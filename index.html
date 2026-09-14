@@ -4,14 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>SHSS Scorecard</title>
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#1f3d27">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="SHSS Scorecard">
-<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
-<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
@@ -422,10 +414,17 @@ table.dataTable tr:last-child td{border-bottom:none;}
 }
 .pNameCell{flex:1;min-width:0;display:flex;gap:4px;}
 .pNameCell.subActive{
+  flex-direction:column;
   background:rgba(201,154,58,0.14);border:1px dashed var(--gold);border-radius:var(--radius-sm);
-  padding:3px;
+  padding:4px;
 }
 .pNameCell.subActive .pName{background:var(--white);}
+.pNameCellRow{display:flex;gap:4px;}
+.subRosterPick{
+  width:100%;padding:6px 5px;border:1.5px solid var(--gold);border-radius:var(--radius-sm);
+  background:var(--white);font-size:11px;color:var(--ink);margin-bottom:4px;
+}
+.subRosterPick.hidden{display:none;}
 .pSubTeam{
   flex:1;min-width:0;padding:8px 6px;border:1.5px solid var(--gold);border-radius:var(--radius-sm);
   background:var(--white);font-size:12px;color:var(--ink);
@@ -744,6 +743,14 @@ table.zoneTable td, table.zoneTable th{font-size:11px;padding:6px 3px;}
   position:absolute;left:0;right:0;bottom:calc(20px + env(safe-area-inset-bottom));
   margin:0;color:var(--chalk-2);opacity:0.6;
 }
+.termsCredit{
+  margin:20px 0 4px;color:var(--chalk-2);opacity:0.6;flex-shrink:0;
+}
+.baseCircle-first.dropTarget,
+.baseCircle-second.dropTarget,
+.baseCircle-third.dropTarget{
+  fill:var(--leather-2) !important;stroke:var(--white);stroke-width:3;
+}
 
 </style><script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
@@ -769,6 +776,7 @@ table.zoneTable td, table.zoneTable th{font-size:11px;padding:6px 3px;}
       <span>I have read and agree to these terms of use</span>
     </label>
     <button id="termsBtn" disabled>Agree &amp; Continue</button>
+    <p class="appCredit termsCredit">A Kevin L. Hoover project</p>
   </div>
 
   <div id="lockScreen" class="hidden">
@@ -811,6 +819,7 @@ table.zoneTable td, table.zoneTable th{font-size:11px;padding:6px 3px;}
       <button class="navBtn" data-tab="batting"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg><span>Batting</span></button>
       <button class="navBtn" data-tab="history"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 8v5l3 2"/></svg><span>History</span></button>
       <button class="navBtn" data-tab="draft"><svg viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 0 1 2-2h9l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M9 12h6M9 16h6M9 8h2"/></svg><span>Rosters</span></button>
+      <button class="navBtn" data-tab="terms"><svg viewBox="0 0 24 24"><path d="M6 4h9l5 5v11a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1z"/><path d="M9 13l2 2 4-4"/></svg><span>Terms</span></button>
       <button class="navBtn" data-tab="qa"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-1.5 2-2 2.5-.3.3-.5.7-.5 1.5"/><circle cx="12" cy="17" r="0.5" fill="currentColor" stroke="none"/></svg><span>Q&amp;A</span></button>
     </nav>
 
@@ -1136,7 +1145,8 @@ function newGame(home, away) {
     outs: 0,
     inning: 1,
     half: 'top',
-    finished: false
+    finished: false,
+    leagueNote: ''
   };
 }
 
@@ -1414,6 +1424,17 @@ function fieldText(label, value, onChange, required = true) {
   return row;
 }
 
+function allRosterPlayersFlat() {
+  const draft = ensureDraft();
+  const list = [];
+  draft.teams.forEach(t => {
+    t.players.forEach(pname => {
+      if (pname && pname.trim()) list.push({ name: pname.trim(), team: t.name });
+    });
+  });
+  return list;
+}
+
 function playerRow(team, p, idx) {
   const row = h('div', { class: 'playerRow', 'data-pid': p.id });
   const main = h('div', { class: 'playerRowMain' });
@@ -1427,8 +1448,27 @@ function playerRow(team, p, idx) {
   name.addEventListener('input', () => { p.name = name.value; saveAll(); });
   const subTeamInput = h('input', { class: 'pSubTeam' + (p.isSub ? '' : ' hidden'), type: 'text', placeholder: 'Team', value: p.subTeamName || '' });
   subTeamInput.addEventListener('input', () => { p.subTeamName = subTeamInput.value; saveAll(); });
-  nameCell.appendChild(name);
-  nameCell.appendChild(subTeamInput);
+
+  const rosterPick = h('select', { class: 'subRosterPick' + (p.isSub ? '' : ' hidden') });
+  rosterPick.appendChild(h('option', { value: '' }, 'Select sub from roster, or type manually below \u2193'));
+  const byTeam = {};
+  allRosterPlayersFlat().forEach(r => { (byTeam[r.team] = byTeam[r.team] || []).push(r.name); });
+  Object.keys(byTeam).forEach(teamName => {
+    const grp = h('optgroup', { label: teamName });
+    byTeam[teamName].forEach(nm => grp.appendChild(h('option', { value: nm + '||' + teamName }, nm)));
+    rosterPick.appendChild(grp);
+  });
+  rosterPick.addEventListener('change', () => {
+    if (!rosterPick.value) return;
+    const [nm, tm] = rosterPick.value.split('||');
+    p.name = nm; p.subTeamName = tm;
+    name.value = nm; subTeamInput.value = tm;
+    saveAll();
+  });
+
+  const nameRow = h('div', { class: 'pNameCellRow' }, [name, subTeamInput]);
+  nameCell.appendChild(rosterPick);
+  nameCell.appendChild(nameRow);
 
   const subWrap = h('label', { class: 'subToggle' });
   const subCheck = h('input', { type: 'checkbox' });
@@ -1439,7 +1479,8 @@ function playerRow(team, p, idx) {
     p.isSub = subCheck.checked;
     nameCell.classList.toggle('subActive', subCheck.checked);
     subTeamInput.classList.toggle('hidden', !subCheck.checked);
-    if (!subCheck.checked) { p.subTeamName = ''; subTeamInput.value = ''; }
+    rosterPick.classList.toggle('hidden', !subCheck.checked);
+    if (!subCheck.checked) { p.subTeamName = ''; subTeamInput.value = ''; rosterPick.value = ''; }
     saveAll();
   });
 
@@ -1861,6 +1902,7 @@ function liveDiamondCard(game) {
     onTagOut: (o, pid) => tagOutRunner(game, o, pid),
     tagOutBoxEl: tagOutBox
   });
+  const svgEl = svg.querySelector('svg');
 
   const scoredPanel = h('div', { class: 'scoredPanel' });
   const chipStack = h('div', { class: 'scoredChipStack' });
@@ -1868,7 +1910,7 @@ function liveDiamondCard(game) {
     scoredEntries.forEach(entry => {
       const player = allPlayers.find(p => p.id === entry.playerId);
       const chip = h('div', { class: 'scoredChip' }, player ? playerInitialLast(player.name) : 'Runner');
-      attachScoredChipDrag(chip, game, entry, tagOutBox);
+      attachScoredChipDrag(chip, game, entry, tagOutBox, svgEl);
       chipStack.appendChild(chip);
     });
   }
@@ -1888,14 +1930,14 @@ function liveDiamondCard(game) {
       ])
     ]),
     stage,
-    (hasRunners || scoredEntries.length) ? h('p', { class: 'diamondHint' }, 'Drag a runner to correct their base or tag them out. Drag a scored player back onto Tag / Force Out if they were actually thrown out at home.') : null
+    (hasRunners || scoredEntries.length) ? h('p', { class: 'diamondHint' }, 'Drag a runner to correct their base or tag them out. Drag a scored player onto a base to put them back on, or onto Tag / Force Out if they were thrown out at home.') : null
   ]);
 }
 function outPip(on) {
   return h('span', { class: 'outPip' + (on ? ' on' : '') });
 }
 
-function attachScoredChipDrag(chip, game, entry, tagOutBoxEl) {
+function attachScoredChipDrag(chip, game, entry, tagOutBoxEl, svgEl) {
   chip.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     const startX = e.clientX, startY = e.clientY;
@@ -1904,9 +1946,37 @@ function attachScoredChipDrag(chip, game, entry, tagOutBoxEl) {
       const r = tagOutBoxEl.getBoundingClientRect();
       return ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
     };
+    const baseScreenPos = () => {
+      if (!svgEl) return {};
+      const ctm = svgEl.getScreenCTM();
+      if (!ctm) return {};
+      const pt = svgEl.createSVGPoint();
+      const out = {};
+      Object.keys(BASE_POS).forEach(k => {
+        if (k === 'home') return;
+        pt.x = BASE_POS[k].x; pt.y = BASE_POS[k].y;
+        out[k] = pt.matrixTransform(ctm);
+      });
+      return out;
+    };
+    const nearestBase = (ev) => {
+      const bases = baseScreenPos();
+      let best = null, bestDist = 30;
+      Object.keys(bases).forEach(k => {
+        const d = Math.hypot(ev.clientX - bases[k].x, ev.clientY - bases[k].y);
+        if (d < bestDist) { bestDist = d; best = k; }
+      });
+      return best;
+    };
+    let hoverBaseEl = null;
     const onMove = (ev) => {
       chip.style.transform = `translate(${ev.clientX - startX}px, ${ev.clientY - startY}px)`;
       tagOutBoxEl.classList.toggle('dragOver', isOverTagOut(ev));
+      if (hoverBaseEl) { hoverBaseEl.classList.remove('dropTarget'); hoverBaseEl = null; }
+      if (!isOverTagOut(ev) && svgEl) {
+        const b = nearestBase(ev);
+        if (b) { hoverBaseEl = svgEl.querySelector('.baseCircle-' + b); if (hoverBaseEl) hoverBaseEl.classList.add('dropTarget'); }
+      }
     };
     const onUp = (ev) => {
       document.removeEventListener('pointermove', onMove);
@@ -1914,11 +1984,46 @@ function attachScoredChipDrag(chip, game, entry, tagOutBoxEl) {
       chip.classList.remove('dragging');
       chip.style.transform = '';
       tagOutBoxEl.classList.remove('dragOver');
-      if (isOverTagOut(ev)) revertScoredRun(game, entry);
+      if (hoverBaseEl) hoverBaseEl.classList.remove('dropTarget');
+      if (isOverTagOut(ev)) { revertScoredRun(game, entry); return; }
+      const b = svgEl ? nearestBase(ev) : null;
+      if (b) restoreScoredRunnerToBase(game, entry, b);
     };
     document.addEventListener('pointermove', onMove);
     document.addEventListener('pointerup', onUp);
   });
+}
+
+function restoreScoredRunnerToBase(game, entry, baseKey) {
+  if (game.base[baseKey]) { toast('That base is already occupied'); return; }
+  let side, inning;
+  const playerId = entry.playerId;
+
+  if (entry.source === 'manual') {
+    const idx = (game.manualScores || []).findIndex(ms => ms.id === entry.manualId);
+    if (idx === -1) return;
+    const ms = game.manualScores[idx];
+    side = ms.side; inning = ms.inning;
+    game.manualScores.splice(idx, 1);
+  } else {
+    const ab = game.atbats.find(a => a.id === entry.atbatId);
+    if (!ab || !ab.scoredPlayerIds) return;
+    const idx = ab.scoredPlayerIds.indexOf(playerId);
+    if (idx === -1) return;
+    ab.scoredPlayerIds.splice(idx, 1);
+    ab.runsScored = ab.scoredPlayerIds.length;
+    ab.rbi = ab.result === 'E' ? 0 : ab.scoredPlayerIds.length;
+    side = ab.side; inning = ab.inning;
+  }
+
+  game.score[side][inning] = Math.max(0, (game.score[side][inning] || 0) - 1);
+  game.base[baseKey] = playerId;
+  saveAll();
+  const allPlayers = [...game.home.players, ...game.away.players];
+  const player = allPlayers.find(p => p.id === playerId);
+  const lbl = baseKey === 'first' ? '1st' : baseKey === 'second' ? '2nd' : '3rd';
+  toast((player ? player.name : 'Runner') + ' moved back to ' + lbl + ' — run backed out');
+  Router.go('scorecard');
 }
 
 function playerInitialLast(name) {
@@ -1946,9 +2051,9 @@ function diamondSVG(game, opts) {
   svg.innerHTML = `
     <path d="M120 190 L40 110 L120 30 L200 110 Z" fill="var(--dirt-2)" stroke="var(--dirt-3)" stroke-width="2"/>
     <path d="M120 60 L172 110 L120 158 L68 110 Z" fill="var(--grass-3)" stroke="var(--dirt-3)" stroke-width="1.5"/>
-    <circle cx="200" cy="110" r="11" fill="${base.first ? 'var(--gold)' : 'var(--chalk)'}" stroke="var(--dirt-3)" stroke-width="2"/>
-    <circle cx="120" cy="30" r="11" fill="${base.second ? 'var(--gold)' : 'var(--chalk)'}" stroke="var(--dirt-3)" stroke-width="2"/>
-    <circle cx="40" cy="110" r="11" fill="${base.third ? 'var(--gold)' : 'var(--chalk)'}" stroke="var(--dirt-3)" stroke-width="2"/>
+    <circle class="baseCircle-first" cx="200" cy="110" r="11" fill="${base.first ? 'var(--gold)' : 'var(--chalk)'}" stroke="var(--dirt-3)" stroke-width="2"/>
+    <circle class="baseCircle-second" cx="120" cy="30" r="11" fill="${base.second ? 'var(--gold)' : 'var(--chalk)'}" stroke="var(--dirt-3)" stroke-width="2"/>
+    <circle class="baseCircle-third" cx="40" cy="110" r="11" fill="${base.third ? 'var(--gold)' : 'var(--chalk)'}" stroke="var(--dirt-3)" stroke-width="2"/>
     <rect x="112" y="180" width="16" height="16" fill="var(--chalk)" stroke="var(--dirt-3)" stroke-width="2" transform="rotate(45 120 188)"/>
   `;
 
@@ -3003,6 +3108,8 @@ function teamBattingLineForGame(game, teamName) {
   return aggregateLine(lines);
 }
 
+const SUB_TEAM_LABEL = 'Sub';
+
 function seasonPlayerKey(side, teamName, playerId) { return teamName + '::' + playerId; }
 
 function collectSeasonPlayers(games) {
@@ -3011,10 +3118,13 @@ function collectSeasonPlayers(games) {
   games.forEach(g => {
     ['home', 'away'].forEach(side => {
       g[side].players.filter(p => p.name.trim()).forEach(p => {
-        const key = seasonPlayerKey(side, g[side].name, p.id);
-        if (!map[key]) map[key] = { key, name: p.name, teamName: g[side].name, side, playerId: p.id, games: [] };
+        const isSub = !!p.isSub;
+        const bucketTeam = isSub ? SUB_TEAM_LABEL : g[side].name;
+        const key = seasonPlayerKey(side, bucketTeam, p.id);
+        if (!map[key]) map[key] = { key, name: p.name, teamName: bucketTeam, side, playerId: p.id, games: [], subForTeams: [] };
         map[key].name = p.name;
         map[key].games.push(g);
+        if (isSub && p.subTeamName && !map[key].subForTeams.includes(p.subTeamName)) map[key].subForTeams.push(p.subTeamName);
       });
     });
   });
@@ -3112,7 +3222,8 @@ Router.register('history', (root) => {
   const sPlayerSel = h('select', {});
   sPlayerSel.appendChild(h('option', { value: 'all' }, 'All players'));
   sPlayerOpts.forEach(sp => {
-    const o = h('option', { value: sp.key }, sp.name);
+    const label = sp.teamName === SUB_TEAM_LABEL ? sp.name + ' (Sub)' : sp.name;
+    const o = h('option', { value: sp.key }, label);
     if (seasonFilter.player === sp.key) o.setAttribute('selected', 'selected');
     sPlayerSel.appendChild(o);
   });
@@ -3126,7 +3237,10 @@ Router.register('history', (root) => {
   const seasonRows = filteredSeasonPlayers.map(sp => {
     const lines = sp.games.map(g => computeBattingLine(g, sp.playerId));
     const agg = aggregateLine(lines);
-    return { name: sp.name, GP: sp.games.length, AB: agg.AB, H: agg.H, RBI: agg.RBI, AVG: agg.AVG, OBP: agg.OBP, SLG: agg.SLG };
+    const displayName = sp.teamName === SUB_TEAM_LABEL
+      ? sp.name + ' (Sub' + (sp.subForTeams.length ? ' — ' + sp.subForTeams.join(', ') : '') + ')'
+      : sp.name;
+    return { name: displayName, GP: sp.games.length, AB: agg.AB, H: agg.H, RBI: agg.RBI, AVG: agg.AVG, OBP: agg.OBP, SLG: agg.SLG };
   });
 
   const sortCols = [['name', 'Player'], ['GP', 'GP'], ['AB', 'AB'], ['H', 'H'], ['RBI', 'RBI'], ['AVG', 'AVG'], ['OBP', 'OBP'], ['SLG', 'SLG']];
@@ -3201,7 +3315,8 @@ Router.register('history', (root) => {
   playerSel.appendChild(h('option', { value: 'all' }, 'All players'));
   const histPlayerOpts = seasonPlayers.filter(sp => histHz.team === 'all' || sp.teamName === histHz.team);
   histPlayerOpts.forEach(sp => {
-    const o = h('option', { value: sp.key }, sp.name);
+    const label = sp.teamName === SUB_TEAM_LABEL ? sp.name + ' (Sub)' : sp.name;
+    const o = h('option', { value: sp.key }, label);
     if (histHz.player === sp.key) o.setAttribute('selected', 'selected');
     playerSel.appendChild(o);
   });
@@ -3310,6 +3425,12 @@ function archivedGameModal(g) {
     });
     sheet.appendChild(table);
   });
+
+  sheet.appendChild(h('div', { class: 'fieldRow', style: 'margin-top:14px;' }, [h('label', {}, 'Note for league (optional)')]));
+  const noteArea = h('textarea', { class: 'reportTextArea', style: 'height:60px;', placeholder: 'e.g. Game ended after 5 innings due to rain' }, g.leagueNote || '');
+  noteArea.value = g.leagueNote || '';
+  noteArea.addEventListener('input', () => { g.leagueNote = noteArea.value; saveAll(); });
+  sheet.appendChild(noteArea);
 
   sheet.appendChild(h('button', { class: 'btn btn-gold btn-sm btn-block', style: 'margin-top:16px;', onclick: () => { overlay.remove(); exportGameReport(g); } }, 'Export report for league'));
 
@@ -3666,7 +3787,7 @@ function downloadDraftTemplate() {
 const FAQ_DATA = [
   { category: 'Getting Started', items: [
     { q: 'How do I get into the app for the first time?', a: 'Accept the Terms of Use, then set a passcode. That passcode is stored on your device only — there\u2019s no "forgot passcode" recovery, so if you forget it, someone with access to the app\u2019s stored data would need to reset it.' },
-    { q: 'How do I save this app for quick, easy access?', a: 'Bookmark it in your browser — tap the star icon in Safari, or the \u22ee menu in Chrome and choose "Add bookmark." That saves the link so you can jump straight back in from your browser\u2019s bookmarks, without needing to retype or re-find it each time. It\u2019s the simplest, most reliable way to get back to the app quickly.' },
+    { q: 'How do I install this app on my device?', a: 'On iPhone: open it in Safari, tap the Share icon, then "Add to Home Screen." On Android: open it in Chrome, tap the \u22ee menu, then "Install app." On a PC: in Chrome or Edge, tap the \u22ee menu and choose "Install this site as an app." Each one adds a real app icon — it opens full-screen with no browser address bar, and works offline once installed.' },
     { q: 'Where is my data stored?', a: 'Locally on your device/browser — not on a server. It\u2019s not automatically backed up and won\u2019t transfer if you switch phones or clear your browser\u2019s data.' }
   ]},
   { category: 'Lineup', items: [
@@ -3714,6 +3835,31 @@ const FAQ_DATA = [
 ];
 
 let qaOpenItem = null;
+
+const TERMS_CLAUSES = [
+  ['1. Use rights.', "You're granted a limited, non-exclusive, non-transferable right to use this application for scorekeeping, roster management, and related recordkeeping for your team or league. This app may not be resold, redistributed, or used for any unlawful purpose."],
+  ['2. Data storage.', 'All information you enter \u2014 rosters, scores, statistics, and player names \u2014 is stored locally on your device or browser. You are responsible for backing up your own data; it is not recovered by any third party if lost, cleared, or if you switch devices.'],
+  ['3. Player information.', 'By entering player names and related data, you confirm you have the appropriate permission to store and use that information for team purposes.'],
+  ['4. No warranty.', 'This application is provided "as is" and "as available," without warranty of any kind, express or implied, including without limitation accuracy of statistics, fitness for a particular purpose, or uninterrupted availability.'],
+  ['5. Limitation of liability.', 'To the fullest extent permitted by law, the provider of this application is not liable for any damages, data loss, or disputes arising from its use.'],
+  ['6. Changes.', 'These terms may be updated from time to time; continued use after changes constitutes acceptance of the revised terms.']
+];
+
+Router.register('terms', (root) => {
+  root.appendChild(h('div', { class: 'pageHead' }, [
+    h('h2', {}, 'Terms of Use'),
+    h('p', {}, 'You agreed to these when you first opened the app. Reproduced here any time you want to review them.')
+  ]));
+
+  const card = h('div', { class: 'card' });
+  TERMS_CLAUSES.forEach(([title, body], i) => {
+    card.appendChild(h('p', { style: 'margin:' + (i === 0 ? '0 0 4px' : '14px 0 4px') + ';font-weight:700;font-size:13.5px;color:var(--ink);' }, title));
+    card.appendChild(h('p', { style: 'margin:0;font-size:13px;color:var(--ink-soft);line-height:1.55;' }, body));
+  });
+  root.appendChild(card);
+
+  root.appendChild(h('p', { class: 'appCredit' }, 'A Kevin L. Hoover project'));
+});
 
 Router.register('qa', (root) => {
   root.appendChild(h('div', { class: 'pageHead' }, [
@@ -3907,6 +4053,10 @@ function buildGameReportHTML(game, verification) {
   <p class="sub">${escapeXml(game.away.name)} @ ${escapeXml(game.home.name)} &nbsp;·&nbsp; ${formatDate(game.date)} &nbsp;·&nbsp; Final: ${totalRuns(game, 'away')} – ${totalRuns(game, 'home')}</p>
   ${verifyBlockHTML(verification, 'game report')}`;
 
+  if (game.leagueNote && game.leagueNote.trim()) {
+    body += `<p class="zoneNote"><strong>Note from manager:</strong> ${escapeXml(game.leagueNote.trim())}</p>`;
+  }
+
   [['away', awayPlayers], ['home', homePlayers]].forEach(([side, players]) => {
     if (!players.length) return;
     body += `<div class="teamHead">${escapeXml(game[side].name)}</div>`;
@@ -3933,6 +4083,13 @@ function buildSeasonReportHTML(games, verification) {
   let body = `<h1>Game Report</h1>
   <p class="sub">${games.length} game${games.length === 1 ? '' : 's'} archived &nbsp;·&nbsp; Generated ${new Date().toLocaleDateString(undefined, { dateStyle: 'medium' })}</p>
   ${verifyBlockHTML(verification, 'game report')}`;
+
+  const notedGames = games.filter(g => g.leagueNote && g.leagueNote.trim());
+  if (notedGames.length) {
+    body += `<h2>Manager notes</h2><ul class="noteList">` +
+      notedGames.map(g => `<li><strong>${escapeXml(g.away.name)} @ ${escapeXml(g.home.name)}</strong> (${formatDate(g.date)}): ${escapeXml(g.leagueNote.trim())}</li>`).join('') +
+      `</ul>`;
+  }
 
   teams.forEach(teamName => {
     const players = seasonPlayers.filter(sp => sp.teamName === teamName);
@@ -3993,6 +4150,10 @@ function buildGameReportText(game, verification) {
   out += `${game.away.name} @ ${game.home.name}  ·  ${formatDate(game.date)}  ·  Final: ${totalRuns(game, 'away')} - ${totalRuns(game, 'home')}\n\n`;
   out += verifyBlockText(verification, 'game report') + '\n';
 
+  if (game.leagueNote && game.leagueNote.trim()) {
+    out += `\nNote from manager: ${game.leagueNote.trim()}\n`;
+  }
+
   [['away', awayPlayers], ['home', homePlayers]].forEach(([side, players]) => {
     if (!players.length) return;
     out += `\n${game[side].name}\n${'='.repeat(game[side].name.length)}\n`;
@@ -4018,6 +4179,14 @@ function buildSeasonReportText(games, verification) {
   let out = `GAME REPORT\n`;
   out += `${games.length} game${games.length === 1 ? '' : 's'} archived  ·  Generated ${new Date().toLocaleDateString(undefined, { dateStyle: 'medium' })}\n\n`;
   out += verifyBlockText(verification, 'game report') + '\n';
+
+  const notedGames = games.filter(g => g.leagueNote && g.leagueNote.trim());
+  if (notedGames.length) {
+    out += `\nManager notes:\n`;
+    notedGames.forEach(g => {
+      out += `  ${g.away.name} @ ${g.home.name} (${formatDate(g.date)}): ${g.leagueNote.trim()}\n`;
+    });
+  }
 
   teams.forEach(teamName => {
     const players = seasonPlayers.filter(sp => sp.teamName === teamName);
@@ -4362,12 +4531,6 @@ function importReviewModal(newOnes, dupes, badFiles) {
   overlay.appendChild(sheet);
   overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
   document.body.appendChild(overlay);
-}
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('service-worker.js').catch(() => {});
-  });
 }
 
 </script>
