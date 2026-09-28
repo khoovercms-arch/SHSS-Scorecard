@@ -318,6 +318,27 @@ table.zoneTable{margin-bottom:14px;width:100%;} table.zoneTable td,table.zoneTab
 .pill-role{background:var(--grass-3);color:#fff;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;}
 .pill-warn{background:var(--leather-2);color:#fff;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;}
 .pill-gold{background:var(--gold);color:var(--grass-1);font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;}
+.chatPhoto{display:block;max-width:100%;max-height:260px;border-radius:10px;margin-top:6px;cursor:zoom-in;border:1px solid var(--line);}
+.chatPending{border:1.5px dashed var(--gold);background:#fff8e6;}
+.chatCaption{font-size:12px;color:var(--ink-soft);margin-top:4px;}
+.photoView{position:fixed;inset:0;z-index:600;background:rgba(0,0,0,0.92);display:flex;align-items:center;justify-content:center;padding:16px;}
+.photoView img{max-width:100%;max-height:100%;border-radius:8px;}
+.pfWrap{width:100%;}
+.pfChips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;}
+.pfChip{min-width:38px;height:38px;padding:0 9px;border-radius:9px;font-weight:800;font-size:15px;cursor:pointer;border:1.5px solid var(--line);background:var(--chalk);color:var(--ink);}
+.pfChip.on{background:var(--grass-1);border-color:var(--grass-1);color:#fff;}
+.pfInputRow{position:relative;}
+.pfInput{width:100%;font-size:17px;padding:12px 40px 12px 12px;border:2px solid var(--grass-3);border-radius:10px;background:#fff;color:var(--ink);-webkit-appearance:none;appearance:none;}
+.pfInput:focus{outline:none;border-color:var(--grass-1);box-shadow:0 0 0 3px rgba(31,61,39,0.15);}
+.pfClear{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;border:none;background:var(--line);font-weight:800;cursor:pointer;}
+.pfList{margin-top:6px;border:1.5px solid var(--line);border-radius:10px;background:#fff;max-height:280px;overflow-y:auto;}
+.pfRow{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;padding:12px 12px;border:none;border-bottom:1px solid var(--line);background:none;font-size:15.5px;cursor:pointer;}
+.pfRow:last-child{border-bottom:none;}
+.pfRow:active,.pfRow.hl{background:var(--chalk-2);}
+.pfRow small{color:var(--ink-soft);font-size:12px;margin-left:8px;}
+.pfSel{display:inline-flex;align-items:center;gap:8px;background:var(--grass-1);color:#fff;border-radius:20px;padding:6px 8px 6px 14px;font-weight:700;font-size:14px;margin-top:8px;}
+.pfSel button{border:none;background:rgba(255,255,255,0.25);color:#fff;border-radius:50%;width:24px;height:24px;font-weight:800;cursor:pointer;}
+.pfHint{font-size:11px;color:var(--ink-soft);margin-top:6px;}
 .navBadge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#d33;color:#fff;font-size:11px;font-weight:800;margin-left:6px;line-height:1;}
 .alertBanner{display:flex;align-items:center;gap:10px;background:#fff4d6;border:1.5px solid var(--gold);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:13px;cursor:pointer;}
 .alertBanner.warn{background:#fde8e4;border-color:var(--leather-2);cursor:default;}
@@ -444,7 +465,7 @@ function h(tag, attrs = {}, children = []) {
   });
   return el;
 }
-function escapeHtml(str){ return (str||'').toString(); }
+function escapeHtml(str){ return (str==null?'':String(str)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function toast(msg){ const t=h('div',{class:'toast'},msg); document.body.appendChild(t); setTimeout(()=>t.remove(),1800); }
 function formatDate(iso){ if(!iso) return ''; const d=new Date(iso+'T00:00:00'); if(isNaN(d)) return iso; return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); }
 function fmt3(n){ return (n||0).toFixed(3).replace(/^0\./, '.'); }
@@ -540,7 +561,7 @@ function pendingAccounts(){ return (S.usersDirectory||[]).filter(u=>u.role==='pe
 function signupSeenAt(){ try{ return parseInt(localStorage.getItem('gbSignupSeen_'+(S.currentLeagueId||'x'))||'0',10)||0; }catch(e){ return 0; } }
 function markSignupsSeen(){ try{ localStorage.setItem('gbSignupSeen_'+(S.currentLeagueId||'x'), String(Date.now())); }catch(e){} }
 function newSeasonSignups(){ const seen=signupSeenAt(); return (S.signups||[]).filter(x=>!x.isTest && (x.createdAt||0)>seen && (!S.currentLeagueId || x.leagueId===S.currentLeagueId)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
-function adminAlertCount(){ if(!isAdmin()) return 0; return pendingAccounts().length + newSeasonSignups().length; }
+function adminAlertCount(){ if(!isAdmin()) return 0; return pendingAccounts().length + newSeasonSignups().length + chatPhotoQueue().length + chatReported().length; }
 let lastAlertCount=null;
 function isAdmin(){ return isSuperAdmin() || (S.profile && S.profile.role === 'admin' && (!S.profile.leagueId || S.profile.leagueId===S.currentLeagueId)); }
 function isManager(){ return S.profile && S.profile.role === 'manager'; }
@@ -757,7 +778,7 @@ function flushTabUsage(){
 window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ flushTabUsage(); tabSessionStart=Date.now(); } else { tabSessionStart=Date.now(); } });
 window.addEventListener('pagehide', flushTabUsage);
 function renderShell(){
-  if(S.activeTab !== tabSessionTab){ flushTabUsage(); if(['report','history'].includes(tabSessionTab)){ resetReportFilters(); reportView='menu'; } if(tabSessionTab==='hitzone'){ hz={team:'all',player:'all',selectedZone:null}; } if(tabSessionTab==='feed'){ feedCallsPrimed=false; } if(tabSessionTab==='admin'){ rulesDraftLocal=null; } tabSessionTab=S.activeTab; tabSessionStart=Date.now(); }
+  if(S.activeTab !== tabSessionTab){ flushTabUsage(); if(['report','history'].includes(tabSessionTab)){ resetReportFilters(); reportView='menu'; } if(tabSessionTab==='batting'){ battingPlayerPick=null; pfReset('batting'); } if(tabSessionTab==='hitzone'){ hz={team:'all',player:'all',selectedZone:null}; pfReset('hitzone'); } if(tabSessionTab==='feed'){ feedCallsPrimed=false; } if(tabSessionTab==='admin'){ rulesDraftLocal=null; } tabSessionTab=S.activeTab; tabSessionStart=Date.now(); }
   const authWrap = document.getElementById('authWrap');
   const pendingWrap = document.getElementById('pendingWrap');
   const mainUI = document.getElementById('mainUI');
@@ -862,6 +883,7 @@ function renderShell(){
 
   updateScoreBug();
   const content = document.getElementById('tabContent');
+  const keep=(()=>{ const a=document.activeElement; if(a && a.tagName==='INPUT' && a.getAttribute('data-pf')) return {id:a.id, pos:a.selectionStart}; return null; })();
   content.innerHTML='';
   if(S.activeTab==='admin' && !isAdmin()) S.activeTab='roster';
   if(S.activeTab==='superadmin' && !isSuperAdmin()) S.activeTab='roster';
@@ -879,10 +901,10 @@ function renderShell(){
       h('span',{class:ACCESS_CLASS[accessLevel]}, accessLevel)
     ]));
   }
-  if(alertN && !(S.activeTab==='admin' && adminSub==='approvals')){
-    const pa=pendingAccounts().length, ns=newSeasonSignups().length;
-    const parts=[]; if(pa) parts.push(pa+' account'+(pa===1?'':'s')+' waiting for approval'); if(ns) parts.push(ns+' new season sign-up'+(ns===1?'':'s'));
-    content.appendChild(h('div',{class:'alertBanner',onclick:()=>{ S.activeTab='admin'; adminSub='approvals'; renderShell(); }},[h('span',{style:'font-size:20px;'},'\ud83d\udd14'), h('span',{style:'flex:1;'},[h('b',{},'New sign-ins: '), parts.join(' \u00b7 ')]), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Review \u2192')]));
+  if(alertN && !(S.activeTab==='admin' && adminSub==='approvals') && !(S.activeTab==='chat' && !pendingAccounts().length && !newSeasonSignups().length)){
+    const pa=pendingAccounts().length, ns=newSeasonSignups().length, cq=chatPhotoQueue().length, cr=chatReported().length;
+    const parts=[]; if(pa) parts.push(pa+' account'+(pa===1?'':'s')+' waiting for approval'); if(ns) parts.push(ns+' new season sign-up'+(ns===1?'':'s')); if(cq) parts.push(cq+' chat photo'+(cq===1?'':'s')+' to approve'); if(cr) parts.push(cr+' reported chat message'+(cr===1?'':'s'));
+    content.appendChild(h('div',{class:'alertBanner',onclick:()=>{ if(!pa&&!ns&&(cq||cr)){ S.activeTab='chat'; } else { S.activeTab='admin'; adminSub='approvals'; } renderShell(); }},[h('span',{style:'font-size:20px;'},'\ud83d\udd14'), h('span',{style:'flex:1;'},[h('b',{},(pa||ns)?'New sign-ins: ':'Chat: '), parts.join(' \u00b7 ')]), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Review \u2192')]));
   }
   { const ga=myGameAlerts(); const chN=ga.reduce((n,x)=>n+x.ch,0);
     if(lastChallengeCount!==null && chN>lastChallengeCount) toast('\u2691 New scoring challenge');
@@ -903,6 +925,7 @@ function renderShell(){
   manageClockTicker();
   renderHelpWidget();
   renderGeezerSpeaker();
+  if(keep){ const el=document.getElementById(keep.id); if(el){ el.focus({preventScroll:true}); try{ el.setSelectionRange(keep.pos,keep.pos); }catch(e){} } }
 }
 
 function updateScoreBug(){
@@ -2146,11 +2169,13 @@ function computeBattingLine(game, playerId){
     if(r.hit){ H++; if(a.result==='1B'){singles++;TB+=1;} if(a.result==='2B'){doubles++;TB+=2;} if(a.result==='3B'){triples++;TB+=3;} if(a.result==='HR'){hr++;TB+=4;} }
     if(outTypes.hasOwnProperty(a.result)) outTypes[a.result]++;
   });
+  let R=0; game.atbats.forEach(a=>{ R+=(a.scoredPlayerIds||[]).filter(id=>id===playerId).length; }); (game.manualScores||[]).forEach(ms=>{ if(ms.playerId===playerId) R++; });
   const AVG=AB>0?H/AB:0; const OBP=(AB+BB+HBP+SF)>0?(H+BB+HBP)/(AB+BB+HBP+SF):0; const SLG=AB>0?TB/AB:0;
-  return {AB,H,singles,doubles,triples,hr,BB,HBP,SF,RBI,TB,AVG,OBP,SLG,outTypes};
+  return {AB,H,R,singles,doubles,triples,hr,BB,HBP,SF,RBI,TB,AVG,OBP,SLG,outTypes};
 }
 /* ===================== BATTING TAB (includes out-type breakdown) ===================== */
 let battingExportScope='both';
+let battingPlayerPick=null;
 Router.register('batting', (root)=>{
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Batting stats'),h('p',{},'AB, hits, RBI, total bases, walks, rate stats, and out types for the selected game.')]));
   const game=currentGame();
@@ -2164,6 +2189,10 @@ Router.register('batting', (root)=>{
   if(!game){ root.appendChild(emptyState('No active game', isAdmin()?'Pick a game above.':'Select or start a game on the Scorecard tab.','zone')); return; }
   const players=allPlayersInGame(game);
   if(!players.length){ root.appendChild(emptyState('No players yet','Add names to your lineups.','zone')); return; }
+  { const fc=h('div',{class:'card'}); fc.appendChild(h('h3',{},'Find a player'));
+    const opts=players.map(p=>({key:p.id,name:p.name,teamName:p.teamName})).sort((a,b)=>lastNameKey(a.name).localeCompare(lastNameKey(b.name)));
+    fc.appendChild(playerFinder({ key:'batting', players:opts, value:battingPlayerPick, showTeam:true, onPick:(v)=>{ battingPlayerPick=(v==='all')?null:v; if(v!=='all') pfReset('batting'); renderShell(); }, onType:(st)=>{ root.querySelectorAll('tr[data-pname]').forEach(tr=>{ tr.style.display = pfMatches({name:tr.getAttribute('data-pname')}, st)?'':'none'; }); } }));
+    root.appendChild(fc); }
   const exportCard=h('div',{class:'card'}); exportCard.appendChild(h('h3',{},'Export to Excel'));
   exportCard.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Teams to include')]));
   const teamSeg=h('div',{class:'segControl'},[
@@ -2178,10 +2207,10 @@ Router.register('batting', (root)=>{
     if(!players.some(p=>p.side===side)) return;
     const card=h('div',{class:'card'}); card.appendChild(h('h3',{},game[side].name));
     const scrollWrap=h('div',{class:'gridScroll'}); const table=h('table',{class:'dataTable'});
-    table.appendChild(h('tr',{},[h('th',{},'Player'),h('th',{},'AB'),h('th',{},'H'),h('th',{},'RBI'),h('th',{},'TB'),h('th',{},'BB'),h('th',{},'AVG'),h('th',{},'OBP'),h('th',{},'SLG'),h('th',{},'SO'),h('th',{},'GO'),h('th',{},'FO')]));
-    players.filter(p=>p.side===side).sort((a,b)=>(a.order||99)-(b.order||99)).forEach(p=>{
+    table.appendChild(h('tr',{},[h('th',{},'Player'),h('th',{},'AB'),h('th',{},'H'),h('th',{},'R'),h('th',{},'RBI'),h('th',{},'TB'),h('th',{},'BB'),h('th',{},'AVG'),h('th',{},'OBP'),h('th',{},'SLG'),h('th',{},'SO'),h('th',{},'GO'),h('th',{},'FO')]));
+    players.filter(p=>p.side===side && (!battingPlayerPick||p.id===battingPlayerPick)).sort((a,b)=>(a.order||99)-(b.order||99)).forEach(p=>{
       const l=computeBattingLine(game,p.id);
-      table.appendChild(h('tr',{},[h('td',{},p.name),h('td',{},String(l.AB)),h('td',{},String(l.H)),h('td',{},String(l.RBI)),h('td',{},String(l.TB)),h('td',{},String(l.BB)),h('td',{},fmt3(l.AVG)),h('td',{},fmt3(l.OBP)),h('td',{},fmt3(l.SLG)),h('td',{},String(l.outTypes.SO)),h('td',{},String(l.outTypes.GO)),h('td',{},String(l.outTypes.FO))]));
+      table.appendChild(h('tr',{'data-pname':p.name},[h('td',{style:'color:var(--grass-1);font-weight:700;text-decoration:underline;cursor:pointer;',onclick:()=>{ battingPlayerPick=p.id; pfReset('batting'); renderShell(); }},p.name),h('td',{},String(l.AB)),h('td',{},String(l.H)),h('td',{},String(l.R)),h('td',{},String(l.RBI)),h('td',{},String(l.TB)),h('td',{},String(l.BB)),h('td',{},fmt3(l.AVG)),h('td',{},fmt3(l.OBP)),h('td',{},fmt3(l.SLG)),h('td',{},String(l.outTypes.SO)),h('td',{},String(l.outTypes.GO)),h('td',{},String(l.outTypes.FO))]));
     });
     scrollWrap.appendChild(table); card.appendChild(scrollWrap); root.appendChild(card);
   });
@@ -2190,12 +2219,12 @@ function setActiveSeg(seg,btn){ seg.querySelectorAll('button').forEach(b=>b.clas
 function exportBattingExcel(game, players, scope){
   if(typeof XLSX==='undefined'){ toast('Excel export is unavailable right now'); return; }
   scope=scope||'both'; const sides = scope==='both'?['away','home']:[scope];
-  const wb=XLSX.utils.book_new(); const header=['Player','AB','H','RBI','TB','BB','AVG','OBP','SLG','SO','GO','FO'];
+  const wb=XLSX.utils.book_new(); const header=['Player','AB','H','R','RBI','TB','BB','AVG','OBP','SLG','SO','GO','FO'];
   sides.forEach(side=>{
     const sidePlayers=players.filter(p=>p.side===side).sort((a,b)=>(a.order||99)-(b.order||99));
     if(!sidePlayers.length) return;
     const rows=[header];
-    sidePlayers.forEach(p=>{ const l=computeBattingLine(game,p.id); rows.push([p.name,l.AB,l.H,l.RBI,l.TB,l.BB,Number(l.AVG.toFixed(3)),Number(l.OBP.toFixed(3)),Number(l.SLG.toFixed(3)),l.outTypes.SO,l.outTypes.GO,l.outTypes.FO]); });
+    sidePlayers.forEach(p=>{ const l=computeBattingLine(game,p.id); rows.push([p.name,l.AB,l.H,l.R,l.RBI,l.TB,l.BB,Number(l.AVG.toFixed(3)),Number(l.OBP.toFixed(3)),Number(l.SLG.toFixed(3)),l.outTypes.SO,l.outTypes.GO,l.outTypes.FO]); });
     const ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:20},{wch:6},{wch:6},{wch:6},{wch:6},{wch:6},{wch:7},{wch:7},{wch:7},{wch:5},{wch:5},{wch:5}];
     XLSX.utils.book_append_sheet(wb,ws,(game[side].name||(side==='home'?'Home':'Away')).slice(0,31));
   });
@@ -2221,7 +2250,7 @@ Router.register('hitzone', (root)=>{
   }
   const seasonPlayers = hzStats.filter(p=>hz.team==='all'||p.teamId===hz.team).slice().sort((a,b)=>a.name.localeCompare(b.name));
   const hzOptions = reportPlayerOptions(hz.team, hzStats);
-  fbar.appendChild(h('div',{class:'fieldRow'}, playerPickerField(hz.player, hz.team, hzStats, hz.team==='all'&&isAdmin(), v=>{ hz.player=v; hz.selectedZone=null; renderShell(); })));
+  fbar.appendChild(h('div',{class:'fieldRow',style:'grid-column:1 / -1;'}, playerPickerField(hz.player, hz.team, hzStats, hz.team==='all'&&isAdmin(), v=>{ hz.player=v; hz.selectedZone=null; renderShell(); }, 'hitzone')));
   filterCard.appendChild(fbar); root.appendChild(filterCard);
 
   let entries = seasonPlayers;
@@ -2448,7 +2477,7 @@ Router.register('history', (root)=>{
   root.appendChild(avgTrendCard(games, 'Batting average trend'));
 });
 function aggregateLines(lines){
-  const t={AB:0,H:0,RBI:0,TB:0,BB:0,HBP:0,SF:0};
+  const t={AB:0,H:0,R:0,RBI:0,TB:0,BB:0,HBP:0,SF:0};
   lines.forEach(l=>{ for(const k in t) t[k]+=l[k]||0; });
   const AVG=t.AB>0?t.H/t.AB:0; const OBP=(t.AB+t.BB+t.HBP+t.SF)>0?(t.H+t.BB+t.HBP)/(t.AB+t.BB+t.HBP+t.SF):0; const SLG=t.AB>0?t.TB/t.AB:0;
   return {...t,AVG,OBP,SLG};
@@ -2456,19 +2485,21 @@ function aggregateLines(lines){
 function exportSeasonBattingExcel(rows){
   if(typeof XLSX==='undefined'){ toast('Excel export is unavailable right now'); return; }
   if(!rows.length){ toast('No data to export'); return; }
-  const header=['Player','GP','AB','H','RBI','AVG','OBP','SLG']; const data=[header];
-  rows.forEach(r=>data.push([r.name,r.GP,r.AB,r.H,r.RBI,Number(r.AVG.toFixed(3)),Number(r.OBP.toFixed(3)),Number(r.SLG.toFixed(3))]));
+  const header=['Player','GP','AB','H','R','RBI','AVG','OBP','SLG']; const data=[header];
+  rows.forEach(r=>data.push([r.name,r.GP,r.AB,r.H,r.R,r.RBI,Number(r.AVG.toFixed(3)),Number(r.OBP.toFixed(3)),Number(r.SLG.toFixed(3))]));
   const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(data); ws['!cols']=[{wch:20},{wch:5},{wch:6},{wch:6},{wch:6},{wch:7},{wch:7},{wch:7}];
   XLSX.utils.book_append_sheet(wb,ws,'Season'); XLSX.writeFile(wb, `Season Batting - ${new Date().toISOString().slice(0,10)}.xlsx`); toast('Excel file downloaded');
 }
-function lineChart(points, series, caption, xLabels){
+function lineChart(points, series, caption, xLabels, copts){
+  copts=copts||{};
   const w=280,hgt=140,padL=32,padR=10,padT=10,plotBottom=hgt-22;
   const n=points.length; const xStep=n>1?(w-padL-padR)/(n-1):0;
   let maxVal=0; points.forEach(p=>series.forEach(s=>{if(p[s.key]>maxVal)maxVal=p[s.key];}));
-  const niceMax=Math.max(0.1,Math.ceil((maxVal*1.15)/0.05)*0.05);
+  const niceMax=copts.integer ? Math.max(1,Math.ceil(maxVal*1.15)) : Math.max(0.1,Math.ceil((maxVal*1.15)/0.05)*0.05);
+  const fmtAxis=copts.integer ? (v=>v.toFixed(1)) : fmt3;
   const xFor=(i)=>padL+i*xStep; const yFor=(v)=>padT+(1-Math.min(1,v/niceMax))*(plotBottom-padT);
   let inner='';
-  for(let g=0;g<=4;g++){ const val=niceMax*g/4; const y=yFor(val); inner+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${w-padR}" y2="${y.toFixed(1)}" class="chartGridLine"/><text x="${padL-4}" y="${(y+3).toFixed(1)}" text-anchor="end" class="chartAxisLbl">${fmt3(val)}</text>`; }
+  for(let g=0;g<=4;g++){ const val=niceMax*g/4; const y=yFor(val); inner+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${w-padR}" y2="${y.toFixed(1)}" class="chartGridLine"/><text x="${padL-4}" y="${(y+3).toFixed(1)}" text-anchor="end" class="chartAxisLbl">${fmtAxis(val)}</text>`; }
   series.forEach(s=>{
     if(n===1){ const y=yFor(points[0][s.key]); inner+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${w-padR}" y2="${y.toFixed(1)}" stroke="${s.color}" stroke-width="2" stroke-dasharray="4,3"/>`; }
     else { let d=''; points.forEach((p,i)=>{ const x=xFor(i),y=yFor(p[s.key]); d+=(i===0?'M':'L')+x.toFixed(1)+','+y.toFixed(1)+' '; }); inner+=`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5"/>`; }
@@ -2755,6 +2786,7 @@ function approvalsView(root){
     fresh.length?h('button',{class:'btn btn-outline btn-sm',style:'flex:1;',onclick:()=>{ markSignupsSeen(); renderShell(); }},'Mark all as seen'):null
   ]));
   root.appendChild(c2);
+  { const mc=chatModerationCard(); if(mc) root.appendChild(mc); }
 }
 function playerEvalView(root){
   const rows=seasonSignups(); const prior=priorStatsByName();
@@ -2812,11 +2844,19 @@ function leagueStandings(){
   const byTeam={};
   S.teams.forEach(t=>byTeam[t.id]={teamId:t.id,name:t.name,W:0,L:0,T:0});
   const credit=(tid,r)=>{ if(!tid||!r) return; if(!byTeam[tid]) byTeam[tid]={teamId:tid,name:teamNameById(tid),W:0,L:0,T:0}; byTeam[tid][r]++; };
-  games.forEach(g=>{
-    if(!g.completed) return;
+  const seqs={};
+  games.filter(g=>g.completed).slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'') || (a.completedAt||0)-(b.completedAt||0)).forEach(g=>{
     const oSide = ownerSideOf(g); const otherSide = oSide==='home'?'away':'home';
-    credit(g.teamId, resultForSide(g,oSide));
-    credit(g.opponentTeamId, resultForSide(g,otherSide));
+    const r1=resultForSide(g,oSide), r2=resultForSide(g,otherSide);
+    credit(g.teamId, r1); credit(g.opponentTeamId, r2);
+    if(g.teamId){ (seqs[g.teamId]=seqs[g.teamId]||[]).push({r:r1, rf:totalRuns(g,oSide), ra:totalRuns(g,otherSide)}); }
+    if(g.opponentTeamId){ (seqs[g.opponentTeamId]=seqs[g.opponentTeamId]||[]).push({r:r2, rf:totalRuns(g,otherSide), ra:totalRuns(g,oSide)}); }
+  });
+  Object.values(byTeam).forEach(t=>{
+    const seq=seqs[t.teamId]||[]; t.RF=seq.reduce((n,x)=>n+x.rf,0); t.RA=seq.reduce((n,x)=>n+x.ra,0);
+    let n=0, kind=''; for(let i=seq.length-1;i>=0;i--){ if(!kind){ kind=seq[i].r; n=1; } else if(seq[i].r===kind) n++; else break; }
+    t.streak = kind ? kind+n : '\u2014'; t.streakKind=kind; t.streakN=n;
+    t.last5 = seq.slice(-5).map(x=>x.r).join('');
   });
   return Object.values(byTeam).sort((a,b)=>{
     const wpA=a.W/Math.max(1,a.W+a.L+a.T), wpB=b.W/Math.max(1,b.W+b.L+b.T);
@@ -2924,8 +2964,8 @@ Router.register('record', (root)=>{
   const standings = leagueStandings();
   const stCard=h('div',{class:'card'}); stCard.appendChild(h('h3',{},'League Standings'));
   const stTable=h('table',{class:'dataTable'});
-  stTable.appendChild(h('tr',{},[h('th',{},'Team'),h('th',{},'W'),h('th',{},'L'),h('th',{},'T')]));
-  standings.forEach(s=>stTable.appendChild(h('tr',{},[h('td',{},s.name),h('td',{},String(s.W)),h('td',{},String(s.L)),h('td',{},String(s.T))])));
+  stTable.appendChild(h('tr',{},[h('th',{},'Team'),h('th',{},'W'),h('th',{},'L'),h('th',{},'T'),h('th',{},'RF'),h('th',{},'RA'),h('th',{},'Streak'),h('th',{},'Last 5')]));
+  standings.forEach(s=>stTable.appendChild(h('tr',{},[h('td',{},s.name),h('td',{},String(s.W)),h('td',{},String(s.L)),h('td',{},String(s.T)),h('td',{},String(s.RF||0)),h('td',{},String(s.RA||0)),h('td',{style:'font-weight:800;color:'+(s.streakKind==='W'?'var(--grass-1)':(s.streakKind==='L'?'var(--leather-2)':'var(--ink-soft)'))+';'},s.streak||'\u2014'),h('td',{style:'font-family:var(--font-mono);letter-spacing:2px;'},s.last5||'\u2014')])));
   stCard.appendChild(stTable); root.appendChild(stCard);
 
   root.appendChild(playoffSection(standings));
@@ -3039,6 +3079,25 @@ function playoffSection(standings){
 }
 
 /* ===================== REPORT TAB ===================== */
+function scoringPeriodKey(dateStr){ if(!dateStr) return ''; if(rptScorePeriod==='month') return dateStr.slice(0,7); const d=new Date(dateStr+'T00:00:00'); const jan1=new Date(d.getFullYear(),0,1); const wk=Math.ceil((((d-jan1)/86400000)+jan1.getDay()+1)/7); return d.getFullYear()+'-W'+String(wk).padStart(2,'0'); }
+function scoringPeriodLabel(k){ if(rptScorePeriod==='month'){ const d=new Date(k+'-01T00:00:00'); return d.toLocaleDateString(undefined,{month:'short',year:'2-digit'}); } return k.slice(2); }
+function barChart(items){
+  // vertical bar chart (SVG) with value labels
+  const n=items.length; const w=Math.max(280, Math.min(640, n*64)); const hgt=180, padL=30, padR=8, padT=18, padB=44;
+  const rawMax=Math.max(1,...items.map(i=>i.value)); const step=(()=>{ const r=rawMax/4; const p=Math.pow(10,Math.floor(Math.log10(r))); for(const m of [1,2,5,10]){ if(m*p>=r) return m*p; } return 10*p; })(); const max=Math.ceil(rawMax/step)*step; const ticks=Math.round(max/step);
+  const plotH=hgt-padT-padB; const slot=(w-padL-padR)/n; const bw=Math.min(44, slot*0.66);
+  let inner='';
+  for(let g=0;g<=ticks;g++){ const val=step*g; const y=padT+(1-val/max)*plotH; inner+=`<line x1="${padL}" y1="${y.toFixed(1)}" x2="${w-padR}" y2="${y.toFixed(1)}" class="chartGridLine"/><text x="${padL-4}" y="${(y+3).toFixed(1)}" text-anchor="end" class="chartAxisLbl">${Math.round(val)}</text>`; }
+  items.forEach((it,i)=>{ const x=padL+i*slot+(slot-bw)/2; const bh=Math.max(1,(it.value/max)*plotH); const y=padT+plotH-bh;
+    inner+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh.toFixed(1)}" rx="4" fill="var(--grass-2)"/>`;
+    inner+=`<text x="${(x+bw/2).toFixed(1)}" y="${(y-4).toFixed(1)}" text-anchor="middle" class="chartAxisLbl" style="font-weight:700;fill:var(--ink);">${it.value}</text>`;
+    const lbl=escapeHtml(String(it.label).length>10?String(it.label).slice(0,9)+'…':String(it.label));
+    inner+=`<text x="${(x+bw/2).toFixed(1)}" y="${hgt-padB+14}" text-anchor="middle" class="chartAxisLbl">${lbl}</text>`;
+    if(it.sub) inner+=`<text x="${(x+bw/2).toFixed(1)}" y="${hgt-padB+27}" text-anchor="middle" class="chartAxisLbl" style="fill:var(--ink-soft);">${escapeHtml(it.sub)}</text>`;
+  });
+  const wrap=document.createElement('div'); wrap.className='chartWrap'; wrap.style.overflowX='auto'; wrap.innerHTML=`<svg viewBox="0 0 ${w} ${hgt}" class="lineChartSvg" style="min-width:${Math.min(w,640)}px;">${inner}</svg>`;
+  return wrap;
+}
 function barList(items){
   const wrap = h('div',{});
   const max = Math.max(1, ...items.map(i=>i.value));
@@ -3058,14 +3117,15 @@ let adminTeamEditId = null;
 let usageWindowDays = 30;
 let usageScope = 'this';
 /* ---------- shared stats engine (league-wide, respects manager scope) ---------- */
+let rptScorePeriod='month';
 let rptTeam='all', rptPlayer='all', rptStat='AVG', rptPeriod='month', rptScoreBy='season', rptView='players', rptTeamB='', rptTrendView='players';
-function resetReportFilters(){ rptTeam='all'; rptPlayer='all'; rptStat='AVG'; rptPeriod='month'; rptScoreBy='season'; rptView='players'; rptTeamB=''; rptTrendView='players'; }
+function resetReportFilters(){ pfReset('report'); rptScorePeriod='month'; rptTeam='all'; rptPlayer='all'; rptStat='AVG'; rptPeriod='month'; rptScoreBy='season'; rptView='players'; rptTeamB=''; rptTrendView='players'; }
 function teamAggregates(stats){
   const byTeam={};
   stats.forEach(p=>{ const k=p.teamId||p.teamName; if(!byTeam[k]) byTeam[k]={teamId:p.teamId,name:p.teamName,GP:new Set(),lines:[],HR:0,'2B':0,'3B':0,SO:0,GO:0,FO:0}; const t=byTeam[k]; p.games.forEach(g=>t.GP.add(g.id)); t.lines.push(p); t.HR+=p.HR; t['2B']+=p['2B']; t['3B']+=p['3B']; t.SO+=p.SO; t.GO+=p.GO; t.FO+=p.FO; });
   return Object.values(byTeam).map(t=>{ const agg=aggregateLines(t.lines); return {name:t.name,teamId:t.teamId,GP:t.GP.size,...agg,HR:t.HR,'2B':t['2B'],'3B':t['3B'],SO:t.SO,GO:t.GO,FO:t.FO}; });
 }
-const STAT_KEYS = ['AVG','OBP','SLG','H','RBI','TB','BB','AB','HR','2B','3B','SO','GO','FO'];
+const STAT_KEYS = ['AVG','OBP','SLG','H','R','RBI','TB','BB','AB','HR','2B','3B','SO','GO','FO'];
 function scopeGames(all){
   const sid=S.currentSeasonId;
   let games = isAdmin() ? dedupeByMatchup(S.allGamesForFeed) : S.allGamesForFeed.filter(g=>g.teamId===S.selectedTeamId || g.opponentTeamId===S.selectedTeamId);
@@ -3107,13 +3167,81 @@ function reportPlayerOptions(teamFilter, statPlayers){
   (statPlayers||[]).forEach(p=>{ if(teamFilter && teamFilter!=='all' && p.teamId!==teamFilter) return; if(!map.has(p.key)) map.set(p.key,{key:p.key,name:p.name,teamId:p.teamId,teamName:p.teamName}); });
   return [...map.values()].sort((a,b)=>lastNameKey(a.name).localeCompare(lastNameKey(b.name)));
 }
-function playerPickerField(value, teamFilter, statPlayers, showTeam, onPick){
+/* ---- shared player finder: letter buttons + type-to-search + tappable list ---- */
+const pfState={};
+function pfGet(key){ if(!pfState[key]) pfState[key]={q:'',letter:''}; return pfState[key]; }
+function pfReset(key){ delete pfState[key]; }
+function pfLast(n){ const parts=(n||'').trim().split(/\s+/); return parts[parts.length-1]||''; }
+function pfMatches(p, st){
+  const L=pfLast(p.name).toUpperCase();
+  if(st.letter && !L.startsWith(st.letter)) return false;
+  const q=st.q.trim().toLowerCase(); if(!q) return true;
+  const name=p.name.toLowerCase();
+  return name.startsWith(q) || name.split(/[\s,().'\-]+/).some(w=>w.startsWith(q)) || (q.length>1 && name.includes(q));
+}
+function playerFinder(opts){
+  // opts: key, players[{key,name,teamName}], value, showTeam, onPick(key), onType(q) optional (live-filter callback)
+  const st=pfGet(opts.key);
+  const ps=opts.players;
+  const letters=[...new Set(ps.map(p=>pfLast(p.name).charAt(0).toUpperCase()).filter(Boolean))].sort();
+  if(st.letter && !letters.includes(st.letter)) st.letter='';
+  const wrap=h('div',{class:'pfWrap'});
+  wrap.appendChild(h('div',{style:'font-size:10px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;'},opts.label||'Find a player — tap a letter (last name) or type a name'));
+  const chips=h('div',{class:'pfChips'});
+  const list=h('div',{class:'pfList hidden'});
+  const inp=h('input',{type:'search',class:'pfInput',id:'pf_'+opts.key,'data-pf':'1',placeholder:'Type a name…',value:st.q,autocomplete:'off',autocorrect:'off',autocapitalize:'off',spellcheck:'false',inputmode:'search',enterkeyhint:'search'});
+  const clear=h('button',{class:'pfClear',type:'button',title:'Clear'},'✕');
+  let hl=-1, rows=[];
+  const renderList=()=>{
+    list.innerHTML=''; hl=-1; rows=[];
+    const active=st.q.trim()||st.letter;
+    if(!active){ list.classList.add('hidden'); return; }
+    const m=ps.filter(p=>pfMatches(p,st)).slice(0,80);
+    list.classList.remove('hidden');
+    if(!m.length){ list.appendChild(h('div',{class:'pfRow',style:'color:var(--ink-soft);cursor:default;'},'No players match')); return; }
+    m.forEach(p=>{ const parts=p.name.trim().split(/\s+/); const lbl=parts.length>1?parts[parts.length-1]+', '+parts.slice(0,-1).join(' '):p.name;
+      const r=h('button',{type:'button',class:'pfRow'},[h('span',{},[lbl, (opts.showTeam&&p.teamName)?h('small',{},p.teamName):null]), h('span',{style:'color:var(--grass-1);font-weight:800;'},'→')]);
+      r.addEventListener('click',()=>{ opts.onPick(p.key); });
+      rows.push(r); list.appendChild(r); });
+  };
+  const renderChips=()=>{
+    chips.innerHTML='';
+    const mk=(label,val)=>{ const b=h('button',{type:'button',class:'pfChip'+(st.letter===val?' on':'')},label); b.addEventListener('click',()=>{ st.letter=(st.letter===val&&val!=='')?'':val; renderChips(); renderList(); if(opts.onType) opts.onType(st); }); return b; };
+    chips.appendChild(mk('All',''));
+    letters.forEach(L=>chips.appendChild(mk(L,L)));
+  };
+  inp.addEventListener('input',()=>{ st.q=inp.value; clear.style.display=st.q?'block':'none'; renderList(); if(opts.onType) opts.onType(st); });
+  inp.addEventListener('focus',()=>{ renderList(); });
+  inp.addEventListener('keydown',e=>{
+    if(e.key==='ArrowDown'){ hl=Math.min(rows.length-1,hl+1); } else if(e.key==='ArrowUp'){ hl=Math.max(0,hl-1); }
+    else if(e.key==='Enter'){ e.preventDefault(); const m=ps.filter(p=>pfMatches(p,st)); if(rows[hl]) rows[hl].click(); else if(m.length) opts.onPick(m[0].key); return; }
+    else if(e.key==='Escape'){ inp.blur(); return; } else return;
+    rows.forEach((r,i)=>r.classList.toggle('hl',i===hl)); if(rows[hl]) rows[hl].scrollIntoView({block:'nearest'});
+  });
+  clear.addEventListener('click',()=>{ st.q=''; inp.value=''; clear.style.display='none'; renderList(); inp.focus(); if(opts.onType) opts.onType(st); });
+  clear.style.display=st.q?'block':'none';
+  renderChips();
+  wrap.appendChild(chips);
+  wrap.appendChild(h('div',{class:'pfInputRow'},[inp,clear]));
+  wrap.appendChild(list);
+  if(opts.value && opts.value!=='all'){
+    const cur=ps.find(p=>p.key===opts.value);
+    wrap.appendChild(h('div',{class:'pfSel'},[ (cur?cur.name:'Selected player')+(cur&&opts.showTeam&&cur.teamName?' — '+cur.teamName:''), h('button',{type:'button',title:'Show all players',onclick:()=>{ pfReset(opts.key); opts.onPick('all'); }},'✕') ]));
+    wrap.appendChild(h('div',{class:'pfHint'},'Showing one player. Tap ✕ to show everyone.'));
+  } else if(opts.hint!==false) wrap.appendChild(h('div',{class:'pfHint'},opts.hint||'Tip: you can also tap a player’s name in the table.'));
+  renderList();
+  return wrap;
+}
+function playerPickerField(value, teamFilter, statPlayers, showTeam, onPick, key){
   const ps=reportPlayerOptions(teamFilter, statPlayers);
-  const pwrap=h('div',{style:'flex:1 1 180px;'});
-  pwrap.appendChild(h('div',{style:'font-size:10px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;'},'Player \u2014 type a letter or name'));
-  pwrap.appendChild(searchSelect({ value, placeholder:'All players \u2014 type a letter or name', options:[{value:'all',label:'All players'}].concat(ps.map(p=>({value:p.key,label:p.name+(showTeam&&p.teamName?' ('+p.teamName+')':'')}))), onChange:onPick }));
-  if(value && value!=='all') pwrap.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin-top:6px;',onclick:()=>onPick('all')},'\u2715 Show all players'));
+  const pwrap=h('div',{style:'flex:1 1 100%;'});
+  pwrap.appendChild(playerFinder({ key:key||'report', players:ps, value, showTeam, onPick:(v)=>{ if(v!=='all') pfReset(key||'report'); onPick(v); }, onType:(st)=>pfLiveFilter(pwrap, st) }));
   return pwrap;
+}
+// live-hide table rows that don't match while typing (rows carry data-pname)
+function pfLiveFilter(anchor, st){
+  const card=anchor.closest('.card'); if(!card) return;
+  card.querySelectorAll('tr[data-pname]').forEach(tr=>{ tr.style.display = pfMatches({name:tr.getAttribute('data-pname')}, st) ? '' : 'none'; });
 }
 function statFilterBar(opts){
   const bar=h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;'});
@@ -3157,7 +3285,7 @@ function battingReportCard(games, title){
   const stats = leaguePlayerStats(games);
   const card=h('div',{class:'card'}); card.appendChild(h('h3',{},title||'Batting'));
   card.appendChild(statFilterBar({view:true, teams:true, players:stats, stat:true}));
-  const cols=['GP','AB','H','RBI','AVG','OBP','SLG','HR','BB','SO','GO','FO'];
+  const cols=['GP','AB','H','R','RBI','AVG','OBP','SLG','HR','BB','SO','GO','FO'];
   if(rptView!=='players'){
     let trows = teamAggregates(stats);
     if(rptView==='h2h'){
@@ -3176,14 +3304,14 @@ function battingReportCard(games, title){
   if(!rows.length){ const pn=rptPlayer!=='all'?(reportPlayerOptions('all',stats).find(p=>p.key===rptPlayer)||{}).name:null; card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'}, pn?('No at-bats recorded yet for '+pn+' in completed games this season.'):'No completed games with at-bats yet.')); return card; }
   if(rptPlayer!=='all'){
     const r=rows[0];
-    card.appendChild(h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;'}, ['AVG','OBP','SLG','H','RBI','HR'].map(k=>h('div',{style:'flex:1 1 80px;background:var(--chalk-2);border-radius:10px;padding:10px;text-align:center;'},[
+    card.appendChild(h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;'}, ['AVG','OBP','SLG','H','R','RBI','HR'].map(k=>h('div',{style:'flex:1 1 80px;background:var(--chalk-2);border-radius:10px;padding:10px;text-align:center;'},[
       h('div',{style:'font-size:10px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;'},k),
       h('div',{style:'font-family:var(--font-mono);font-size:18px;font-weight:800;'},fmtStat(k,r[k]))
     ]))));
   }
   const table=h('table',{class:'dataTable'});
   table.appendChild(h('tr',{},[h('th',{},'Player')].concat(isAdmin()?[h('th',{},'Team')]:[]).concat(cols.map(c=>h('th',{},c)))));
-  rows.forEach(r=>table.appendChild(h('tr',{},[h('td',{style:'text-align:left;'},r.name)].concat(isAdmin()?[h('td',{},r.teamName)]:[]).concat(cols.map(c=>h('td',{},fmtStat(c,r[c])))))));
+  rows.forEach(r=>table.appendChild(h('tr',{'data-pname':r.name},[h('td',{style:'text-align:left;color:var(--grass-1);font-weight:700;text-decoration:underline;cursor:pointer;',onclick:()=>{ pfReset('report'); rptPlayer=r.key; renderShell(); }},r.name)].concat(isAdmin()?[h('td',{},r.teamName)]:[]).concat(cols.map(c=>h('td',{},fmtStat(c,r[c])))))));
   const sw=h('div',{class:'gridScroll'}); sw.appendChild(table); card.appendChild(sw);
   card.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:12px;',onclick:()=>exportSeasonBattingExcel(rows)},'Export to Excel'));
   return card;
@@ -3328,14 +3456,38 @@ Router.register('report', (root)=>{
       if(!buckets[k]) buckets[k]={runs:0,games:0};
       buckets[k].runs+=totalRuns(g,side); buckets[k].games++;
     }));
-    const rows=Object.entries(buckets).map(([k,v])=>({label:k, value:v.runs, displayValue:v.runs+' runs · '+v.games+' g · '+(v.runs/v.games).toFixed(1)+'/g'})).sort((a,b)=>b.value-a.value);
-    card.appendChild(rows.length?barList(rows):h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No completed games yet.'));
+    const rows=Object.entries(buckets).map(([k,v])=>({label:k, value:v.runs, games:v.games, avg:v.runs/v.games, displayValue:v.runs+' runs · '+v.games+' g · '+(v.runs/v.games).toFixed(1)+'/g'})).sort((a,b)=>b.value-a.value);
+    if(!rows.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No completed games yet.')); root.appendChild(card); return; }
+    card.appendChild(h('div',{class:'sectiontitle'},'Total runs'));
+    card.appendChild(barChart(rows.map(r=>({label:r.label,value:r.value,sub:r.avg.toFixed(1)+'/g'}))));
+    // trend: runs per game over time (by week/month) for the chosen team(s)
+    const byPeriod={};
+    games.slice().sort((a,b)=>(a.date||'').localeCompare(b.date||'')).forEach(g=>['home','away'].forEach(side=>{
+      const tid=sideTeamId(g,side); if(rptTeam!=='all' && tid!==rptTeam) return; if(!isAdmin() && tid!==S.selectedTeamId) return;
+      const k=scoringPeriodKey(g.date); if(!k) return; if(!byPeriod[k]) byPeriod[k]={runs:0,games:0}; byPeriod[k].runs+=totalRuns(g,side); byPeriod[k].games++;
+    }));
+    const keys=Object.keys(byPeriod).sort();
+    if(keys.length){
+      const pts=keys.map(k=>({rpg:byPeriod[k].runs/byPeriod[k].games, runs:byPeriod[k].runs}));
+      card.appendChild(h('div',{class:'sectiontitle',style:'margin-top:14px;'},'Trend \u2014 runs per game over time'));
+      const per=h('div',{class:'segControl',style:'margin-bottom:8px;'},[['week','By week'],['month','By month']].map(([v,l])=>h('button',{class:rptScorePeriod===v?'active':'',onclick:()=>{ rptScorePeriod=v; renderShell(); }},l)));
+      card.appendChild(per);
+      card.appendChild(lineChart(pts,[{key:'rpg',color:'var(--grass-1)'}],(rptTeam==='all'?'All teams':teamNameById(rptTeam))+' \u2014 average runs per game', keys.map(scoringPeriodLabel), {integer:true}));
+    }
     root.appendChild(card);
   }
   if(reportView==='standings'){
-    const standings = leagueStandings().map(s=>{ const gp=s.W+s.L+s.T; return {label:s.name, value: gp>0?s.W/gp:0, displayValue: s.W+'-'+s.L+(s.T?'-'+s.T:'')}; });
-    const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'League Standings — Win %'));
-    card.appendChild(barList(standings));
+    const st=leagueStandings();
+    const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'League Standings'));
+    const t=h('table',{class:'dataTable'});
+    t.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Team'),h('th',{},'W'),h('th',{},'L'),h('th',{},'T'),h('th',{},'Win %'),h('th',{},'RF'),h('th',{},'RA'),h('th',{},'Diff'),h('th',{},'Streak'),h('th',{},'Last 5')]));
+    st.forEach(s=>{ const gp=s.W+s.L+s.T; const diff=(s.RF||0)-(s.RA||0);
+      t.appendChild(h('tr',{},[h('td',{style:'text-align:left;font-weight:700;'},s.name),h('td',{},String(s.W)),h('td',{},String(s.L)),h('td',{},String(s.T)),h('td',{},gp?fmt3(s.W/gp):'\u2014'),h('td',{},String(s.RF||0)),h('td',{},String(s.RA||0)),h('td',{style:'color:'+(diff>0?'var(--grass-1)':(diff<0?'var(--leather-2)':'inherit'))+';'},(diff>0?'+':'')+diff),
+        h('td',{style:'font-weight:800;color:'+(s.streakKind==='W'?'var(--grass-1)':(s.streakKind==='L'?'var(--leather-2)':'var(--ink-soft)'))+';'},s.streak||'\u2014'), h('td',{style:'font-family:var(--font-mono);letter-spacing:2px;'},s.last5||'\u2014')])); });
+    const sw=h('div',{class:'gridScroll'}); sw.appendChild(t); card.appendChild(sw);
+    card.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:8px 0 0;'},'Streak = current run of wins (W) or losses (L). RF/RA = runs for/against. Last 5 = most recent five results, oldest to newest.'));
+    card.appendChild(h('div',{class:'sectiontitle',style:'margin-top:14px;'},'Win %'));
+    card.appendChild(barList(st.map(s=>{ const gp=s.W+s.L+s.T; return {label:s.name, value: gp>0?s.W/gp:0, displayValue: s.W+'-'+s.L+(s.T?'-'+s.T:'')}; })));
     root.appendChild(card);
   }
 });
@@ -3512,7 +3664,9 @@ const TERMS_CLAUSES = [
   ['8. League rules and conduct.','You agree to follow your league\u2019s rules as posted on the League Rules tab, which may change during the season. All communication in the app \u2014 including League Chat, team messages, suggestions, and anything else you post \u2014 must be appropriate, respectful, and consistent with league rules. No harassment, threats, discrimination, profanity directed at others, or content that reflects poorly on the league. League administrators may remove content and restrict or remove any member\u2019s access for conduct that violates these standards, at their discretion.'],
   ['9. Your uploads.','You are responsible for any image, logo, document, or other file you upload or import into the app (for example a league logo or rules document), and you confirm you have the rights needed to use it. The operator of this app does not review uploads and is not liable for any copyright, trademark, or other infringement claim arising from content uploaded by users or leagues. The league or user who uploaded the content agrees to defend and hold the app\u2019s operator harmless from any such claim.'],
   ['10. No warranty; limitation of liability.','The app is provided \u201cas is,\u201d without warranties of any kind, including the accuracy of statistics or uninterrupted availability. To the fullest extent permitted by law, the operator of this app is not liable for any damages, data loss, or disputes arising from its use.'],
-  ['11. Changes.','We may update these Terms. Continued use after an update means you accept the revised Terms; material changes will be posted in the app.']
+  ['11. Member content and photos.','League Chat and other features let members post text and photos. Everything a member posts is that member\u2019s own content and responsibility. The app owner and the league do not review content before it appears (unless a league turns on photo approval), do not endorse it, and are not responsible or liable for anything posted by members, including content that is inaccurate, offensive, infringing, or that shows a person who did not agree to be photographed. Post only photos you took or have permission to share, and only of people who are fine with being shown. League admins may delete any content, hold or reject photos, or restrict a member\u2019s posting at their discretion and without notice. If you see something inappropriate, use Report or contact your league admin.'],
+  ['12. Security and unauthorized access.','We use reasonable safeguards, but no system is perfectly secure. To the fullest extent permitted by law, the app owner is not responsible or liable for any content, changes, data loss, or disclosure caused by hacking, malware, credential theft, or other unauthorized or malicious access by third parties, or by a member sharing their login. Keep your password private and tell your league admin right away if you think your account has been misused.'],
+  ['13. Changes.','We may update these Terms. Continued use after an update means you accept the revised Terms; material changes will be posted in the app.']
 ];
 function termsModal(){
   const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet',style:'max-height:85vh;overflow-y:auto;'});
@@ -3527,7 +3681,7 @@ function termsAgreeRow(){
   return {row, cb};
 }
 Router.register('terms', (root)=>{
-  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Terms of Use & Privacy Notice'),h('p',{},'Accepted by every member when they sign up.')]));
+  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Terms of Use & Privacy Notice'),h('p',{},'Accepted by every member when they sign up. Updated '+new Date().getFullYear()+' — includes member content and security clauses (sections 11–12).')]));
   const card=h('div',{class:'card'});
   TERMS_CLAUSES.forEach(([title,body],i)=>{
     card.appendChild(h('p',{style:'margin:'+(i===0?'0 0 4px':'14px 0 4px')+';font-weight:700;font-size:13.5px;'},title));
@@ -3538,10 +3692,53 @@ Router.register('terms', (root)=>{
 
 /* ===================== LEAGUE CHAT ===================== */
 function chatBanned(){ return S.profile && S.profile.chatBanned; }
+function chatCfg(){ const lg=S.leagues.find(l=>l.id===S.currentLeagueId)||{}; return { photos: lg.chatPhotos!==false, approve: !!lg.chatPhotoApprove }; }
+function photoBanned(){ return S.profile && S.profile.chatPhotoBanned; }
+function chatPhotoQueue(){ return (S.chat||[]).filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted && m.photo && m.pending); }
+function chatReported(){ return (S.chat||[]).filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted && (m.reports||[]).length && !m.reportsCleared); }
+function openPhotoView(src){ const v=h('div',{class:'photoView',onclick:()=>v.remove()},[h('img',{src,alt:''})]); document.body.appendChild(v); }
+async function resizePhotoForChat(file){
+  // JPEG, long side 1000px, quality stepped down until under ~180 KB
+  const img=await new Promise((res,rej)=>{ const i=new Image(); const u=URL.createObjectURL(file); i.onload=()=>{ URL.revokeObjectURL(u); res(i); }; i.onerror=()=>{ URL.revokeObjectURL(u); rej(new Error('Not an image')); }; i.src=u; });
+  const sc=Math.min(1,1000/Math.max(img.width,img.height)); const c=document.createElement('canvas'); c.width=Math.round(img.width*sc); c.height=Math.round(img.height*sc);
+  c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+  let q=0.82, out=c.toDataURL('image/jpeg',q);
+  while(out.length>240000 && q>0.4){ q-=0.1; out=c.toDataURL('image/jpeg',q); }
+  return out;
+}
+function chatModerationCard(){
+  const q=chatPhotoQueue(), rep=chatReported();
+  if(!q.length && !rep.length) return null;
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Chat moderation'));
+  if(q.length){
+    card.appendChild(h('div',{class:'sectiontitle'},'Photos waiting for approval ('+q.length+')'));
+    q.forEach(m=>card.appendChild(h('div',{style:'border-bottom:1px solid var(--line);padding:8px 0;'},[
+      h('div',{style:'font-size:12.5px;'},[h('b',{},m.name||'Member'),' · '+new Date(m.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}), m.text?' — '+m.text:'']),
+      h('img',{src:m.photo,class:'chatPhoto',style:'max-height:160px;',onclick:()=>openPhotoView(m.photo)}),
+      h('div',{style:'display:flex;gap:6px;margin-top:6px;'},[
+        h('button',{class:'btn btn-primary btn-sm',onclick:()=>updateDoc(doc(db,'chatMessages',m.id),{pending:false,approvedBy:S.user.uid,approvedAt:Date.now()})},'Approve'),
+        h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>confirmModal('Reject this photo?','It will be removed. The member keeps their posting rights.',()=>updateDoc(doc(db,'chatMessages',m.id),{deleted:true,deletedBy:S.user.uid,rejected:true}),{danger:true,confirmLabel:'Reject'})},'Reject')
+      ])
+    ])));
+  }
+  if(rep.length){
+    card.appendChild(h('div',{class:'sectiontitle',style:'margin-top:10px;'},'Reported by members ('+rep.length+')'));
+    rep.forEach(m=>card.appendChild(h('div',{style:'border-bottom:1px solid var(--line);padding:8px 0;'},[
+      h('div',{style:'font-size:12.5px;'},[h('b',{},m.name||'Member'),': ', m.text||'(photo)']),
+      m.photo?h('img',{src:m.photo,class:'chatPhoto',style:'max-height:120px;',onclick:()=>openPhotoView(m.photo)}):null,
+      h('div',{style:'font-size:11.5px;color:var(--leather-2);margin-top:4px;'},(m.reports||[]).length+' report'+((m.reports||[]).length===1?'':'s')+': '+(m.reports||[]).map(r=>r.reason||'no reason').join('; ')),
+      h('div',{style:'display:flex;gap:6px;margin-top:6px;'},[
+        h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>confirmModal('Delete this message?','Removes it for everyone.',()=>updateDoc(doc(db,'chatMessages',m.id),{deleted:true,deletedBy:S.user.uid}),{danger:true})},'Delete'),
+        h('button',{class:'btn btn-outline btn-sm',onclick:()=>updateDoc(doc(db,'chatMessages',m.id),{reportsCleared:true})},'Keep — dismiss reports')
+      ])
+    ])));
+  }
+  return card;
+}
 Router.register('chat', (root)=>{
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'League Chat'),h('p',{},'Talk with the whole league. Keep it friendly and within league rules.')]));
   if(!S.currentLeagueId && !S.leagues.length){ root.appendChild(emptyState('No league yet','Ask your commissioner to set up the league.','diamond')); return; }
-  const msgs=S.chat.filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted).slice(-200);
+  const msgs=S.chat.filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted && (!m.pending || isAdmin() || (S.user&&m.uid===S.user.uid))).slice(-200);
   const card=h('div',{class:'card chatBox'});
   const list=h('div',{class:'chatMsgs'});
   if(!msgs.length) list.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);text-align:center;padding:20px;'},'No messages yet — say hello!'));
@@ -3552,9 +3749,12 @@ Router.register('chat', (root)=>{
     const meta=h('div',{class:'chatMeta'},[h('strong',{style:'color:var(--ink);'},m.name||'Member'), h('span',{},new Date(m.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))]);
     if(isAdmin()){
       meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;',onclick:()=>confirmModal('Delete message?','Removes it for everyone.',()=>updateDoc(doc(db,'chatMessages',m.id),{deleted:true,deletedBy:S.user.uid}),{danger:true})},'Delete'));
+      if(author && !mine && m.photo) meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;'+(author.chatPhotoBanned?'color:var(--grass-1);':'color:var(--leather-2);'),onclick:()=>confirmModal((author.chatPhotoBanned?'Allow photos again for ':'Turn off photos for ')+(m.name||'this member')+'?', author.chatPhotoBanned?'They can post photos again.':'They can still post text, but not photos.',()=>updateDoc(doc(db,'users',author.id),{chatPhotoBanned:!author.chatPhotoBanned}))}, author.chatPhotoBanned?'Allow photos':'No photos'));
       if(author && !mine) meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;'+(author.chatBanned?'color:var(--grass-1);':'color:var(--leather-2);'),onclick:()=>confirmModal((author.chatBanned?'Restore chat for ':'Restrict ')+(m.name||'this member')+'?', author.chatBanned?'They will be able to post again.':'They will be able to read chat but not post until you restore them.',()=>updateDoc(doc(db,'users',author.id),{chatBanned:!author.chatBanned}))}, author.chatBanned?'Restore':'Restrict'));
     }
-    el.appendChild(meta); el.appendChild(h('div',{},m.text));
+    if(!isAdmin() && !mine && S.user && !(m.reports||[]).some(r=>r.uid===S.user.uid)) meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;color:var(--ink-soft);',title:'Report to the league admin',onclick:()=>{ const why=prompt('Why are you reporting this? (optional)',''); if(why===null) return; updateDoc(doc(db,'chatMessages',m.id),{reports:arrayUnion({uid:S.user.uid,name:S.profile.displayName||S.profile.email,reason:(why||'').trim(),ts:Date.now()}),reportsCleared:false}).then(()=>toast('Reported to the league admin')); }},'Report'));
+    el.appendChild(meta); if(m.text) el.appendChild(h('div',{},m.text));
+    if(m.photo){ if(m.pending) el.classList.add('chatPending'); el.appendChild(h('img',{src:m.photo,class:'chatPhoto',alt:'Photo',onclick:()=>openPhotoView(m.photo)})); if(m.pending) el.appendChild(h('div',{class:'chatCaption'},'\u23f3 Waiting for admin approval \u2014 only you'+(isAdmin()?' and admins':'')+' can see this for now.')); }
     list.appendChild(el);
   });
   card.appendChild(list);
@@ -3562,18 +3762,36 @@ Router.register('chat', (root)=>{
   if(chatBanned()) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--leather-2);margin:8px 0 0;'},'Your posting access has been restricted by a league admin. You can still read the chat.'));
   else if(!canPost) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:8px 0 0;'},'Your account is pending approval — you can read but not post yet.'));
   else {
-    const row=h('div',{style:'display:flex;gap:6px;margin-top:8px;'});
-    const inp=h('input',{type:'text',placeholder:'Write a message…',maxlength:'500',style:'flex:1;'});
-    const send=async()=>{ const t=inp.value.trim(); if(!t) return; inp.value=''; await addDoc(collection(db,'chatMessages'),{leagueId:S.currentLeagueId||null,uid:S.user.uid,name:S.profile.displayName||S.profile.email,text:t,ts:Date.now(),deleted:false}); };
+    const cfg=chatCfg();
+    let pendingPhoto=null;
+    const preview=h('div',{style:'margin-top:8px;display:none;align-items:center;gap:8px;'});
+    const row=h('div',{style:'display:flex;gap:6px;margin-top:8px;align-items:center;'});
+    const inp=h('input',{type:'text',placeholder:'Write a message\u2026',maxlength:'500',style:'flex:1;min-width:0;'});
+    const fileInp=h('input',{type:'file',accept:'image/*',class:'hidden'});
+    const camBtn=h('button',{class:'btn btn-outline',style:'padding:9px 12px;font-size:18px;line-height:1;',title:'Add a photo',onclick:()=>fileInp.click()},'\ud83d\udcf7');
+    fileInp.addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f) return; try{ camBtn.textContent='\u23f3'; pendingPhoto=await resizePhotoForChat(f); preview.innerHTML=''; preview.style.display='flex'; preview.appendChild(h('img',{src:pendingPhoto,style:'height:70px;border-radius:8px;border:1px solid var(--line);'})); preview.appendChild(h('span',{style:'font-size:12px;color:var(--ink-soft);flex:1;'},'Photo ready \u2014 add a caption (optional) and tap Send.'+(cfg.approve?' An admin will approve it before others see it.':''))); preview.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ pendingPhoto=null; preview.style.display='none'; fileInp.value=''; }},'\u2715')); }catch(err){ toast('That file isn\u2019t a photo'); } camBtn.textContent='\ud83d\udcf7'; });
+    const send=async()=>{ const t=inp.value.trim(); if(!t && !pendingPhoto) return; const msg={leagueId:S.currentLeagueId||null,uid:S.user.uid,name:S.profile.displayName||S.profile.email,text:t,ts:Date.now(),deleted:false}; if(pendingPhoto){ msg.photo=pendingPhoto; msg.pending=cfg.approve && !isAdmin(); } inp.value=''; pendingPhoto=null; preview.style.display='none'; fileInp.value=''; try{ await addDoc(collection(db,'chatMessages'),msg); if(msg.pending) toast('Sent \u2014 your photo is waiting for admin approval'); }catch(err){ toast('Could not send: '+(err.message||err)); } };
     inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); send(); } });
-    row.appendChild(inp); row.appendChild(h('button',{class:'btn btn-primary',onclick:send},'Send'));
-    card.appendChild(row);
+    row.appendChild(inp);
+    if(cfg.photos && !photoBanned()) { row.appendChild(camBtn); row.appendChild(fileInp); }
+    row.appendChild(h('button',{class:'btn btn-primary',onclick:send},'Send'));
+    card.appendChild(row); card.appendChild(preview);
+    if(cfg.photos && photoBanned()) card.appendChild(h('p',{style:'font-size:11.5px;color:var(--leather-2);margin:6px 0 0;'},'Photo posting has been turned off for your account by a league admin.'));
   }
   root.appendChild(card);
   setTimeout(()=>{ list.scrollTop=list.scrollHeight; },0);
   if(isAdmin()){
+    const mc=chatModerationCard(); if(mc) root.appendChild(mc);
+    const lg=S.leagues.find(l=>l.id===S.currentLeagueId);
+    if(lg){ const cfg=chatCfg(); const sc=h('div',{class:'card'}); sc.appendChild(h('h3',{},'Chat settings (admin)'));
+      const cb=(label,desc,val,onChange)=>{ const c=h('input',{type:'checkbox',style:'width:auto;margin-right:10px;'}); if(val) c.checked=true; c.addEventListener('change',()=>onChange(c.checked)); return h('label',{style:'display:flex;align-items:flex-start;font-size:13px;margin:6px 0;'},[c,h('span',{},[h('b',{},label),h('div',{style:'font-size:11.5px;color:var(--ink-soft);'},desc)])]); };
+      sc.appendChild(cb('Allow photos in chat','Members can attach a photo (shrunk to about 1000 px) to a message.',cfg.photos,v=>updateDoc(doc(db,'leagues',lg.id),{chatPhotos:v})));
+      sc.appendChild(cb('Approve photos before others see them','New photos wait in the moderation list above until an admin approves them. Text posts are not held.',cfg.approve,v=>updateDoc(doc(db,'leagues',lg.id),{chatPhotoApprove:v})));
+      sc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:6px 0 0;'},'Admins can delete any message or photo, turn photos off for one member (\u201cNo photos\u201d on their message), or restrict a member from posting entirely. Members can Report a message to you.'));
+      root.appendChild(sc); }
     const banned=S.usersDirectory.filter(u=>u.chatBanned && (!S.currentLeagueId||u.leagueId===S.currentLeagueId||!u.leagueId));
-    if(banned.length){ const bc=h('div',{class:'card'}); bc.appendChild(h('h3',{},'Restricted from chat')); banned.forEach(u=>bc.appendChild(h('div',{class:'gameListRow'},[h('div',{class:'glTeams'},u.displayName||u.email), h('button',{class:'btn btn-outline btn-sm',onclick:()=>updateDoc(doc(db,'users',u.id),{chatBanned:false})},'Restore')]))); root.appendChild(bc); }
+    const pb=S.usersDirectory.filter(u=>u.chatPhotoBanned && !u.chatBanned && (!S.currentLeagueId||u.leagueId===S.currentLeagueId||!u.leagueId));
+    if(banned.length||pb.length){ const bc=h('div',{class:'card'}); bc.appendChild(h('h3',{},'Restricted members')); banned.forEach(u=>bc.appendChild(h('div',{class:'gameListRow'},[h('div',{},[h('div',{class:'glTeams'},u.displayName||u.email),h('div',{class:'glDate'},'No posting')]), h('button',{class:'btn btn-outline btn-sm',onclick:()=>updateDoc(doc(db,'users',u.id),{chatBanned:false})},'Restore')]))); pb.forEach(u=>bc.appendChild(h('div',{class:'gameListRow'},[h('div',{},[h('div',{class:'glTeams'},u.displayName||u.email),h('div',{class:'glDate'},'No photos')]), h('button',{class:'btn btn-outline btn-sm',onclick:()=>updateDoc(doc(db,'users',u.id),{chatPhotoBanned:false})},'Allow photos')]))); root.appendChild(bc); }
   }
 });
 
@@ -3630,6 +3848,8 @@ function rulesAdminView(root){
 let helpOpen=false, helpLog=[];
 const HELP_RESTRICTED = ['how was','how is','how did','who made','who built','who created','who designed','who wrote','built','build','coded','code','coding','program','programmed','developer','develop','designed','design of','architecture','database','firebase','firestore','server','backend','api','source','html','javascript','css','script','algorithm','formula','stored','storage','encrypt','security rules','hack','bypass','password for','admin password','login as','confidential','proprietary','secret','revenue','pricing','price','cost','sell','sponsor list','email list','phone list','all emails','everyone’s','everyones','someone else','other player’s','claude','chatgpt','openai','anthropic','ai model','llm','prompt','license','copyright','company','owner','business plan','contract','invoice'];
 const HELP_KB = [
+  {k:'chat photo picture image post camera', q:'How do I post a photo in League Chat?', a:'Left menu → League Chat → tap the 📷 camera button → pick or take a photo → add a caption if you like → Send. Photos are shrunk automatically. Some leagues hold photos for admin approval first.'},
+  {k:'report inappropriate chat message photo remove delete moderate', q:'How do I report or remove a chat message?', a:'Members: tap Report on the message. Admins: tap Delete on any message, “No photos” to stop one member posting photos, or Restrict to stop them posting at all. Reported messages and photos waiting for approval appear in the Chat moderation card on the League Chat page.'},
   {k:'scorekeeper keeping score home away who scores', q:'Who keeps score?', a:'One team per game. When a game is started, pick Home or Away as the official scorekeeper. The other team is view-only and can challenge plays. Admins can change the scorekeeper on the Scorecard.'},
   {k:'challenge wrong play dispute correct missing entry alert', q:'How do I challenge a play?', a:'Scorecard or Live Feed → ⚑ Challenge a play → pick the play (or “missing at-bat”) → say what it should be → Send. The scorekeeper can Accept & fix or Reject.'},
   {k:'approve new sign in pending account registration alert', q:'How do I approve new accounts?', a:'Admin → New Sign-ins. Tap Approve as Player, pick a team and Approve as Manager, or Decline. The bell badge shows how many are waiting.'},
@@ -3953,12 +4173,29 @@ function settingsView(root){
 /* ===================== ADVERTISEMENT (Super Admin) ===================== */
 let adEditId=null;
 const AD_PLACEMENTS=[['landing','Sign-in page'],['feed','Live Feed'],['schedule','Schedule'],['record','Record'],['report','Report'],['history','Batting History'],['roster','Roster'],['chat','League Chat'],['rules','League Rules'],['qa','Q&A']];
-function adEligible(a){ if(a.active===false) return false; if(!a.imageDataUrl && !a.statement) return false; if((a.leagueScope||'all')==='all') return true; return !S.currentLeagueId || (a.leagueIds||[]).includes(S.currentLeagueId); }
+const AD_TIERS={gold:{label:'Gold',weight:3,cls:'pill-gold'},silver:{label:'Silver',weight:2,cls:'pill-role'},bronze:{label:'Bronze',weight:1,cls:'pill-warn'}};
+function adTier(a){ return AD_TIERS[a.tier]?a.tier:'bronze'; }
+function adWeight(a){ return AD_TIERS[adTier(a)].weight; }
+function adDateStatus(a){ const today=new Date().toISOString().slice(0,10); if(a.startDate && today<a.startDate) return 'scheduled'; if(a.endDate && today>a.endDate) return 'expired'; if(a.endDate){ const d=(new Date(a.endDate+'T00:00:00')-new Date(today+'T00:00:00'))/86400000; if(d<=14) return 'ending'; } return 'live'; }
+function adEligible(a, place){
+  if(a.active===false) return false; if(!a.imageDataUrl && !a.statement) return false;
+  const ds=adDateStatus(a); if(ds==='scheduled'||ds==='expired') return false;
+  if(place && place!=='__preview__' && a.placements && a.placements.length && !a.placements.includes(place)) return false;
+  if((a.leagueScope||'all')==='all') return true; return !S.currentLeagueId || (a.leagueIds||[]).includes(S.currentLeagueId);
+}
+function adRotationPlan(ads){
+  const pinned=ads.filter(a=>a.pinned), rest=ads.filter(a=>!a.pinned);
+  const order=[...pinned,...rest];
+  const slots=[]; const maxW=Math.max(1,...order.map(adWeight));
+  for(let r=0;r<maxW;r++) order.forEach(a=>{ if(adWeight(a)>r) slots.push(a); });
+  return slots;
+}
 let adRotateTimer=null, adRotateIdx=0;
 function geezerAdBox(place){
   const cfg=S.adConfig||{}; if(!cfg.enabled) return null;
   if(!(cfg.placements||[]).includes(place)) return null;
-  const ads=(S.advertisers||[]).filter(adEligible); if(!ads.length) return null;
+  const elig=(S.advertisers||[]).filter(a=>adEligible(a,place)); if(!elig.length) return null;
+  const ads=adRotationPlan(elig);
   const box=h('div',{class:'adBox','data-place':place});
   const render=(i)=>{
     const a=ads[i%ads.length]; box.innerHTML='';
@@ -3967,10 +4204,16 @@ function geezerAdBox(place){
     if(a.imageDataUrl) body.appendChild(h('img',{src:a.imageDataUrl,alt:a.company||''}));
     body.appendChild(h('div',{class:'adText'},[h('div',{style:'font-weight:800;'},a.company||''), a.statement?h('div',{style:'font-size:12.5px;line-height:1.4;'},a.statement):null, (a.phone||a.email)?h('div',{style:'font-size:11px;opacity:0.8;margin-top:2px;'},[a.phone||'', a.phone&&a.email?' \u00b7 ':'', a.email||'']):null]));
     box.appendChild(body);
-    if(ads.length>1) box.appendChild(h('div',{class:'adDots'}, ads.map((_,j)=>h('span',{class:(j===i%ads.length)?'on':''}))));
+    if(elig.length>1) box.appendChild(h('div',{class:'adDots'}, elig.map(e=>h('span',{class:(e===a)?'on':''}))));
   };
+  if(elig.some(a=>a.pinned)) adRotateIdx=0;
   render(adRotateIdx);
-  if(ads.length>1){ if(adRotateTimer) clearInterval(adRotateTimer); adRotateTimer=setInterval(()=>{ if(!document.body.contains(box)){ clearInterval(adRotateTimer); adRotateTimer=null; return; } adRotateIdx=(adRotateIdx+1)%ads.length; box.classList.add('fade'); setTimeout(()=>{ render(adRotateIdx); box.classList.remove('fade'); },400); }, Math.max(4,(+cfg.rotateSeconds||8))*1000); }
+  if(ads.length>1){
+    if(adRotateTimer) clearTimeout(adRotateTimer);
+    const secsFor=(a)=>Math.max(4,(+a.seconds||+cfg.rotateSeconds||8))*1000;
+    const tick=()=>{ adRotateTimer=setTimeout(()=>{ if(!document.body.contains(box)){ adRotateTimer=null; return; } adRotateIdx=(adRotateIdx+1)%ads.length; box.classList.add('fade'); setTimeout(()=>{ render(adRotateIdx); box.classList.remove('fade'); },400); tick(); }, secsFor(ads[adRotateIdx%ads.length])); };
+    tick();
+  }
   return box;
 }
 function advertisementView(root){
@@ -3984,11 +4227,14 @@ function advertisementView(root){
   AD_PLACEMENTS.forEach(([id,label])=>{ const cb=h('input',{type:'checkbox',style:'width:auto;'}); cb.checked=(cfg.placements||[]).includes(id); cb.addEventListener('change',()=>{ const cur=new Set(cfg.placements||[]); if(cb.checked) cur.add(id); else cur.delete(id); set({placements:[...cur]}); }); pl.appendChild(h('label',{style:'display:flex;align-items:center;gap:6px;font-size:13px;'},[cb,label])); });
   sc.appendChild(pl);
   const rot=h('input',{type:'number',min:4,max:120,value:cfg.rotateSeconds||8,style:'max-width:120px;'}); rot.addEventListener('change',()=>set({rotateSeconds:Math.max(4,parseInt(rot.value)||8)}));
-  sc.appendChild(h('div',{class:'fieldRow',style:'margin-top:10px;'},[h('label',{},'Rotate every (seconds)'),rot]));
+  sc.appendChild(h('div',{class:'fieldRow',style:'margin-top:10px;'},[h('label',{},'Default seconds per ad (a sponsor can override this)'),rot]));
+  sc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.5;'},'Preferred treatment: each sponsor has a tier (Gold shows 3\u00d7 as often as Bronze, Silver 2\u00d7), its own seconds on screen, its own pages, start/end dates, and can be pinned to show first. The pages checked above are the master list \u2014 a sponsor can only pick from these.'));
   const prev=geezerAdBox('__preview__');
   root.appendChild(sc);
-  const eligible=(S.advertisers||[]).filter(adEligible);
-  if(eligible.length){ const pc=h('div',{class:'card'}); pc.appendChild(h('h3',{},'Preview')); const tmp={...cfg,enabled:true,placements:['__preview__']}; const saved=S.adConfig; S.adConfig=tmp; const b=geezerAdBox('__preview__'); S.adConfig=saved; if(b) pc.appendChild(b); root.appendChild(pc); }
+  const eligible=(S.advertisers||[]).filter(a=>adEligible(a,'__preview__'));
+  if(eligible.length){ const pc=h('div',{class:'card'}); pc.appendChild(h('h3',{},'Preview \u2014 rotation'));
+    const tw=eligible.reduce((n,a)=>n+adWeight(a),0);
+    pc.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 8px;'},'Share of time: '+eligible.slice().sort((a,b)=>adWeight(b)-adWeight(a)).map(a=>(a.company||'?')+' '+Math.round(adWeight(a)/tw*100)+'%'+(a.pinned?' (first)':'')).join(' \u00b7 '))); const tmp={...cfg,enabled:true,placements:['__preview__']}; const saved=S.adConfig; S.adConfig=tmp; const b=geezerAdBox('__preview__'); S.adConfig=saved; if(b) pc.appendChild(b); root.appendChild(pc); }
   const ads=S.advertisers||[];
   const leagueLabel=(a)=> a.leagueScope==='all' ? 'All leagues' : ((a.leagueIds||[]).map(id=>(S.leagues.find(l=>l.id===id)||{}).name||'?').join(', ')||'—');
   const listCard=h('div',{class:'card'});
@@ -4001,7 +4247,8 @@ function advertisementView(root){
       h('span',{style:'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'},[h('strong',{},a.company||'(no name)'), h('span',{style:'color:var(--ink-soft);'},'  · '+(a.contactName||'')+(a.email?' · '+a.email:'')+' · '+leagueLabel(a))]),
       h('span',{style:'font-family:var(--font-mono);white-space:nowrap;'},'$'+(+a.amount||0).toLocaleString()),
       h('span',{class:a.feePaid?'pill-role':'pill-warn'},a.feePaid?'Paid':'Unpaid'),
-      h('span',{class:a.active===false?'pill-warn':'pill-gold'},a.active===false?'Inactive':'Active'),
+      h('span',{class:AD_TIERS[adTier(a)].cls},AD_TIERS[adTier(a)].label+(a.pinned?' \u2605':'')),
+      (()=>{ const ds=adDateStatus(a); return a.active===false?h('span',{class:'pill-warn'},'Inactive'):(ds==='live'?h('span',{class:'pill-role'},'Live'):h('span',{class:ds==='ending'?'pill-gold':'pill-warn'},ds==='scheduled'?'Starts '+formatDate(a.startDate):(ds==='expired'?'Expired':'Ends '+formatDate(a.endDate)))); })(),
       h('span',{style:'color:var(--ink-soft);'},adEditId===a.id?'▲':'▼')
     ]);
     listCard.appendChild(row);
@@ -4012,7 +4259,8 @@ function advertisementView(root){
   if(ads.length){
     const dir=h('div',{class:'card'}); dir.appendChild(h('h3',{},['Sponsor directory', h('span',{style:'font-size:11px;color:var(--ink-soft);font-weight:600;'},ads.length+' sponsor'+(ads.length===1?'':'s'))]));
     const t=h('table',{class:'dataTable',style:'min-width:1000px;'});
-    t.appendChild(h('tr',{},['Company','Contact','Email','Phone','Supporting','Statement','Fee','Paid','Status','Added'].map((c,i)=>h('th',{style:i<6?'text-align:left;':''},c))));
+    t.appendChild(h('tr',{},['Company','Contact','Email','Phone','Supporting','Statement','Tier','Pages','Start','End','Fee','Paid','Status','Added'].map((c,i)=>h('th',{style:i<6?'text-align:left;':''},c))));
+    const pagesLabel=(a)=>(a.placements&&a.placements.length)?a.placements.map(id=>(AD_PLACEMENTS.find(x=>x[0]===id)||[id,id])[1]).join(', '):'All allowed pages';
     ads.forEach(a=>t.appendChild(h('tr',{},[
       h('td',{style:'text-align:left;font-weight:700;white-space:nowrap;'},a.company||'\u2014'),
       h('td',{style:'text-align:left;white-space:nowrap;'},a.contactName||'\u2014'),
@@ -4020,9 +4268,13 @@ function advertisementView(root){
       h('td',{style:'text-align:left;white-space:nowrap;'},a.phone?h('a',{href:'tel:'+a.phone.replace(/[^\d+]/g,''),style:'color:var(--grass-1);'},a.phone):'\u2014'),
       h('td',{style:'text-align:left;'},leagueLabel(a)),
       h('td',{style:'text-align:left;max-width:260px;white-space:normal;font-size:12px;'},a.statement||'\u2014'),
+      h('td',{},AD_TIERS[adTier(a)].label+(a.pinned?' \u2605':'')+(a.seconds?' \u00b7 '+a.seconds+'s':'')),
+      h('td',{style:'font-size:11.5px;white-space:normal;max-width:180px;'},pagesLabel(a)),
+      h('td',{style:'white-space:nowrap;'},a.startDate?formatDate(a.startDate):'\u2014'),
+      h('td',{style:'white-space:nowrap;'},a.endDate?formatDate(a.endDate):'\u2014'),
       h('td',{style:'font-family:var(--font-mono);'},'$'+(+a.amount||0).toLocaleString()),
       h('td',{},h('span',{class:a.feePaid?'pill-role':'pill-warn'},a.feePaid?'Paid':'Unpaid')),
-      h('td',{},h('span',{class:a.active===false?'pill-warn':'pill-gold'},a.active===false?'Inactive':'Active')),
+      h('td',{},(()=>{ const ds=adDateStatus(a); return a.active===false?h('span',{class:'pill-warn'},'Inactive'):h('span',{class:ds==='live'?'pill-role':(ds==='ending'?'pill-gold':'pill-warn')},ds==='live'?'Live':(ds==='ending'?'Ending soon':(ds==='scheduled'?'Scheduled':'Expired'))); })()),
       h('td',{style:'white-space:nowrap;'},a.createdAt?new Date(a.createdAt).toLocaleDateString():'\u2014')
     ])));
     const sw=h('div',{class:'gridScroll'}); sw.appendChild(t); dir.appendChild(sw);
@@ -4031,9 +4283,9 @@ function advertisementView(root){
       h('button',{class:'btn btn-outline btn-sm',onclick:async()=>{ try{ await navigator.clipboard.writeText(emails.join(', ')); toast('Copied '+emails.length+' sponsor emails'); }catch(e){ toast('Could not copy'); } }},'Copy sponsor emails'),
       h('button',{class:'btn btn-outline btn-sm',onclick:()=>{
         if(typeof XLSX==='undefined'){ toast('Excel export unavailable'); return; }
-        const rows=[['Company','Contact','Email','Phone','Supporting','Statement','Fee','Paid','Status','Added','Notes']];
-        ads.forEach(a=>rows.push([a.company||'',a.contactName||'',a.email||'',a.phone||'',leagueLabel(a),a.statement||'',+a.amount||0,a.feePaid?'Yes':'No',a.active===false?'Inactive':'Active',a.createdAt?new Date(a.createdAt).toLocaleDateString():'',a.notes||'']));
-        const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:22},{wch:18},{wch:26},{wch:14},{wch:18},{wch:40},{wch:8},{wch:6},{wch:9},{wch:11},{wch:30}];
+        const rows=[['Company','Contact','Email','Phone','Supporting','Statement','Tier','Pinned first','Seconds','Pages','Start','End','Fee','Paid','Status','Added','Notes']];
+        ads.forEach(a=>rows.push([a.company||'',a.contactName||'',a.email||'',a.phone||'',leagueLabel(a),a.statement||'',AD_TIERS[adTier(a)].label,a.pinned?'Yes':'No',a.seconds||'',pagesLabel(a),a.startDate||'',a.endDate||'',+a.amount||0,a.feePaid?'Yes':'No',a.active===false?'Inactive':adDateStatus(a),a.createdAt?new Date(a.createdAt).toLocaleDateString():'',a.notes||'']));
+        const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:22},{wch:18},{wch:26},{wch:14},{wch:18},{wch:40},{wch:8},{wch:8},{wch:8},{wch:24},{wch:11},{wch:11},{wch:8},{wch:6},{wch:10},{wch:11},{wch:30}];
         XLSX.utils.book_append_sheet(wb,ws,'Sponsors'); XLSX.writeFile(wb,'Sponsors - '+new Date().toISOString().slice(0,10)+'.xlsx'); toast('Excel file downloaded');
       }},'Export to Excel')
     ]));
@@ -4041,7 +4293,7 @@ function advertisementView(root){
   }
 }
 function adForm(a){
-  const isNew=!a; a=a||{company:'',contactName:'',email:'',phone:'',statement:'',leagueScope:'all',leagueIds:[],imageDataUrl:null,feePaid:false,amount:'',active:true,notes:''};
+  const isNew=!a; a=a||{company:'',contactName:'',email:'',phone:'',statement:'',leagueScope:'all',leagueIds:[],imageDataUrl:null,feePaid:false,amount:'',active:true,notes:'',tier:'bronze',pinned:false,seconds:'',placements:[],startDate:'',endDate:''};
   const box=h('div',{style:'background:var(--chalk-2);border-radius:10px;padding:12px;margin:6px 0 12px;'});
   const f={};
   const mk=(k,label,type,ph)=>{ f[k]=h('input',{type:type||'text',value:a[k]!=null?a[k]:'',placeholder:ph||''}); box.appendChild(h('div',{class:'fieldRow'},[h('label',{},label),f[k]])); };
@@ -4065,6 +4317,22 @@ function adForm(a){
   const fileInput=h('input',{type:'file',accept:'image/png,image/jpeg,image/webp',class:'hidden'});
   fileInput.addEventListener('change',async e=>{ const fl=e.target.files[0]; if(!fl) return; try{ const d=await resizeImageFile(fl,900); if(d.length>800000){ toast('Image too large — use a simpler or smaller image'); return; } imageDataUrl=d; prev.src=d; prev.style.display=''; }catch(err){ toast('Could not read that image'); } });
   box.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Advertisement image'), prev, h('div',{style:'display:flex;gap:6px;margin-top:6px;'},[h('button',{class:'btn btn-outline btn-sm',onclick:()=>fileInput.click()},imageDataUrl?'Change image':'Upload image'), h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ imageDataUrl=null; prev.style.display='none'; }},'Remove')]), fileInput]));
+  // preferred treatment
+  box.appendChild(h('div',{class:'sectiontitle',style:'margin-top:6px;'},'Preferred treatment'));
+  const g3=h('div',{class:'grid2'});
+  const tierSel=h('select',{}); Object.entries(AD_TIERS).forEach(([v,t])=>{ const o=h('option',{value:v},t.label+' \u2014 '+t.weight+'\u00d7 share'); if(adTier(a)===v) o.setAttribute('selected','selected'); tierSel.appendChild(o); });
+  g3.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Tier (share of rotation)'),tierSel]));
+  const secInp=h('input',{type:'number',min:4,max:120,value:a.seconds||'',placeholder:'Default ('+((S.adConfig||{}).rotateSeconds||8)+')'});
+  g3.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Seconds on screen'),secInp]));
+  const startInp=h('input',{type:'date',value:a.startDate||''}); g3.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Start date (optional)'),startInp]));
+  const endInp=h('input',{type:'date',value:a.endDate||''}); g3.appendChild(h('div',{class:'fieldRow'},[h('label',{},'End date (optional)'),endInp]));
+  box.appendChild(g3);
+  const pinCb=h('input',{type:'checkbox',style:'width:auto;margin-right:8px;'}); pinCb.checked=!!a.pinned;
+  box.appendChild(h('label',{style:'display:flex;align-items:center;font-size:13px;margin:2px 0 8px;'},[pinCb,'Pinned \u2014 always the first ad shown when a page opens']));
+  const allowed=(S.adConfig||{}).placements||[];
+  const plBox=h('div',{style:'display:flex;flex-wrap:wrap;gap:8px 14px;margin-top:4px;'}); const plChecks={};
+  AD_PLACEMENTS.forEach(([id,label])=>{ const on=allowed.includes(id); const cb=h('input',{type:'checkbox',style:'width:auto;'}); if((a.placements||[]).includes(id)) cb.checked=true; if(!on) cb.disabled=true; plChecks[id]=cb; plBox.appendChild(h('label',{style:'display:flex;align-items:center;gap:5px;font-size:12.5px;'+(on?'':'opacity:0.45;')},[cb,label+(on?'':' (off)')])); });
+  box.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Pages for this sponsor (leave all unchecked = every allowed page)'),plBox]));
   // fee
   const g2=h('div',{class:'grid2'});
   f.amount=h('input',{type:'number',min:0,step:'0.01',value:a.amount!=null?a.amount:'',placeholder:'0.00'}); g2.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Fee amount ($)'),f.amount]));
@@ -4076,7 +4344,8 @@ function adForm(a){
   box.appendChild(h('div',{style:'display:flex;gap:8px;margin-top:6px;'},[
     h('button',{class:'btn btn-primary btn-sm',style:'flex:1;',onclick:async()=>{
       if(!f.company.value.trim()){ toast('Company name is required'); return; }
-      const data={ company:f.company.value.trim(), contactName:f.contactName.value.trim(), email:f.email.value.trim().toLowerCase(), phone:f.phone.value.trim(), statement:f.statement.value.trim(), leagueScope:scopeSel.value, leagueIds: scopeSel.value==='all'?[]:Object.keys(lgChecks).filter(id=>lgChecks[id].checked), imageDataUrl, feePaid:paidCb.checked, amount:parseFloat(f.amount.value)||0, active:activeCb.checked, notes:f.notes.value.trim(), updatedAt:Date.now() };
+      const data={ company:f.company.value.trim(), contactName:f.contactName.value.trim(), email:f.email.value.trim().toLowerCase(), phone:f.phone.value.trim(), statement:f.statement.value.trim(), leagueScope:scopeSel.value, leagueIds: scopeSel.value==='all'?[]:Object.keys(lgChecks).filter(id=>lgChecks[id].checked), imageDataUrl, feePaid:paidCb.checked, amount:parseFloat(f.amount.value)||0, active:activeCb.checked, notes:f.notes.value.trim(), tier:tierSel.value, pinned:pinCb.checked, seconds:parseInt(secInp.value)||null, placements:Object.keys(plChecks).filter(id=>plChecks[id].checked), startDate:startInp.value||null, endDate:endInp.value||null, updatedAt:Date.now() };
+      if(data.startDate && data.endDate && data.endDate<data.startDate){ toast('End date is before start date'); return; }
       if(isNew){ data.createdAt=Date.now(); await addDoc(collection(db,'advertisers'),data); } else await updateDoc(doc(db,'advertisers',a.id),data);
       adEditId=null; toast(isNew?'Advertiser added':'Advertiser saved');
     }}, isNew?'Add advertiser':'Save'),
