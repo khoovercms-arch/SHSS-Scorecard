@@ -88,6 +88,7 @@ body.docked .appMark{right:212px;}
 #authWrap .authField{width:100%;margin-bottom:10px;}
 #authWrap input{width:100%;padding:13px 14px;border:none;border-radius:var(--radius-md);background:var(--grass-2);border:2px solid var(--grass-3);color:var(--chalk);font-size:15px;outline:none;}
 #authWrap input::placeholder{color:#9fb3a5;}
+#authWrap select.leaguePick{width:100%;padding:12px 14px;border-radius:var(--radius-md);background:var(--grass-2);border:2px solid var(--gold);color:var(--chalk);font-size:15px;font-weight:600;outline:none;}
 #authWrap .authBtn{width:100%;padding:13px;background:var(--chalk);color:var(--grass-1);border:none;border-radius:var(--radius-md);font-weight:700;font-size:15px;margin-top:6px;box-shadow:0 4px 14px rgba(0,0,0,0.25);}
 #authWrap .authToggle{margin-top:14px;background:none;border:1px solid var(--grass-3);color:var(--chalk);padding:8px 14px;border-radius:var(--radius-md);font-size:12.5px;}
 #authWrap .authErr{color:#f2b8ab;font-size:12.5px;margin:0 0 10px;}
@@ -317,6 +318,10 @@ table.zoneTable{margin-bottom:14px;width:100%;} table.zoneTable td,table.zoneTab
 .pill-role{background:var(--grass-3);color:#fff;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;}
 .pill-warn{background:var(--leather-2);color:#fff;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;}
 .pill-gold{background:var(--gold);color:var(--grass-1);font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;}
+.navBadge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:#d33;color:#fff;font-size:11px;font-weight:800;margin-left:6px;line-height:1;}
+.alertBanner{display:flex;align-items:center;gap:10px;background:#fff4d6;border:1.5px solid var(--gold);border-radius:12px;padding:10px 12px;margin-bottom:12px;font-size:13px;cursor:pointer;}
+.alertBanner.warn{background:#fde8e4;border-color:var(--leather-2);cursor:default;}
+.alertBanner b{font-weight:800;}
 .pill-super{background:#4a2c6b;color:#fff;font-size:10px;padding:2px 8px;border-radius:20px;font-weight:700;}
 .faqItem{border-bottom:1px solid var(--line);} .faqItem:last-child{border-bottom:none;}
 .faqQuestion{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 2px;cursor:pointer;font-size:13.5px;font-weight:600;}
@@ -504,7 +509,13 @@ function searchSelect(opts){
   let hl=-1, items=[];
   const render=()=>{
     const q=inp.value.trim().toLowerCase();
-    items=opts.options.filter(o=>!q||o.label.toLowerCase().includes(q)).slice(0,60);
+    if(!q) items=opts.options.slice(0,250);
+    else {
+      const wordStart=o=>{ const L=o.label.toLowerCase(); return L.startsWith(q) || L.split(/[\s,().'\-]+/).some(w=>w.startsWith(q)); };
+      const starts=opts.options.filter(wordStart);
+      const rest=q.length>1 ? opts.options.filter(o=>!starts.includes(o) && o.label.toLowerCase().includes(q)) : [];
+      items=starts.concat(rest).slice(0,150);
+    }
     list.innerHTML=''; hl=-1;
     if(!items.length){ list.appendChild(h('div',{class:'ssItem',style:'color:var(--ink-soft);'},'No matches')); return; }
     items.forEach((o,i)=>{ const it=h('div',{class:'ssItem'},o.label); it.addEventListener('mousedown',e=>{ e.preventDefault(); choose(o); }); list.appendChild(it); });
@@ -521,7 +532,16 @@ function searchSelect(opts){
   return wrap;
 }
 function genJoinCode(){ const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; let c=''; for(let i=0;i<6;i++) c+=chars[Math.floor(Math.random()*chars.length)]; return c; }
-function isSuperAdmin(){ return S.user && S.user.email && S.user.email.toLowerCase()===SUPER_ADMIN_EMAIL; }
+function isPrimarySuperAdmin(){ return !!(S.user && S.user.email && S.user.email.toLowerCase()===SUPER_ADMIN_EMAIL); }
+function altSuperStatus(){ const a=S.accessConfig||{}; if(!a.altEmail) return 'none'; if(!a.altEnabled) return 'off'; const today=new Date().toISOString().slice(0,10); if(a.altFrom && today<a.altFrom) return 'scheduled'; if(a.altUntil && today>a.altUntil) return 'expired'; return 'active'; }
+function isAltSuperAdmin(){ const a=S.accessConfig||{}; return !!(S.user && S.user.email && a.altEmail && S.user.email.toLowerCase()===a.altEmail && altSuperStatus()==='active'); }
+function isSuperAdmin(){ return isPrimarySuperAdmin() || isAltSuperAdmin(); }
+function pendingAccounts(){ return (S.usersDirectory||[]).filter(u=>u.role==='pending' && (u.email||'').toLowerCase()!==SUPER_ADMIN_EMAIL && (isSuperAdmin() || !u.leagueId || u.leagueId===S.currentLeagueId)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
+function signupSeenAt(){ try{ return parseInt(localStorage.getItem('gbSignupSeen_'+(S.currentLeagueId||'x'))||'0',10)||0; }catch(e){ return 0; } }
+function markSignupsSeen(){ try{ localStorage.setItem('gbSignupSeen_'+(S.currentLeagueId||'x'), String(Date.now())); }catch(e){} }
+function newSeasonSignups(){ const seen=signupSeenAt(); return (S.signups||[]).filter(x=>!x.isTest && (x.createdAt||0)>seen && (!S.currentLeagueId || x.leagueId===S.currentLeagueId)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
+function adminAlertCount(){ if(!isAdmin()) return 0; return pendingAccounts().length + newSeasonSignups().length; }
+let lastAlertCount=null;
 function isAdmin(){ return isSuperAdmin() || (S.profile && S.profile.role === 'admin' && (!S.profile.leagueId || S.profile.leagueId===S.currentLeagueId)); }
 function isManager(){ return S.profile && S.profile.role === 'manager'; }
 function myTeamId(){ return S.profile ? S.profile.teamId : null; }
@@ -529,7 +549,7 @@ function canEditTeam(){ return isAdmin() || (isManager() && myTeamId()===S.selec
 
 onAuthStateChanged(auth, async (u)=>{
   cleanupTeamListeners();
-  if(!u){ S.user=null; S.profile=null; renderShell(); return; }
+  if(!u){ S.user=null; S.profile=null; renderShell(); loadPublicLeagues(); return; }
   try{
     S.user = u;
     const pRef = doc(db,'users',u.uid);
@@ -562,18 +582,25 @@ onAuthStateChanged(auth, async (u)=>{
           }
         }
       }
+      if(!claimedSignup && !leagueId && pendingSignupLeagueId){
+        leagueId = pendingSignupLeagueId;
+        try{ const ls=await getDoc(doc(db,'leagues',leagueId)); const designated=ls.exists()?(ls.data().adminEmail||'').toLowerCase():'';
+          if(designated && designated===(u.email||'').toLowerCase()){ role='admin'; await updateDoc(doc(db,'leagues',leagueId),{adminUserId:u.uid}); } else role='pending';
+        }catch(e){ role='pending'; }
+      }
+      pendingSignupLeagueId='';
       if(isSuper){ role='admin'; }
       if(role !== 'admin'){
         const teamsSnap = await getDocs(collection(db,'teams'));
         matchedTeam = teamsSnap.docs.find(d => (d.data().pendingManagerEmail||'').toLowerCase() === (u.email||'').toLowerCase());
         if(matchedTeam){ role='manager'; teamId=matchedTeam.id; if(!leagueId) leagueId=matchedTeam.data().leagueId||null; }
       }
-      const profile = { email:u.email, role, teamId, leagueId, displayName: claimedSignup ? claimedSignup.data().name : u.email.split('@')[0], agreedTerms:true, agreedTermsAt:Date.now() };
+      const profile = { email:u.email, role, teamId, leagueId, displayName: claimedSignup ? claimedSignup.data().name : u.email.split('@')[0], agreedTerms:true, agreedTermsAt:Date.now(), createdAt:Date.now() };
       await setDoc(pRef, profile);
       if(matchedTeam) await updateDoc(doc(db,'teams',matchedTeam.id),{ managerUserId:u.uid, pendingManagerEmail:null });
       pendingJoinCode='';
       S.profile = profile;
-    } else { S.profile = snap.data(); }
+    } else { S.profile = snap.data(); if((u.email||'').toLowerCase()===SUPER_ADMIN_EMAIL && S.profile.role!=='admin'){ S.profile.role='admin'; try{ await updateDoc(pRef,{role:'admin'}); }catch(e){} } }
     onSnapshot(pRef, s=>{ if(s.exists()){ S.profile = s.data(); renderShell(); } });
     startGlobalListeners();
     renderShell();
@@ -585,8 +612,8 @@ onAuthStateChanged(auth, async (u)=>{
   }
 });
 async function doLogin(email,pass){ S.authError=''; S.authMessage=''; try{ await signInWithEmailAndPassword(auth,email,pass);}catch(e){ S.authError=e.message.replace('Firebase: ',''); renderShell(); } }
-let pendingJoinCode = '';
-async function doSignup(email,pass,joinCode){ S.authError=''; S.authMessage=''; pendingJoinCode=(joinCode||'').trim().toUpperCase(); try{ await createUserWithEmailAndPassword(auth,email,pass);}catch(e){ S.authError=e.message.replace('Firebase: ',''); renderShell(); } }
+let pendingJoinCode = '', pendingSignupLeagueId = '';
+async function doSignup(email,pass,joinCode,leagueId){ S.authError=''; S.authMessage=''; pendingJoinCode=(joinCode||'').trim().toUpperCase(); pendingSignupLeagueId=leagueId||''; try{ await createUserWithEmailAndPassword(auth,email,pass);}catch(e){ S.authError=e.message.replace('Firebase: ',''); renderShell(); } }
 async function doReset(email){ S.authError=''; S.authMessage=''; if(!email){ S.authError='Enter your email above first.'; renderShell(); return; } try{ await sendPasswordResetEmail(auth,email); S.authMessage='Password reset email sent — check your inbox.'; }catch(e){ S.authError=e.message.replace('Firebase: ',''); } renderShell(); }
 function doLogout(){ signOut(auth); }
 
@@ -622,6 +649,7 @@ function startGlobalListeners(){
   onSnapshot(collection(db,'advertisers'), snap=>{ S.advertisers = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(a.company||'').localeCompare(b.company||'')); renderShell(); });
   onSnapshot(doc(db,'appConfig','ads'), snap=>{ S.adConfig = snap.exists()?snap.data():null; renderShell(); });
   onSnapshot(doc(db,'appConfig','branding'), snap=>{ S.appBranding = snap.exists()?snap.data():null; renderShell(); });
+  onSnapshot(doc(db,'appConfig','access'), snap=>{ S.accessConfig = snap.exists()?snap.data():null; renderShell(); }, ()=>{});
 }
 function leagueGames(){ const sid=S.currentSeasonId; return dedupeByMatchup(S.allGamesForFeed.filter(g=>!sid||g.seasonId===sid||!g.seasonId)); }
 function leagueSchedule(){
@@ -747,11 +775,12 @@ function renderShell(){
     }
     return;
   }
-  if(S.profile && S.profile.role==='pending'){
+  if(S.profile && (S.profile.role==='pending'||S.profile.role==='declined') && !isSuperAdmin()){
     authWrap.classList.add('hidden'); mainUI.classList.add('hidden'); pendingWrap.classList.remove('hidden');
     pendingWrap.innerHTML='';
-    pendingWrap.appendChild(h('h1',{},'Account Pending'));
-    pendingWrap.appendChild(h('p',{},"Your account has been created but the league commissioner hasn't assigned your role or team yet. Check back soon, or contact your commissioner."));
+    const declined=S.profile.role==='declined';
+    pendingWrap.appendChild(h('h1',{}, declined?'Account Not Approved':'Account Pending'));
+    pendingWrap.appendChild(h('p',{}, declined ? "Your league admin didn't approve this account. If you think that's a mistake, contact your league admin." : "Your account has been created and your league admin has been notified. You'll get in as soon as they approve you — check back soon."));
     pendingWrap.appendChild(h('button',{onclick:doLogout},'Sign out'));
     return;
   }
@@ -810,7 +839,7 @@ function renderShell(){
   ];
   const rightDrawerTabs = [];
   if(isAdmin() || isManager()){ rightDrawerTabs.push({id:'eval', label:'Player Eval'}); rightDrawerTabs.push({id:'draft', label:'Draft Board'}); }
-  if(isAdmin()) rightDrawerTabs.push({id:'admin', label:'Admin'});
+  if(isAdmin()) rightDrawerTabs.push({id:'admin', label:'Admin'+(adminAlertCount()?' \ud83d\udd14 '+adminAlertCount():'')});
   if(isSuperAdmin()) rightDrawerTabs.push({id:'superadmin', label:'Super Admin'});
   if(isSuperAdmin()) rightDrawerTabs.push({id:'__landing', label:'View landing page'});
 
@@ -826,6 +855,10 @@ function renderShell(){
   document.getElementById('leftDrawerBtn').onclick = ()=>{ S.drawerOpen = S.drawerOpen==='left'?null:'left'; renderShell(); };
   document.getElementById('rightDrawerBtn').onclick = ()=>{ S.drawerOpen = S.drawerOpen==='right'?null:'right'; renderShell(); };
   renderDrawer(leftDrawerTabs, rightDrawerTabs);
+  const alertN = adminAlertCount();
+  { const rb=document.getElementById('rightDrawerBtn'); if(rb){ const old=rb.querySelector('.navBadge'); if(old) old.remove(); if(alertN) rb.insertBefore(h('span',{class:'navBadge'},String(alertN)), rb.firstChild); } }
+  if(lastAlertCount!==null && alertN>lastAlertCount) toast('\ud83d\udd14 New sign-in waiting for approval');
+  lastAlertCount = alertN;
 
   updateScoreBug();
   const content = document.getElementById('tabContent');
@@ -845,6 +878,19 @@ function renderShell(){
       h('span',{style:'font-size:10.5px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.4px;'},'Edit access:'),
       h('span',{class:ACCESS_CLASS[accessLevel]}, accessLevel)
     ]));
+  }
+  if(alertN && !(S.activeTab==='admin' && adminSub==='approvals')){
+    const pa=pendingAccounts().length, ns=newSeasonSignups().length;
+    const parts=[]; if(pa) parts.push(pa+' account'+(pa===1?'':'s')+' waiting for approval'); if(ns) parts.push(ns+' new season sign-up'+(ns===1?'':'s'));
+    content.appendChild(h('div',{class:'alertBanner',onclick:()=>{ S.activeTab='admin'; adminSub='approvals'; renderShell(); }},[h('span',{style:'font-size:20px;'},'\ud83d\udd14'), h('span',{style:'flex:1;'},[h('b',{},'New sign-ins: '), parts.join(' \u00b7 ')]), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Review \u2192')]));
+  }
+  { const ga=myGameAlerts(); const chN=ga.reduce((n,x)=>n+x.ch,0);
+    if(lastChallengeCount!==null && chN>lastChallengeCount) toast('\u2691 New scoring challenge');
+    lastChallengeCount=chN;
+    if(ga.length && S.activeTab!=='scorecard' && S.activeTab!=='feed'){
+      const x=ga[0];
+      content.appendChild(h('div',{class:'alertBanner warn',style:'cursor:pointer;',onclick:()=>{ S.activeTab='scorecard'; useGame(x.g); }},[h('span',{style:'font-size:18px;'},'\u2691'), h('span',{style:'flex:1;'},[h('b',{},x.g.away.name+' at '+x.g.home.name+': '), [x.ch?x.ch+' open challenge'+(x.ch===1?'':'s'):'', x.iss?x.iss+' missing entr'+(x.iss===1?'y':'ies'):''].filter(Boolean).join(' \u00b7 ')+(ga.length>1?' (+'+(ga.length-1)+' more game'+(ga.length>2?'s':'')+')':'')]), h('span',{style:'font-weight:800;'},'Open \u2192')]));
+    }
   }
   const fn = Router.tabs[S.activeTab];
   if(fn) fn(content); else content.appendChild(h('p',{},'Not available.'));
@@ -873,11 +919,40 @@ function updateScoreBug(){
 }
 function totalRuns(game, side){ return Object.values((game.score&&game.score[side])||{}).reduce((a,b)=>a+b,0); }
 
+/* ---- league shown on the sign-in page ---- */
+function leaguePool(){ return S.user ? (S.leagues||[]) : (S.publicLeagues||[]); }
+function listedLeagues(){ return leaguePool().filter(l=>l.status!=='closed' && !l.hideFromSignup).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||'')); }
+function resolveLandingLeague(){
+  const all=leaguePool(), L=listedLeagues(); let id=null;
+  let qp=null; try{ qp=new URLSearchParams(location.search).get('league'); }catch(e){}
+  if(qp){ const q=qp.trim(); const m=all.find(l=>l.id===q || (l.joinCode||'').toUpperCase()===q.toUpperCase() || (l.shortName||'').toLowerCase()===q.toLowerCase()); if(m){ id=m.id; try{ localStorage.setItem('gbLeague',id); }catch(e){} } }
+  if(!id){ try{ const saved=localStorage.getItem('gbLeague'); if(saved && all.some(l=>l.id===saved)) id=saved; }catch(e){} }
+  if(!id && L.length===1) id=L[0].id;
+  S.landingLeagueId=id;
+}
+function landingLeague(){ return leaguePool().find(l=>l.id===S.landingLeagueId)||null; }
+async function loadPublicLeagues(){
+  try{ const snap=await getDocs(collection(db,'leagues')); S.publicLeagues=snap.docs.map(d=>({id:d.id,...d.data()})); S.publicLeaguesError=false; }
+  catch(e){ S.publicLeagues=[]; S.publicLeaguesError=true; }
+  resolveLandingLeague();
+  if(!S.user) renderShell();
+}
+function leaguePickerField(onPick){
+  const L=listedLeagues(); if(!L.length) return null;
+  if(!S.landingLeagueId || !leaguePool().some(l=>l.id===S.landingLeagueId)) resolveLandingLeague();
+  const sel=h('select',{class:'leaguePick'});
+  sel.appendChild(h('option',{value:''},'Select your league…'));
+  L.forEach(l=>{ const o=h('option',{value:l.id},l.name); if(l.id===S.landingLeagueId) o.setAttribute('selected','selected'); sel.appendChild(o); });
+  const cur=landingLeague(); if(cur && !L.some(l=>l.id===cur.id)){ const o=h('option',{value:cur.id},cur.name); o.setAttribute('selected','selected'); sel.appendChild(o); }
+  sel.addEventListener('change',()=>{ S.landingLeagueId=sel.value||null; try{ if(sel.value) localStorage.setItem('gbLeague',sel.value); }catch(e){} if(onPick) onPick(landingLeague()); });
+  return {sel, field:h('div',{class:'authField'},[h('div',{style:'font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:0.4px;color:#e8e2cf;margin:0 0 4px 2px;'},'Your league'), sel])};
+}
 let portalDone=false;
 function renderPortal(outer){
   const wrap=h('div',{class:'authCard'}); outer.appendChild(wrap);
-  const plgo = (S.leagues.find(l=>l.id===S.currentLeagueId)||{});
-  wrap.appendChild(h('div',{class:'authLogo'}, h('img',{src:plgo.logoDataUrl||DEFAULT_LOGO,alt:'',style:'width:110px;height:110px;'})));
+  const plgo = landingLeague()||{};
+  const plImg=h('img',{src:plgo.logoDataUrl||DEFAULT_LOGO,alt:'',style:'width:110px;height:110px;'});
+  wrap.appendChild(h('div',{class:'authLogo'}, plImg));
   wrap.appendChild(h('h1',{},'Player Sign-up'));
   wrap.appendChild(h('p',{class:'sub'},'Register for the upcoming season. No account needed.'));
   if(S.authError) wrap.appendChild(h('div',{class:'authErr'}, S.authError));
@@ -888,7 +963,8 @@ function renderPortal(outer){
   }
   const f={};
   const mk=(k,ph,type,extra)=>{ f[k]=h('input',Object.assign({type:type||'text',placeholder:ph},extra||{})); wrap.appendChild(h('div',{class:'authField'},f[k])); };
-  mk('code','League Code','text',{style:'text-transform:uppercase;'});
+  const ppick=leaguePickerField(lg=>{ plImg.src=(lg&&lg.logoDataUrl)||DEFAULT_LOGO; });
+  if(ppick) wrap.appendChild(ppick.field); else mk('code','League Code','text',{style:'text-transform:uppercase;'});
   mk('name','Full name');
   mk('age','Age','number',{inputmode:'numeric'});
   mk('email','Email','email');
@@ -899,15 +975,20 @@ function renderPortal(outer){
   const pterms=termsAgreeRow(); wrap.appendChild(pterms.row);
   wrap.appendChild(h('button',{class:'authBtn',onclick:async()=>{
     S.authError='';
-    const code=f.code.value.trim().toUpperCase();
-    if(!code||!f.name.value.trim()||!f.email.value.trim()){ S.authError='League code, name and email are required.'; renderShell(); return; }
+    const code=f.code?f.code.value.trim().toUpperCase():'';
+    const pickedId=ppick?ppick.sel.value:'';
+    if((!code&&!pickedId)||!f.name.value.trim()||!f.email.value.trim()){ S.authError=(ppick?'Your league':'League code')+', name and email are required.'; renderShell(); return; }
     if(!pterms.cb.checked){ S.authError='Please accept the Terms of Use & Privacy Notice to sign up.'; renderShell(); return; }
     try{
-      const leaguesSnap=await getDocs(collection(db,'leagues'));
-      const league=leaguesSnap.docs.find(d=>(d.data().joinCode||'').toUpperCase()===code);
+      let league=null;
+      if(pickedId){ league={id:pickedId}; }
+      else { const leaguesSnap=await getDocs(collection(db,'leagues')); league=leaguesSnap.docs.find(d=>(d.data().joinCode||'').toUpperCase()===code); }
       if(!league){ S.authError='That league code was not recognized.'; renderShell(); return; }
       const seasonsSnap=await getDocs(collection(db,'seasons'));
-      const seasons=seasonsSnap.docs.map(d=>({id:d.id,...d.data()})).filter(x=>x.leagueId===league.id && x.status!=='ended').sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+      const allSeasons=seasonsSnap.docs.map(d=>({id:d.id,...d.data()}));
+      let seasons=allSeasons.filter(x=>x.leagueId===league.id && x.status!=='ended');
+      if(!seasons.length) seasons=allSeasons.filter(x=>!x.leagueId && x.status!=='ended');
+      seasons.sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
       const season=seasons[0];
       if(!season){ S.authError='This league has no open season right now.'; renderShell(); return; }
       const today=new Date().toISOString().slice(0,10);
@@ -942,21 +1023,28 @@ function renderAuth(wrap){
   const panel=h('div',{class:'authPanel'}); layout.appendChild(panel);
   wrap.appendChild(layout);
   const card=h('div',{class:'authCard'});
-  const lgo = (S.leagues.find(l=>l.id===S.currentLeagueId)||{});
-  card.appendChild(h('div',{class:'authLogo'}, h('img',{src:lgo.logoDataUrl||DEFAULT_LOGO,alt:''})));
-  card.appendChild(h('h1',{},lgo.shortName||lgo.name||'Geezer Ball Scorecard'));
+  if(!S.landingLeagueId) resolveLandingLeague();
+  const lgo = landingLeague()||{};
+  const lgImg=h('img',{src:lgo.logoDataUrl||DEFAULT_LOGO,alt:''});
+  const lgTitle=h('h1',{},lgo.shortName||lgo.name||'Geezer Ball Scorecard');
+  card.appendChild(h('div',{class:'authLogo'}, lgImg));
+  card.appendChild(lgTitle);
   card.appendChild(h('p',{class:'sub'}, signup?'Create your account':'Welcome back'));
   if(S.authError) card.appendChild(h('div',{class:'authErr'}, S.authError));
   if(S.authMessage) card.appendChild(h('div',{class:'authMsg'}, S.authMessage));
   const emailInp = h('input',{type:'email',placeholder:'Email',autocomplete:'email'});
   const passInp = h('input',{type:'password',placeholder:'Password',autocomplete:signup?'new-password':'current-password'});
-  const codeInp = h('input',{type:'text',placeholder:'Invite code (or league code)',style:'text-transform:uppercase;'});
+  const pick = (signup || listedLeagues().length>1) ? leaguePickerField(lg=>{ lgImg.src=(lg&&lg.logoDataUrl)||DEFAULT_LOGO; lgTitle.textContent=lg?(lg.shortName||lg.name):'Geezer Ball Scorecard'; }) : null;
+  const codeInp = h('input',{type:'text',placeholder:pick?'Invite code (optional)':'Invite code (or league code)',style:'text-transform:uppercase;'});
+  if(pick) card.appendChild(pick.field);
   card.appendChild(h('div',{class:'authField'}, emailInp));
   card.appendChild(h('div',{class:'authField'}, passInp));
   if(signup) card.appendChild(h('div',{class:'authField'}, codeInp));
   const terms = termsAgreeRow();
   if(signup) card.appendChild(terms.row);
-  const go=()=>{ if(signup && !terms.cb.checked){ S.authError='Please accept the Terms of Use & Privacy Notice to continue.'; renderShell(); return; } signup ? doSignup(emailInp.value.trim(),passInp.value,codeInp.value) : doLogin(emailInp.value.trim(),passInp.value); };
+  const go=()=>{ if(signup && !terms.cb.checked){ S.authError='Please accept the Terms of Use & Privacy Notice to continue.'; renderShell(); return; }
+    if(signup && pick && !pick.sel.value && !codeInp.value.trim()){ S.authError='Please pick your league.'; renderShell(); return; }
+    signup ? doSignup(emailInp.value.trim(),passInp.value,codeInp.value,pick?pick.sel.value:'') : doLogin(emailInp.value.trim(),passInp.value); };
   passInp.addEventListener('keydown',e=>{ if(e.key==='Enter') go(); });
   card.appendChild(h('button',{class:'authBtn', onclick:go}, signup?'Create account':'Sign In'));
   const links=h('div',{class:'authLinks'});
@@ -1499,13 +1587,20 @@ async function findOrCreateGameFromSchedule(sched){
   if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
   const myTeam = S.teams.find(t=>t.id===S.selectedTeamId);
   const isHome = sched.homeAway!=='away';
-  const myRoster = await fetchTeamRosterFormatted(S.selectedTeamId);
-  const oppRoster = await fetchTeamRosterFormatted(sched.opponentTeamId);
+  if(sched.matchupId && sched.opponentTeamId){
+    try{ const os=await getDocs(collection(db,'teams',sched.opponentTeamId,'games')); const d=os.docs.find(x=>x.data().matchupId===sched.matchupId);
+      if(d){ toast('The other team already started this game \u2014 opening it'); useGame({id:d.id, teamId:sched.opponentTeamId, ...d.data()}); return; } }catch(e){}
+  }
   const homeName = isHome ? (myTeam?myTeam.name:'Home') : sched.opponent;
   const awayName = isHome ? sched.opponent : (myTeam?myTeam.name:'Away');
+  const keeperSide = await chooseScorekeeperModal(homeName, awayName, null);
+  if(!keeperSide) return;
+  const myRoster = await fetchTeamRosterFormatted(S.selectedTeamId);
+  const oppRoster = await fetchTeamRosterFormatted(sched.opponentTeamId);
   const ref = await addDoc(collection(db,'teams',S.selectedTeamId,'games'),{
     opponent:sched.opponent, opponentTeamId:sched.opponentTeamId||null, date:sched.date, seasonId:S.currentSeasonId, matchupId:sched.matchupId||null,
     homeAway:sched.homeAway, location:sched.location||'',
+    scorekeeperSide:keeperSide, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[],
     home:{ name:homeName, coach:'', players: isHome?myRoster:oppRoster },
     away:{ name:awayName, coach:'', players: isHome?oppRoster:myRoster },
     inningsPlanned:9, atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''
@@ -1513,9 +1608,148 @@ async function findOrCreateGameFromSchedule(sched){
   S.activeGameId = ref.id; renderShell();
   playBallSplash();
 }
+/* ===================== SCOREKEEPER / ALERTS / CHALLENGES ===================== */
+function gameDoc(g){ return doc(db,'teams', g.teamId||S.selectedTeamId, 'games', g.id); }
+function scorekeeperSide(g){ return (g && g.scorekeeperSide) || ownerSideOf(g); }
+function scorekeeperTeamId(g){ return sideTeamId(g, scorekeeperSide(g)); }
+function myGameSide(g){ const t=myTeamId(); if(!t||!g) return null; if(sideTeamId(g,'home')===t) return 'home'; if(sideTeamId(g,'away')===t) return 'away'; return null; }
+function canScoreGame(g){ if(!g) return false; if(isAdmin()) return true; return !!(isManager() && myTeamId() && myTeamId()===scorekeeperTeamId(g)); }
+function canChallengeGame(g){ if(!g) return false; if(isAdmin()) return true; return !!(isManager() && myGameSide(g) && myTeamId()!==scorekeeperTeamId(g)); }
+function halfLabel(a){ return (a.half==='top'?'Top ':'Bot ')+a.inning; }
+function playLabel(g,a){ return halfLabel(a)+' · '+playerInitialLast(playerName(g,a.playerId))+' — '+((RESULTS[a.result]||{}).label||a.result)+(a.zone?' ('+zoneShort(a.zone)+')':''); }
+function gameEntryIssues(g){
+  const out=[]; const acked=new Set(g.ackedIssues||[]); const ab=g.atbats||[];
+  ab.forEach(a=>{ if(IN_PLAY.includes(a.result) && !a.zone){ const k='zone:'+a.id; if(!acked.has(k)) out.push({key:k, kind:'zone', atbatId:a.id, text:playerInitialLast(playerName(g,a.playerId))+' — '+((RESULTS[a.result]||{}).label||a.result)+' ('+halfLabel(a)+'): no hit location entered.'}); } });
+  ['away','home'].forEach(side=>{
+    const lineup=(g[side].players||[]).filter(p=>p.name&&p.name.trim()).slice().sort((a,b)=>(a.order||99)-(b.order||99));
+    if(lineup.length<2) return;
+    const seq=ab.filter(a=>a.side===side);
+    seq.forEach((cur,i)=>{
+      let expected;
+      if(i===0) expected=lineup[0];
+      else { const idx=lineup.findIndex(p=>p.id===seq[i-1].playerId); if(idx<0) return; expected=lineup[(idx+1)%lineup.length]; }
+      if(!expected || expected.id===cur.playerId) return;
+      const k='order:'+cur.id; if(acked.has(k)) return;
+      out.push({key:k, kind:'order', atbatId:cur.id, text:'Batting order ('+g[side].name+', '+halfLabel(cur)+'): '+playerInitialLast(expected.name)+' was due up, but '+playerInitialLast(playerName(g,cur.playerId))+' is recorded. An at-bat may be missing.'});
+    });
+  });
+  return out;
+}
+function openChallenges(g){ return (g.challenges||[]).filter(c=>c.status==='open'); }
+function chooseScorekeeperModal(homeName, awayName, current){
+  return new Promise(resolve=>{
+    const overlay=h('div',{class:'modalOverlay'});
+    const done=v=>{ overlay.remove(); resolve(v); };
+    const btn=(side,name)=>h('button',{class:'btn '+(side==='home'?'btn-primary':'btn-gold')+' btn-block',style:'margin-bottom:10px;padding:14px;font-size:15px;',onclick:()=>done(side)},[(side==='home'?'Home — ':'Away — ')+name, current===side?' (current)':'']);
+    overlay.appendChild(h('div',{class:'modalSheet'},[
+      h('div',{class:'modalHandle'}), h('h3',{},'Who’s keeping score?'),
+      h('p',{style:'font-size:13px;color:var(--ink-soft);line-height:1.5;margin:0 0 14px;'},'Only one team keeps the official scorecard for this game, so nothing gets entered twice. The other team follows along on Live Feed and can challenge any play they think is wrong.'),
+      btn('home',homeName), btn('away',awayName),
+      h('button',{class:'btn btn-outline btn-block',onclick:()=>done(null)},'Cancel')
+    ]));
+    overlay.addEventListener('click',e=>{ if(e.target===overlay) done(null); });
+    document.body.appendChild(overlay);
+  });
+}
+function setAtBatZoneModal(game, ab){
+  let z=ab.zone||null;
+  const overlay=h('div',{class:'modalOverlay'});
+  const save=h('button',{class:'btn btn-gold btn-sm'},'Save');
+  overlay.appendChild(h('div',{class:'modalSheet'},[h('div',{class:'modalHandle'}), h('div',{class:'modalTitleRow'},[h('h3',{style:'margin:0;'},'Hit location — '+playerInitialLast(playerName(game,ab.playerId))), save]), h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:4px 0 8px;'},((RESULTS[ab.result]||{}).label||ab.result)+' · '+halfLabel(ab)), zonePickerSVG(v=>{ z=v; }, z)]));
+  save.addEventListener('click', async()=>{ if(!z){ toast('Tap a zone'); return; } const atbats=(game.atbats||[]).map(a=>a.id===ab.id?{...a,zone:z}:a); game.atbats=atbats; await updateDoc(gameDoc(game),{atbats}); overlay.remove(); toast('Hit location saved'); renderShell(); });
+  overlay.addEventListener('click',e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+function challengeModal(game){
+  const overlay=h('div',{class:'modalOverlay'});
+  const sel=h('select',{}); sel.appendChild(h('option',{value:''},'Pick the play…'));
+  (game.atbats||[]).slice().reverse().forEach(a=>sel.appendChild(h('option',{value:a.id},playLabel(game,a))));
+  sel.appendChild(h('option',{value:'__missing'},'A play/at-bat is MISSING'));
+  sel.appendChild(h('option',{value:'__other'},'Something else (score, outs, runners)'));
+  const why=h('textarea',{rows:3,placeholder:'What should it be? e.g. “That was a single to left, not an error”',style:'width:100%;margin-top:10px;'});
+  overlay.appendChild(h('div',{class:'modalSheet'},[
+    h('div',{class:'modalHandle'}), h('h3',{},'⚑ Challenge a play'),
+    h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'The scorekeeper ('+game[scorekeeperSide(game)].name+') and the league admin are alerted. The scorer fixes the play if they agree; both teams can see the result.'),
+    sel, why,
+    h('div',{style:'display:flex;gap:10px;margin-top:14px;'},[
+      h('button',{class:'btn btn-outline',style:'flex:1;',onclick:()=>overlay.remove()},'Cancel'),
+      h('button',{class:'btn btn-primary',style:'flex:1;',onclick:async()=>{
+        if(!sel.value){ toast('Pick the play you’re challenging'); return; }
+        if(!why.value.trim()){ toast('Say what it should be'); return; }
+        const a=(game.atbats||[]).find(x=>x.id===sel.value);
+        const c={ id:uid(), atbatId:a?a.id:null, playText:a?playLabel(game,a):(sel.value==='__missing'?'Missing play/at-bat':'Other'), reason:why.value.trim(), byTeamId:myTeamId()||null, byTeamName:(myGameSide(game)?game[myGameSide(game)].name:'League admin'), byEmail:(S.user&&S.user.email)||'', status:'open', createdAt:Date.now() };
+        await updateDoc(gameDoc(game),{challenges:arrayUnion(c)}); overlay.remove(); toast('Challenge sent to the scorekeeper');
+      }},'Send challenge')
+    ])
+  ]));
+  overlay.addEventListener('click',e=>{ if(e.target===overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+async function resolveChallenge(game, id, status, note){
+  const list=(game.challenges||[]).map(c=>c.id===id?{...c,status,resolvedNote:note||'',resolvedBy:(S.user&&S.user.email)||'',resolvedAt:Date.now()}:c);
+  await updateDoc(gameDoc(game),{challenges:list});
+  toast(status==='accepted'?'Challenge accepted — fix the play on the scorecard':(status==='withdrawn'?'Challenge withdrawn':'Challenge rejected'));
+}
+function gameIntegrityCard(game, opts){
+  opts=opts||{};
+  const scorer=canScoreGame(game), chall=canChallengeGame(game);
+  const kSide=scorekeeperSide(game);
+  const card=h('div',{class:'card'});
+  card.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;'},[
+    h('span',{style:'font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--ink-soft);font-weight:700;'},'Official scorekeeper'),
+    h('span',{class:'pill-role'},(kSide==='home'?'Home — ':'Away — ')+game[kSide].name),
+    isAdmin()&&!game.completed?h('button',{class:'btn btn-outline btn-sm',onclick:async()=>{ const v=await chooseScorekeeperModal(game.home.name,game.away.name,kSide); if(v&&v!==kSide){ await updateDoc(gameDoc(game),{scorekeeperSide:v,scorekeeperSetBy:(S.user&&S.user.email)||null,scorekeeperSetAt:Date.now()}); toast('Scorekeeper changed'); } }},'Change'):null
+  ]));
+  if(!opts.feed && !scorer) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.5;'},'View only — '+game[kSide].name+' is keeping score for this game. See something wrong? Challenge the play below.'));
+  const issues=gameEntryIssues(game);
+  if(issues.length){
+    const box=h('div',{class:'alertBanner warn',style:'flex-direction:column;align-items:stretch;margin:10px 0 0;'});
+    box.appendChild(h('div',{style:'font-weight:800;'},'⚠️ Missing entries ('+issues.length+')'));
+    issues.forEach(it=>{
+      const ab=(game.atbats||[]).find(a=>a.id===it.atbatId);
+      box.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;border-top:1px solid rgba(0,0,0,0.08);padding-top:6px;'},[
+        h('span',{style:'flex:1 1 200px;font-size:12.5px;'},it.text),
+        scorer&&it.kind==='zone'&&ab?h('button',{class:'btn btn-gold btn-sm',onclick:()=>setAtBatZoneModal(game,ab)},'Add location'):null,
+        scorer?h('button',{class:'btn btn-outline btn-sm',onclick:()=>updateDoc(gameDoc(game),{ackedIssues:arrayUnion(it.key)})},'It’s correct'):null
+      ]));
+    });
+    card.appendChild(box);
+  }
+  const open=openChallenges(game);
+  const closed=(game.challenges||[]).filter(c=>c.status!=='open').slice(-4).reverse();
+  if(open.length){
+    const box=h('div',{class:'alertBanner',style:'flex-direction:column;align-items:stretch;margin:10px 0 0;cursor:default;'});
+    box.appendChild(h('div',{style:'font-weight:800;'},'⚑ Open challenges ('+open.length+')'));
+    open.forEach(c=>{
+      const mine=(S.user&&S.user.email)===c.byEmail;
+      box.appendChild(h('div',{style:'border-top:1px solid rgba(0,0,0,0.08);padding-top:6px;font-size:12.5px;'},[
+        h('div',{},[h('b',{},c.byTeamName+': '), c.playText]),
+        h('div',{style:'font-style:italic;margin:2px 0 6px;'},'“'+c.reason+'”'),
+        h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;'},[
+          scorer?h('button',{class:'btn btn-primary btn-sm',onclick:()=>{ resolveChallenge(game,c.id,'accepted',''); const a=(game.atbats||[]).find(x=>x.id===c.atbatId); if(a && !opts.feed) setTimeout(()=>cellDetailModal(game,a),300); }},'Accept & fix'):null,
+          scorer?h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ const n=prompt('Reason for rejecting (both teams will see it):',''); if(n!==null) resolveChallenge(game,c.id,'rejected',n); }},'Reject'):null,
+          mine&&!scorer?h('button',{class:'btn btn-outline btn-sm',onclick:()=>resolveChallenge(game,c.id,'withdrawn','')},'Withdraw'):null,
+          !scorer&&!mine?h('span',{style:'font-size:11.5px;color:var(--ink-soft);'},'Waiting for the scorekeeper'):null
+        ])
+      ]));
+    });
+    card.appendChild(box);
+  }
+  if(closed.length){
+    card.appendChild(h('div',{style:'margin-top:8px;font-size:11.5px;color:var(--ink-soft);'}, closed.map(c=>h('div',{},['⚑ '+c.byTeamName+' — '+c.playText+': ', h('b',{},c.status), c.resolvedNote?' (“'+c.resolvedNote+'”)':'']))));
+  }
+  if(chall && !game.completed) card.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:10px;',onclick:()=>challengeModal(game)},'⚑ Challenge a play'));
+  return card;
+}
+function myGameAlerts(){
+  if(!S.user||!S.profile) return [];
+  const t=myTeamId();
+  return (S.allGamesForFeed||[]).filter(g=>!g.completed && (isAdmin() || (t && (sideTeamId(g,'home')===t || sideTeamId(g,'away')===t)))).map(g=>{ const inGame=!!(t && (sideTeamId(g,'home')===t || sideTeamId(g,'away')===t)); return {g, ch:openChallenges(g).length, iss:inGame?gameEntryIssues(g).length:0}; }).filter(x=>x.ch||x.iss);
+}
+let lastChallengeCount=null;
 Router.register('scorecard', (root)=>{
   if(!S.selectedTeamId && !isAdmin()){ root.appendChild(emptyState('No team assigned','Ask your commissioner to assign you a team.','diamond')); return; }
-  const canEdit = canEditTeam();
+  let canEdit = canEditTeam();
   const game = currentGame();
 
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Scorecard'), h('p',{}, game ? (formatDate(game.date)+'  ·  '+game.away.name+' at '+game.home.name) : 'Pick a scheduled game to start scoring.')]));
@@ -1542,10 +1776,12 @@ Router.register('scorecard', (root)=>{
     return;
   }
 
+  canEdit = canScoreGame(game);
   root.appendChild(h('div',{class:'card',style:'display:flex;justify-content:space-between;align-items:center;'},[
     h('span',{style:'font-size:13px;color:var(--ink-soft);'},'Playing a scheduled game'),
     h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.activeGameId=null; renderShell(); }},'Switch Game')
   ]));
+  root.appendChild(gameIntegrityCard(game));
 
   root.appendChild(liveDiamondCard(game, canEdit));
   if(canEdit){
@@ -1771,6 +2007,7 @@ function cellDetailModal(game, ab){
     h('div',{class:'modalHandle'}), h('h3',{}, playerName(game,ab.playerId)+' — Inning '+ab.inning),
     h('p',{style:'font-size:14px;color:var(--ink-soft);margin:0 0 6px;'}, RESULTS[ab.result].label+(ab.zone?' · '+zoneLabel(ab.zone):'')),
     h('p',{style:'font-size:13px;color:var(--ink-soft);margin:0 0 18px;'}, ab.rbi?ab.rbi+' RBI':'No RBI'),
+    IN_PLAY.includes(ab.result) ? h('button',{class:'btn btn-outline btn-block',style:'margin-bottom:10px;',onclick:()=>{overlay.remove(); setAtBatZoneModal(game,ab);}}, ab.zone?'Change hit location':'Add hit location') : null,
     ab.runsScored>0 ? h('button',{class:'btn btn-outline btn-block',style:'margin-bottom:10px;',onclick:()=>{overlay.remove(); correctScoredRunModal(game,ab);}},'A runner was out at home instead') : null,
     h('button',{class:'btn btn-danger btn-block',onclick:()=>{ deleteAtBat(game,ab.id).then(()=>renderShell()); overlay.remove(); }},'Delete this at-bat')
   ]);
@@ -1822,8 +2059,9 @@ function openAtBatModal(game, presetPlayer, presetInning, presetSide){
   }
   saveBtn.addEventListener('click', async ()=>{
     if(!selectedResult){ toast('Pick a result'); return; }
-    await recordAtBat(game, selectedPlayer.id, selectedResult, selectedZone);
-    overlay.remove(); toast(RESULTS[selectedResult].label+' recorded'); renderShell();
+    const doSave=async()=>{ await recordAtBat(game, selectedPlayer.id, selectedResult, selectedZone); overlay.remove(); toast(RESULTS[selectedResult].label+' recorded'); renderShell(); };
+    if(IN_PLAY.includes(selectedResult) && !selectedZone){ confirmModal('No hit location picked','Save this at-bat without a hit location? Both teams will see a \u201cmissing entry\u201d alert until a location is added.',doSave,{confirmLabel:'Save anyway'}); return; }
+    await doSave();
   });
   overlay.appendChild(sheet); overlay.addEventListener('click',e=>{if(e.target===overlay)overlay.remove();}); document.body.appendChild(overlay);
 }
@@ -1982,8 +2220,8 @@ Router.register('hitzone', (root)=>{
     fbar.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Team'),teamSel]));
   }
   const seasonPlayers = hzStats.filter(p=>hz.team==='all'||p.teamId===hz.team).slice().sort((a,b)=>a.name.localeCompare(b.name));
-  const playerSel=searchSelect({ value:hz.player, placeholder:'All players \u2014 type a name', options:[{value:'all',label:'All players'}].concat(seasonPlayers.map(sp=>({value:sp.key,label:sp.name+(hz.team==='all'&&isAdmin()?' ('+sp.teamName+')':'')}))), onChange:v=>{ hz.player=v; hz.selectedZone=null; renderShell(); } });
-  fbar.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Player'),playerSel]));
+  const hzOptions = reportPlayerOptions(hz.team, hzStats);
+  fbar.appendChild(h('div',{class:'fieldRow'}, playerPickerField(hz.player, hz.team, hzStats, hz.team==='all'&&isAdmin(), v=>{ hz.player=v; hz.selectedZone=null; renderShell(); })));
   filterCard.appendChild(fbar); root.appendChild(filterCard);
 
   let entries = seasonPlayers;
@@ -2004,9 +2242,9 @@ Router.register('hitzone', (root)=>{
     detail.appendChild(h('div',{class:'hzZoneDetailInner'},[h('span',{class:'hzZoneDetailLbl'},z.label), h('span',{class:'hzZoneDetailCount'},String(counts[z.id]||0)+' hit'+((counts[z.id]||0)===1?'':'s'))])); }
   renderZoneDetail(); mapCard.appendChild(detail); root.appendChild(mapCard);
 
-  if(!total){ root.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);text-align:center;padding:10px;'},'No balls in play recorded for this filter yet.')); return; }
+  if(!total){ const pn=hz.player!=='all'?(hzOptions.find(p=>p.key===hz.player)||{}).name:null; root.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);text-align:center;padding:10px;'}, pn?('No balls in play recorded for '+pn+' yet.'):'No balls in play recorded for this filter yet.')); return; }
   const groups=[['Catcher','CATCH'],['Infield','IF'],['Short outfield','SOF'],['Deep outfield','DOF'],['Foul (L)','FOULL'],['Foul (R)','FOULR']];
-  const tableCard=h('div',{class:'card'}); tableCard.appendChild(h('h3',{}, hz.player!=='all' ? (seasonPlayers.find(p=>p.key===hz.player)||{}).name || 'Player' : ((hz.team==='all'?'All teams':teamNameById(hz.team))+' — breakdown')));
+  const tableCard=h('div',{class:'card'}); tableCard.appendChild(h('h3',{}, hz.player!=='all' ? (hzOptions.find(p=>p.key===hz.player)||{}).name || 'Player' : ((hz.team==='all'?'All teams':teamNameById(hz.team))+' — breakdown')));
   groups.forEach(([label,prefix])=>{
     const zs=ZONES.filter(z=>z.id.startsWith(prefix));
     const gt=h('table',{class:'dataTable zoneTable'}); const hr=h('tr',{},[h('th',{},label)]); zs.forEach(z=>hr.appendChild(h('th',{},z.short))); gt.appendChild(hr);
@@ -2447,6 +2685,10 @@ function signupAdminView(root){
   const list=h('div',{class:'card'});
   const rows=seasonSignups();
   list.appendChild(h('h3',{},['Sign-ups', h('span',{style:'font-size:11px;color:var(--ink-soft);font-weight:600;'},rows.length+' \u00b7 '+rows.filter(x=>x.agreedTerms).length+' accepted terms \u00b7 '+rows.filter(x=>x.paid).length+' paid')]));
+  { const others=S.signups.filter(x=>x.seasonId!==S.currentSeasonId && (!S.currentLeagueId||x.leagueId===S.currentLeagueId) && !x.isTest);
+    const bySeason={}; others.forEach(x=>{ bySeason[x.seasonId]=(bySeason[x.seasonId]||0)+1; });
+    Object.entries(bySeason).forEach(([sid,n])=>{ const sn=(S.seasons.find(z=>z.id===sid)||{}).name||'another season'; list.appendChild(h('div',{class:'alertBanner',onclick:()=>{ S.currentSeasonId=sid; switchSeasonListeners(); renderShell(); }},[h('span',{},'\u2139\ufe0f'), h('span',{style:'flex:1;'},n+' sign-up'+(n===1?' is':'s are')+' filed under '+sn+'.'), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Show \u2192')])); });
+  }
   if(!rows.length) list.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No sign-ups yet.'));
   else {
     const t=h('table',{class:'dataTable',style:'min-width:620px;'});
@@ -2467,6 +2709,52 @@ function signupAdminView(root){
     const sw=h('div',{class:'gridScroll'}); sw.appendChild(t); list.appendChild(sw);
   }
   root.appendChild(list);
+}
+function approveAccount(u, role, teamId){
+  const patch={role, leagueId:u.leagueId||S.currentLeagueId||null, approvedAt:Date.now(), approvedBy:(S.user&&S.user.email)||null};
+  if(role==='manager'){ patch.teamId=teamId||null; }
+  return updateDoc(doc(db,'users',u.id),patch).then(async()=>{
+    if(role==='manager' && teamId) await updateDoc(doc(db,'teams',teamId),{managerUserId:u.id, pendingManagerEmail:null});
+    toast((u.displayName||u.email)+' approved as '+(role==='viewer'?'player':role));
+  });
+}
+function approvalsView(root){
+  const pend=pendingAccounts();
+  const c1=h('div',{class:'card'});
+  c1.appendChild(h('h3',{},['App accounts waiting for approval', h('span',{style:'font-size:11px;color:var(--ink-soft);font-weight:600;'},String(pend.length))]));
+  c1.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'People who tapped “Need an account? Sign up.” They see an “Account Pending” screen until you approve them. Player = view-only; Manager = runs one team; Admin = league admin.'));
+  if(!pend.length) c1.appendChild(h('p',{style:'font-size:13px;'},'✓ Nobody waiting.'));
+  pend.forEach(u=>{
+    const lg=S.leagues.find(l=>l.id===u.leagueId);
+    const teamSel=h('select',{style:'max-width:160px;'}); teamSel.appendChild(h('option',{value:''},'Team…')); S.teams.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(t=>teamSel.appendChild(h('option',{value:t.id},t.name)));
+    c1.appendChild(h('div',{style:'border-bottom:1px solid var(--line);padding:10px 0;'},[
+      h('div',{style:'font-weight:700;font-size:14px;'},u.displayName&&u.displayName!==(u.email||'').split('@')[0]?u.displayName+' · '+u.email:u.email),
+      h('div',{style:'font-size:11.5px;color:var(--ink-soft);margin:2px 0 8px;'},[(u.createdAt?'Signed up '+new Date(u.createdAt).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'Signed up earlier'), ' · ', lg?lg.name:'No league chosen — approving puts them in '+((S.leagues.find(l=>l.id===S.currentLeagueId)||{}).name||'this league')]),
+      h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;align-items:center;'},[
+        h('button',{class:'btn btn-primary btn-sm',onclick:()=>approveAccount(u,'viewer')},'Approve as Player'),
+        teamSel,
+        h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ if(!teamSel.value){ toast('Pick their team first'); return; } approveAccount(u,'manager',teamSel.value); }},'Approve as Manager'),
+        h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Make '+u.email+' a league admin?','Admins can change everything in this league.',()=>approveAccount(u,'admin'))},'Admin'),
+        h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>confirmModal('Decline this account?',u.email+' will see “Account Not Approved.” You can approve them later from League Setup → Users & Roles.',()=>updateDoc(doc(db,'users',u.id),{role:'declined'}),{danger:true,confirmLabel:'Decline'})},'Decline')
+      ])
+    ]));
+  });
+  root.appendChild(c1);
+
+  const fresh=newSeasonSignups();
+  const c2=h('div',{class:'card'});
+  c2.appendChild(h('h3',{},['New season sign-ups', h('span',{style:'font-size:11px;color:var(--ink-soft);font-weight:600;'},String(fresh.length))]));
+  c2.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Players who used “New player? Sign up for the season.” They don’t have app accounts yet. Personal invite codes are created on the Sign-up list — usually after the draft — and sent by Email or Text from there.'));
+  if(!fresh.length) c2.appendChild(h('p',{style:'font-size:13px;'},'✓ No new sign-ups since you last checked.'));
+  fresh.forEach(x=>{
+    const sn=(S.seasons.find(z=>z.id===x.seasonId)||{}).name;
+    c2.appendChild(h('div',{class:'gameListRow'},[h('div',{},[h('div',{class:'glTeams'},x.name||'—'), h('div',{class:'glDate'},[x.email||'',x.phone?' · '+x.phone:'',sn?' · '+sn:'',x.createdAt?' · '+new Date(x.createdAt).toLocaleDateString():''].join(''))]), h('span',{class:x.paid?'pill-role':'pill-gold'},x.paid?'Paid':'Unpaid')]));
+  });
+  c2.appendChild(h('div',{style:'display:flex;gap:8px;margin-top:10px;'},[
+    h('button',{class:'btn btn-gold btn-sm',style:'flex:1;',onclick:()=>{ const sid=fresh[0]&&fresh[0].seasonId; if(sid && sid!==S.currentSeasonId){ S.currentSeasonId=sid; switchSeasonListeners(); } adminSub='signup'; renderShell(); }},'Open Sign-up list'),
+    fresh.length?h('button',{class:'btn btn-outline btn-sm',style:'flex:1;',onclick:()=>{ markSignupsSeen(); renderShell(); }},'Mark all as seen'):null
+  ]));
+  root.appendChild(c2);
 }
 function playerEvalView(root){
   const rows=seasonSignups(); const prior=priorStatsByName();
@@ -2806,6 +3094,27 @@ function leaguePlayerStats(games){
     return {...sp, GP:sp.games.length, ...agg, ...extra};
   }).filter(r=>r.AB>0 || r.BB>0);
 }
+function lastNameKey(n){ const parts=(n||'').trim().toLowerCase().split(/\s+/); return (parts[parts.length-1]||'')+' '+parts.slice(0,-1).join(' '); }
+function reportPlayerOptions(teamFilter, statPlayers){
+  const teamIds=new Set(S.teams.map(t=>t.id)); const sid=S.currentSeasonId; const map=new Map();
+  (S.allPlayersForFeed||[]).forEach(p=>{
+    if(!p.name||!p.name.trim()||!teamIds.has(p.teamId)) return;
+    if(sid && p.seasonId && p.seasonId!==sid) return;
+    if(!isAdmin() && p.teamId!==S.selectedTeamId) return;
+    if(teamFilter && teamFilter!=='all' && p.teamId!==teamFilter) return;
+    map.set(p.id,{key:p.id,name:p.name.trim(),teamId:p.teamId,teamName:teamNameById(p.teamId)});
+  });
+  (statPlayers||[]).forEach(p=>{ if(teamFilter && teamFilter!=='all' && p.teamId!==teamFilter) return; if(!map.has(p.key)) map.set(p.key,{key:p.key,name:p.name,teamId:p.teamId,teamName:p.teamName}); });
+  return [...map.values()].sort((a,b)=>lastNameKey(a.name).localeCompare(lastNameKey(b.name)));
+}
+function playerPickerField(value, teamFilter, statPlayers, showTeam, onPick){
+  const ps=reportPlayerOptions(teamFilter, statPlayers);
+  const pwrap=h('div',{style:'flex:1 1 180px;'});
+  pwrap.appendChild(h('div',{style:'font-size:10px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;'},'Player \u2014 type a letter or name'));
+  pwrap.appendChild(searchSelect({ value, placeholder:'All players \u2014 type a letter or name', options:[{value:'all',label:'All players'}].concat(ps.map(p=>({value:p.key,label:p.name+(showTeam&&p.teamName?' ('+p.teamName+')':'')}))), onChange:onPick }));
+  if(value && value!=='all') pwrap.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin-top:6px;',onclick:()=>onPick('all')},'\u2715 Show all players'));
+  return pwrap;
+}
 function statFilterBar(opts){
   const bar=h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;'});
   const mk=(label, current, choices, onChange)=>{
@@ -2824,11 +3133,7 @@ function statFilterBar(opts){
   if(opts.teams && isAdmin() && rptView==='h2h') bar.appendChild(mk('Team B', rptTeamB, [{value:'',label:'Select…'}].concat(S.teams.filter(t=>t.id!==rptTeam).map(t=>({value:t.id,label:t.name}))), v=>{ rptTeamB=v; }));
   if(opts.players && rptView!=='players') opts.players=null;
   if(opts.players){
-    const ps = opts.players.filter(p=>rptTeam==='all'||p.teamId===rptTeam).slice().sort((a,b)=>a.name.localeCompare(b.name));
-    const pwrap=h('div',{style:'flex:1 1 160px;'});
-    pwrap.appendChild(h('div',{style:'font-size:10px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;'},'Player'));
-    pwrap.appendChild(searchSelect({ value:rptPlayer, placeholder:'All players \u2014 type a name', options:[{value:'all',label:'All players'}].concat(ps.map(p=>({value:p.key,label:p.name+(rptTeam==='all'?' ('+p.teamName+')':'')}))), onChange:v=>{ rptPlayer=v; renderShell(); } }));
-    bar.appendChild(pwrap);
+    bar.appendChild(playerPickerField(rptPlayer, rptTeam, opts.players, rptTeam==='all', v=>{ rptPlayer=v; renderShell(); }));
   }
   if(opts.stat) bar.appendChild(mk('Stat', rptStat, STAT_KEYS.map(k=>({value:k,label:k})), v=>{ rptStat=v; }));
   if(opts.period) bar.appendChild(mk('Period', rptPeriod, [{value:'week',label:'Week'},{value:'month',label:'Month'},{value:'quarter',label:'Quarter'}], v=>{ rptPeriod=v; }));
@@ -2868,7 +3173,7 @@ function battingReportCard(games, title){
     return card;
   }
   let rows = stats.filter(p=>(rptTeam==='all'||p.teamId===rptTeam) && (rptPlayer==='all'||p.key===rptPlayer)).sort((a,b)=>b[rptStat]-a[rptStat]);
-  if(!rows.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No completed games with at-bats yet.')); return card; }
+  if(!rows.length){ const pn=rptPlayer!=='all'?(reportPlayerOptions('all',stats).find(p=>p.key===rptPlayer)||{}).name:null; card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'}, pn?('No at-bats recorded yet for '+pn+' in completed games this season.'):'No completed games with at-bats yet.')); return card; }
   if(rptPlayer!=='all'){
     const r=rows[0];
     card.appendChild(h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;'}, ['AVG','OBP','SLG','H','RBI','HR'].map(k=>h('div',{style:'flex:1 1 80px;background:var(--chalk-2);border-radius:10px;padding:10px;text-align:center;'},[
@@ -3181,6 +3486,7 @@ Router.register('feed', (root)=>{
   if(!feedCallsPrimed){ (game.atbats||[]).forEach(a=>{ if(!(a.ts && Date.now()-a.ts<FEED_ANNOUNCE_WINDOW_MS)) seenCallIds.add(a.id); }); feedCallsPrimed=true; }
   { const fresh=recent.filter(a=>!seenCallIds.has(a.id)); if(fresh.length){ fresh.forEach(x=>seenCallIds.add(x.id)); if(geezerVoiceOn) geezerToast(fresh.map(a=>plainCall(game,a)).join('  \u00b7  ')); } }
   root.appendChild(lineScoreCard(game));
+  { const ic=gameIntegrityCard(game,{feed:true}); if(game.scorekeeperSide || gameEntryIssues(game).length || (game.challenges||[]).length || canChallengeGame(game)) root.appendChild(ic); }
   { const last=(game.atbats||[]).slice().sort((a,b)=>(a.ts||0)-(b.ts||0)).pop();
     if(last) root.appendChild(h('div',{class:'card',style:'display:flex;align-items:center;gap:12px;background:var(--grass-1);color:var(--chalk);'},[
       h('img',{src:GEEZER_FACE,alt:'',style:'width:44px;height:44px;border-radius:50%;flex:none;'}),
@@ -3324,6 +3630,10 @@ function rulesAdminView(root){
 let helpOpen=false, helpLog=[];
 const HELP_RESTRICTED = ['how was','how is','how did','who made','who built','who created','who designed','who wrote','built','build','coded','code','coding','program','programmed','developer','develop','designed','design of','architecture','database','firebase','firestore','server','backend','api','source','html','javascript','css','script','algorithm','formula','stored','storage','encrypt','security rules','hack','bypass','password for','admin password','login as','confidential','proprietary','secret','revenue','pricing','price','cost','sell','sponsor list','email list','phone list','all emails','everyone’s','everyones','someone else','other player’s','claude','chatgpt','openai','anthropic','ai model','llm','prompt','license','copyright','company','owner','business plan','contract','invoice'];
 const HELP_KB = [
+  {k:'scorekeeper keeping score home away who scores', q:'Who keeps score?', a:'One team per game. When a game is started, pick Home or Away as the official scorekeeper. The other team is view-only and can challenge plays. Admins can change the scorekeeper on the Scorecard.'},
+  {k:'challenge wrong play dispute correct missing entry alert', q:'How do I challenge a play?', a:'Scorecard or Live Feed → ⚑ Challenge a play → pick the play (or “missing at-bat”) → say what it should be → Send. The scorekeeper can Accept & fix or Reject.'},
+  {k:'approve new sign in pending account registration alert', q:'How do I approve new accounts?', a:'Admin → New Sign-ins. Tap Approve as Player, pick a team and Approve as Manager, or Decline. The bell badge shows how many are waiting.'},
+  {k:'alternate super admin backup away', q:'Can someone cover for the Super Admin?', a:'Super Admin → Access → enter the alternate’s email, optional dates, switch it on, and Save.'},
   {k:'start score game scorecard begin scoring', q:'How do I start scoring a game?', a:'Scorecard tab → tap the scheduled game → Score. Both rosters load automatically. Only that team’s manager or an admin can start it.'},
   {k:'record at-bat atbat hit out plate appearance', q:'How do I record an at-bat?', a:'On the Scorecard tap “Record at-bat”, or tap the empty grid box for that player and inning. For a ball in play, pick where it landed on the field diagram.'},
   {k:'runner base move wrong drag', q:'How do I fix a runner on the wrong base?', a:'Drag the runner on the Base Diagram to the correct base, or to home plate to score them.'},
@@ -3399,7 +3709,9 @@ function renderHelpWidget(){
 let qaOpenItem=null;
 const FAQ_DATA = [
   { category:'Getting started', items:[
-    { q:'How do I get an account?', a:'Tap “Need an account? Sign up” on the sign-in screen and enter the invite code your league sent you (or the league code if you’re a manager or admin). Every account accepts the Terms of Use & Privacy Notice at sign-up.' },
+    { q:'How do I get an account?', a:'Tap “Need an account? Sign up,” pick your league from the list, and enter your email and a password. If you were given a personal invite code, add it. Your league admin gets an alert and approves you — until then you’ll see “Account Pending.”' },
+    { q:'Who keeps score?', a:'Only one team keeps the official scorecard for each game. Whoever starts the game picks Home or Away as scorekeeper; the league admin can change it. The other team watches on Live Feed.' },
+    { q:'What if a play was scored wrong or missed?', a:'Managers of the other team tap “⚑ Challenge a play” on the Scorecard or Live Feed. The scorekeeper sees it right away and can Accept & fix or Reject with a reason. Both teams see the outcome. The app also flags missing hit locations and skipped batters automatically.' },
     { q:'How do players register for the season?', a:'From the sign-in screen, tap “Player Sign-up for the season.” No account is needed — just the league code, your name, age, email, phone, and preferred position. The league admin sets the sign-up window.' },
     { q:'What do the Admin, Manager and Player badges on each tab mean?', a:'They show the lowest role that can make changes on that tab. Admin edits everything league-wide; a Manager edits only their own team; Players can view everything but change nothing.' },
     { q:'What does a manager see vs. an admin?', a:'A manager’s tabs are automatically locked to their team — their schedule, lineups, and games. An admin sees the whole league and picks the game they want to work on.' }
@@ -3775,13 +4087,56 @@ function adForm(a){
 }
 
 /* ===================== SUPER ADMIN TAB ===================== */
+function superAccessView(root){
+  const a=S.accessConfig||{};
+  const primary=isPrimarySuperAdmin();
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Super Admin'));
+  card.appendChild(h('div',{class:'gameListRow'},[
+    h('div',{},[h('div',{class:'glTeams'},SUPER_ADMIN_EMAIL), h('div',{class:'glDate'},'Permanent Super Admin — full access to every league. This can’t be changed or removed, and the role can’t be edited from Admin.')]),
+    h('span',{class:'pill-super'},'Permanent')
+  ]));
+  root.appendChild(card);
+
+  const alt=h('div',{class:'card'}); alt.appendChild(h('h3',{},'Alternate Super Admin'));
+  alt.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;'},'Name a backup to cover when you’re away. While switched on (and within the dates, if you set them) they get full Super Admin access. You always stay the Super Admin, and the alternate can’t change this card or your access. They need an app account with this email.'));
+  const st=altSuperStatus();
+  const stLabel={none:['Not set','pill-warn'],off:['Off','pill-warn'],scheduled:['Scheduled — starts '+(a.altFrom?formatDate(a.altFrom):''),'pill-gold'],expired:['Expired','pill-warn'],active:['Active now','pill-role']}[st];
+  alt.appendChild(h('div',{style:'margin-bottom:10px;'},[h('span',{style:'font-size:11px;color:var(--ink-soft);margin-right:6px;'},'Status:'),h('span',{class:stLabel[1]},stLabel[0])]));
+  if(!primary){
+    alt.appendChild(h('p',{style:'font-size:12.5px;margin:0;'},'Alternate: '+(a.altEmail||'—')+(a.altUntil?' (until '+formatDate(a.altUntil)+')':'')));
+    alt.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:8px 0 0;'},'Only '+SUPER_ADMIN_EMAIL+' can change this.'));
+    root.appendChild(alt); return;
+  }
+  const em=h('input',{type:'email',placeholder:'alternate@email.com',value:a.altEmail||''});
+  const from=h('input',{type:'date',value:a.altFrom||''});
+  const until=h('input',{type:'date',value:a.altUntil||''});
+  const on=h('input',{type:'checkbox',style:'width:auto;margin-right:8px;'}); if(a.altEnabled) on.checked=true;
+  alt.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Alternate’s email'),em]));
+  alt.appendChild(h('div',{class:'grid2'},[h('div',{class:'fieldRow'},[h('label',{},'From (optional)'),from]), h('div',{class:'fieldRow'},[h('label',{},'Until (optional)'),until])]));
+  alt.appendChild(h('label',{style:'display:flex;align-items:center;font-size:13px;margin:4px 0 12px;'},[on,'Alternate access is ON']));
+  const u=S.usersDirectory.find(x=>(x.email||'').toLowerCase()===(a.altEmail||''));
+  if(a.altEmail) alt.appendChild(h('p',{style:'font-size:11.5px;margin:-4px 0 10px;color:'+(u?'var(--grass-1)':'var(--gold)')+';'}, u?'✓ Has an app account':'No app account yet — they need to sign up with this email.'));
+  alt.appendChild(h('div',{style:'display:flex;gap:8px;'},[
+    h('button',{class:'btn btn-primary',style:'flex:1;',onclick:async()=>{
+      const e=em.value.trim().toLowerCase();
+      if(e && e===SUPER_ADMIN_EMAIL){ toast('That’s you — pick someone else'); return; }
+      if(on.checked && !e){ toast('Enter the alternate’s email'); return; }
+      if(from.value && until.value && until.value<from.value){ toast('“Until” is before “From”'); return; }
+      await setDoc(doc(db,'appConfig','access'),{altEmail:e||null, altFrom:from.value||null, altUntil:until.value||null, altEnabled:on.checked && !!e, updatedAt:Date.now(), updatedBy:S.user.email},{merge:true});
+      toast('Alternate Super Admin saved');
+    }},'Save'),
+    a.altEmail?h('button',{class:'btn btn-outline',onclick:()=>confirmModal('Remove the alternate?','They lose Super Admin access immediately.',()=>setDoc(doc(db,'appConfig','access'),{altEmail:null,altFrom:null,altUntil:null,altEnabled:false,updatedAt:Date.now()},{merge:true}))},'Remove'):null
+  ]));
+  root.appendChild(alt);
+}
 Router.register('superadmin', (root)=>{
   if(!isSuperAdmin()){ root.appendChild(emptyState('Super Admin only','This area is restricted.','diamond')); return; }
-  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Super Admin'),h('p',{},'Cross-league controls — leagues, join codes, master user list, and usage. Only '+SUPER_ADMIN_EMAIL+' can see this tab.')]));
-  const saSubs=[['leagues','Leagues'],['users','Users'],['usage','Usage'],['app','App identity'],['ads','Advertisement']];
+  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Super Admin'),h('p',{},'Cross-league controls — leagues, access, master user list, and usage. Only the Super Admin ('+SUPER_ADMIN_EMAIL+') and an active alternate can see this tab.')]));
+  const saSubs=[['leagues','Leagues'],['access','Access'],['users','Users'],['usage','Usage'],['app','App identity'],['ads','Advertisement']];
   root.appendChild(h('div',{class:'segControl',style:'margin-bottom:14px;'}, saSubs.map(([id,l])=>h('button',{class:superSub===id?'active':'',onclick:()=>{ superSub=id; renderShell(); }},l))));
   if(superSub==='usage'){ usageReportCard(root); return; }
   if(superSub==='ads'){ advertisementView(root); return; }
+  if(superSub==='access'){ superAccessView(root); return; }
   if(superSub==='app'){
     const ab=S.appBranding||{};
     const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'App name & logo'));
@@ -3826,8 +4181,9 @@ Router.register('superadmin', (root)=>{
       toast('Admin set — they get admin rights when they sign up with this email');
     }
   };
-  const ltable=h('table',{class:'dataTable',style:'min-width:720px;'});
-  ltable.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'League'),h('th',{style:'text-align:left;'},'Admin'),h('th',{style:'text-align:left;'},'Email'),h('th',{},'Status'),h('th',{},'Join code'),h('th',{},'')]));
+  leagueCard.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:10px 0 0;line-height:1.5;'},'Sign-in page: “Listed” leagues appear in the league drop-down on the sign-in and sign-up screens (hide your test league). “Copy link” gives a link that opens the sign-in page already set to that league — send that link to your players.'));
+  const ltable=h('table',{class:'dataTable',style:'min-width:820px;'});
+  ltable.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'League'),h('th',{style:'text-align:left;'},'Admin'),h('th',{style:'text-align:left;'},'Email'),h('th',{},'Status'),h('th',{},'Sign-in page'),h('th',{},'Join code'),h('th',{},'')]));
   const cellInp=(val,ph)=>h('input',{type:'text',value:val||'',placeholder:ph,style:'padding:6px 8px;font-size:12.5px;min-width:0;'});
   S.leagues.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(lg=>{
     const adminUser=S.usersDirectory.find(u=>u.id===lg.adminUserId);
@@ -3846,6 +4202,10 @@ Router.register('superadmin', (root)=>{
       h('td',{},adminInp),
       h('td',{},[emailInp,state]),
       h('td',{},statusBtn),
+      h('td',{},[
+        h('button',{class:(lg.hideFromSignup||!active)?'pill-warn':'pill-role',style:'border:none;cursor:pointer;',title:'Show this league in the sign-in page league list',onclick:()=>updateDoc(doc(db,'leagues',lg.id),{hideFromSignup:!lg.hideFromSignup})}, (!active)?'Hidden (closed)':(lg.hideFromSignup?'Hidden':'Listed')),
+        h('div',{},h('button',{class:'btn btn-outline btn-sm',style:'margin-top:4px;',onclick:async()=>{ const link=APP_URL.split('?')[0]+'?league='+lg.id; try{ await navigator.clipboard.writeText(link); toast('League link copied'); }catch(e){ prompt('Copy this link:',link); } }},'Copy link'))
+      ]),
       h('td',{},[h('span',{style:'font-family:var(--font-mono);font-weight:700;letter-spacing:1px;'},lg.joinCode||'—'), h('div',{},h('button',{class:'btn btn-outline btn-sm',style:'margin-top:4px;',onclick:async()=>{ await updateDoc(doc(db,'leagues',lg.id),{joinCode:genJoinCode()}); toast('New join code generated'); }},lg.joinCode?'New code':'Generate'))]),
       h('td',{},[ isCur?null:h('button',{class:'btn btn-outline btn-sm',onclick:()=>switchLeague(lg.id)},'Select') ])
     ]);
@@ -3881,9 +4241,11 @@ Router.register('superadmin', (root)=>{
 });
 
 Router.register('admin', (root)=>{
-  const subs=[['setup','League Setup'],['signup','Sign-up list'],['settings','Settings'],['rules','Rules']];
+  const nAlert=adminAlertCount();
+  const subs=[['approvals','New Sign-ins'+(nAlert?' ('+nAlert+')':'')],['setup','League Setup'],['signup','Sign-up list'],['settings','Settings'],['rules','Rules']];
   const seg=h('div',{class:'segControl',style:'margin-bottom:14px;'}, subs.map(([id,label])=>h('button',{class:adminSub===id?'active':'',onclick:()=>{ adminSub=id; renderShell(); }},label)));
   root.appendChild(seg);
+  if(adminSub==='approvals'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'New Sign-ins'),h('p',{},'Approve new app accounts and see who just registered for the season.')])); approvalsView(root); return; }
   if(adminSub==='signup'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Sign-up list'),h('p',{},'Everyone who registered for '+(currentSeasonName()||'this season')+'.')])); signupAdminView(root); return; }
   if(adminSub==='rules'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'League Rules'),h('p',{},'Draft, import, and publish the rules members see.')])); rulesAdminView(root); return; }
   if(adminSub==='settings'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Settings'),h('p',{},'Season controls — schedule, playoffs, sign-up window, roster display, and test data.')])); settingsView(root); return; }
@@ -3985,7 +4347,8 @@ Router.register('admin', (root)=>{
     const row=h('div',{class:'gameListRow'});
     row.appendChild(h('div',{},[h('div',{class:'glTeams'},u.email), h('div',{class:'glDate'}, u.role+(u.teamId?(' · '+((S.teams.find(t=>t.id===u.teamId)||{}).name||'')):''))]));
     const roleSel=h('select',{style:'max-width:110px;'});
-    ['pending','admin','manager','viewer'].forEach(r=>{ const o=h('option',{value:r},r); if(u.role===r) o.setAttribute('selected','selected'); roleSel.appendChild(o); });
+    ['pending','viewer','manager','admin','declined'].forEach(r=>{ const o=h('option',{value:r},r); if(u.role===r) o.setAttribute('selected','selected'); roleSel.appendChild(o); });
+    if((u.email||'').toLowerCase()===SUPER_ADMIN_EMAIL){ roleSel.disabled=true; roleSel.title='Super Admin role cannot be changed'; }
     roleSel.addEventListener('change', ()=>updateDoc(doc(db,'users',u.id),{role:roleSel.value, leagueId: u.leagueId||S.currentLeagueId||null}));
     row.appendChild(roleSel);
     userCard.appendChild(row);
