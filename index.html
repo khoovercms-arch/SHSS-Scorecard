@@ -623,7 +623,7 @@ function leagueLogoCard(){
   const nameInp=h('input',{type:'text',placeholder:'Short name shown in the header (e.g. South Hills)',value:lg.shortName||''});
   nameInp.addEventListener('change',()=>updateDoc(doc(db,'leagues',lg.id),{shortName:nameInp.value.trim()||null}));
   card.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Header name'),nameInp]));
-  card.appendChild(h('p',{style:'font-size:12px;color:var(--leather-2);font-weight:700;margin:6px 0 0;'},'This logo is for '+lg.name+' only. To change another league\u2019s logo, switch leagues first (the gold \u201cViewing league\u201d bar at the top).'));
+  card.appendChild(h('p',{style:'font-size:12px;color:var(--leather-2);font-weight:700;margin:6px 0 0;'},'This logo is for '+lg.name+' only. To change another league\u2019s logo, switch leagues first in Super Admin (the gold \u201cViewing league\u201d bar).'));
   card.appendChild(h('p',{style:'font-size:11px;color:var(--ink-soft);margin:6px 0 0;line-height:1.45;'},'PNG, JPG, WebP or SVG. Upload a large, sharp file \u2014 it\u2019s resized to 512px and shown in the header and on the sign-in page for everyone in this league. Only upload artwork your league has the right to use \u2014 see the Terms.'));
   return card;
 }
@@ -653,12 +653,24 @@ async function linkAccountToSignup(u, x){
   await updateDoc(doc(db,'users',u.id),patch);
 }
 /* ======== Yearly league registration — separate from the login and from season sign-up ======== */
-const DATA_CONSENT_TEXT='I understand and agree that the information I provide (my name, contact details and registration answers) and my game statistics will be stored in Geezer Ball Scorecard; that my league’s administrators can see my registration; that my name, team and statistics are visible to members of my league; and that Geezer Ball Scorecard and my league may share my name and contact details (email and phone) with sponsors, who may contact me with offers.';
+const DATA_CONSENT_TEXT='I understand and agree that the information I provide (my name, contact details and registration answers) and my game statistics will be stored in Geezer Ball Scorecard; that my league’s administrators can see my registration; that my name, team and statistics are visible to members of my league and to other users of the app; and that Geezer Ball Scorecard and my league may share my name and contact details (email and phone) with sponsors, who may contact me with offers.';
+const GBS_RELEASE_TEXT='I understand that Geezer Ball Scorecard is software provided free of charge and “as is” by its owner (the “Software Owner”). To the fullest extent permitted by law, I release and hold harmless the Software Owner and Geezer Ball Scorecard from any and all claims, costs, suits, damages or expenses arising from my use of the app, my participation in league activities, any injury to me or my property, the accuracy of scores, statistics or other information in the app, or the loss or disclosure of information I provide.';
+function leagueReleaseText(lg){ const t=(regFormFor(lg).release||{}).text; const nm=(lg&&lg.name)||'my league';
+  return t || ('As a participant, I release and hold harmless '+nm+', its managers, officers and their successors from any and all claims, costs, suits, actions, judgments or expenses upon any damage, loss or injury to me or to my property which may arise from this activity. I acknowledge that I am fully aware of any and all risks posed by these activities and that I have no medical condition that prevents me from engaging in them.'); }
+const EVAL_POS=['P','C','1B','2B','3B','SS','RV','LF','LCF','RCF','RF','EH'];
+function evalPosList(x){ return String(x.pos||'').split(/[,\/;]+|\s+/).map(v=>v.trim().toUpperCase()).filter(Boolean).map(v=>v==='ROVER'?'RV':v); }
+const REG_DAYS=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+const REG_SHIRTS=['Small','Medium','Large','X-Large','XX-Large','XXX-Large'];
+const REG_VOL=[['umpire','Willing to umpire (umpires are paid)'],['fields','Willing to help with field maintenance'],['manage','Interested in managing a team']];
 const REG_TYPES={text:'Short answer',para:'Paragraph',yesno:'Yes / No',choice:'Choose one',number:'Number',date:'Date'};
 const REG_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
 function regFormFor(lg){ const f=(lg&&lg.regForm)||{}; const st=f.standard||{};
   return { active:f.active!==false, yearStartMonth:+f.yearStartMonth||1,
-    standard:{ age:{on:(st.age||{}).on!==false,req:true}, dob:{on:!!(st.dob||{}).on,req:true}, pos:{on:(st.pos||{}).on!==false,req:true} },
+    standard:{ age:{on:(st.age||{}).on!==false,req:true}, dob:{on:!!(st.dob||{}).on,req:true}, pos:{on:(st.pos||{}).on!==false,req:true},
+      addr:{on:(st.addr||{}).on!==false,req:true}, homePhone:{on:(st.homePhone||{}).on!==false,req:false}, primary:{on:(st.primary||{}).on!==false,req:true},
+      days:{on:(st.days||{}).on!==false,req:true}, unavail:{on:(st.unavail||{}).on!==false,req:false}, shirt:{on:(st.shirt||{}).on!==false,req:true},
+      vol:{on:(st.vol||{}).on!==false,req:true} },
+    release:{ on:(f.release||{}).on!==false, text:(f.release||{}).text||'' },
     questions:(f.questions||[]).map(q=>({...q,required:true})), agreements:(f.agreements||[]).map(a=>({...a,required:true})), certify:f.certify!==false }; }
 function regYear(lg, d){ d=d||new Date(); const m=regFormFor(lg).yearStartMonth; let y=d.getFullYear(); if(d.getMonth()+1<m) y--; return y; }
 function regYearLabel(lg, y){ const m=regFormFor(lg).yearStartMonth; return m===1 ? String(y) : (y+'–'+String((y+1)%100).padStart(2,'0')); }
@@ -682,19 +694,43 @@ function buildRegFields(box, lg, o){
   const st=F.standard;
   if(st.age.on){ const i=mkInput('std_age','number','Your age today',null); i.setAttribute('inputmode','numeric'); field('std_age','Age',st.age.req,i,()=>i.value.trim()); }
   if(st.dob.on){ const i=mkInput('std_dob','date','',P.dob); field('std_dob','Date of birth',st.dob.req,i,()=>i.value); }
-  if(st.pos.on){ const i=mkInput('std_pos','text','e.g. SS, LF, P',P.pos); field('std_pos','Preferred position',st.pos.req,i,()=>i.value.trim()); }
+  // tap-to-pick chips (no keyboard). multi=true → several; returns {el, val()}
+  const chips=(key,opts,init,multi,labelOf)=>{ let cur=D[key]!=null?D[key]:(init==null?(multi?[]:''):init); if(multi&&!Array.isArray(cur)) cur=String(cur||'').split(/,\s*/).filter(Boolean);
+    const el=h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;margin:2px 0 4px;'});
+    const draw=()=>{ el.innerHTML=''; opts.forEach(o=>{ const on=multi?cur.includes(o):cur===o; const n=multi&&on?cur.indexOf(o)+1:0;
+      el.appendChild(h('button',{type:'button',style:'padding:7px 11px;border-radius:16px;cursor:pointer;font-size:13px;font-weight:700;border:1.5px solid '+(on?(dark?'var(--gold);background:var(--gold);color:#1e2a22;':'var(--grass-1);background:var(--grass-1);color:#fff;'):(dark?'rgba(255,255,255,.35);background:rgba(0,0,0,.18);color:#f3efe2;':'var(--line);background:#fff;color:var(--ink);')),
+        onclick:()=>{ if(multi){ if(o==='None') cur=on?[]:['None']; else { cur=cur.filter(v=>v!=='None'); cur=on?cur.filter(v=>v!==o):[...cur,o]; } } else cur=on?'':o; D[key]=cur; draw(); }},[labelOf?labelOf(o):o, n&&opts.length>8?h('sup',{style:'font-size:9px;margin-left:2px;'},String(n)):null])); }); };
+    draw(); return {el, val:()=>multi?(cur.length?cur.slice():''):(cur||'')}; };
+  if(st.pos.on){ const c=chips('std_pos',EVAL_POS,P.pos?evalPosList({pos:P.pos}).filter(v=>EVAL_POS.includes(v)):null,true); field('std_pos','Position(s) you play — main position first',st.pos.req,c.el,c.val); }
+  if(st.addr.on){ const a=P.address||{}; const box2=h('div',{style:'display:grid;grid-template-columns:1fr;gap:6px;'});
+    const street=mkInput('addr_street','text','Street address',a.street), city=mkInput('addr_city','text','Township / city',a.city), state=mkInput('addr_state','text','State',a.state||'PA'), zip=mkInput('addr_zip','text','ZIP code',a.zip); zip.setAttribute('inputmode','numeric'); [street,city,state,zip].forEach(i=>{ i.style.width='100%'; i.style.minWidth='0'; i.style.boxSizing='border-box'; });
+    box2.appendChild(street); box2.appendChild(h('div',{style:'display:grid;grid-template-columns:2fr 1fr 1.2fr;gap:6px;'},[city,state,zip]));
+    field('std_addr','Home address',st.addr.req,box2,()=>{ const o={street:street.value.trim(),city:city.value.trim(),state:state.value.trim(),zip:zip.value.trim()}; return (o.street&&o.city&&o.state&&o.zip)?o:''; }); }
+  if(st.homePhone.on){ const i=mkInput('std_homePhone','tel','Home phone (optional)',P.homePhone); field('std_homePhone','Home phone (optional)',false,i,()=>i.value.trim()); }
+  if(st.primary.on){ const c=chips('std_primary',['Yes','No'],P.primaryLeague||null,false); field('std_primary','Will this be your primary league?',st.primary.req,c.el,c.val); }
+  if(st.days.on){ const c=chips('std_days',REG_DAYS.concat(['None']),null,true,o=>o==='None'?'None — any day is fine':o.slice(0,3)); field('std_days','Days I cannot play (tap all that apply)',st.days.req,c.el,c.val); }
+  if(st.unavail.on){ const i=h('textarea',{rows:'2',placeholder:'e.g. June 10–24 vacation (optional)',style:dark?darkCtl:''}); if(D.std_unavail) i.value=D.std_unavail; i.addEventListener('input',()=>{ D.std_unavail=i.value; }); field('std_unavail','Expected dates I’ll be unavailable (optional)',false,i,()=>i.value.trim()); }
+  if(st.shirt.on){ const c=chips('std_shirt',REG_SHIRTS,P.shirt||null,false); field('std_shirt','Shirt size',st.shirt.req,c.el,c.val); }
+  if(st.vol.on){ const pv=P.volunteer||{}; const parts={};
+    const vb=h('div',{}); REG_VOL.forEach(([k,lab])=>{ const c=chips('vol_'+k,['Yes','No'],pv[k]||null,false); parts[k]=c; vb.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:3px 0;'},[h('span',{style:'flex:1;min-width:180px;font-size:12.5px;'+(dark?'color:#f3efe2;':'')},lab),c.el])); });
+    field('std_vol','Volunteering',st.vol.req,vb,()=>{ const o={}; for(const [k] of REG_VOL){ const v=parts[k].val(); if(!v) return ''; o[k]=v; } return o; }); }
   F.questions.forEach(q=>{ if(!q||!q.label) return; const key='q_'+q.id; const init=q.fresh?null:((P.answers||{})[q.id]); let el, gv;
     if(q.type==='para'){ el=h('textarea',{rows:'2',style:dark?darkCtl:''}); const v=D[key]!=null?D[key]:init; if(v) el.value=v; el.addEventListener('input',()=>{ D[key]=el.value; }); gv=()=>el.value.trim(); }
     else if(q.type==='yesno'){ el=mkSelect(key,['Yes','No'],init); gv=()=>el.value; }
     else if(q.type==='choice'){ el=mkSelect(key,(q.options||[]).filter(Boolean),init); gv=()=>el.value; }
     else { el=mkInput(key,q.type==='number'?'number':(q.type==='date'?'date':'text'),'',init); gv=()=>el.value.trim(); }
     field(key,q.label,!!q.required,el,gv,{qid:q.id}); });
-  box.appendChild(h('div',{style:'font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;margin:12px 2px 2px;'+(dark?'color:#e8e2cf;opacity:.85;':'color:var(--ink-soft);')},'Agreements'));
+  const secHead=(t,sub)=>box.appendChild(h('div',{style:'margin:14px 2px 2px;'},[h('div',{style:'font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;'+(dark?'color:#e8e2cf;opacity:.85;':'color:var(--ink-soft);')},t), sub?h('div',{style:'font-size:11px;'+(dark?'color:#e8e2cf;opacity:.75;':'color:var(--ink-soft);')},sub):null]));
+  secHead((lg&&(lg.shortName||lg.name))+' agreements','Set by your league');
   const cbRow=(key,content,req,label)=>{ const cb=h('input',{type:'checkbox',style:'width:auto;margin:2px 8px 0 0;flex:none;'}); if(D[key]) cb.checked=true; cb.addEventListener('change',()=>{ D[key]=cb.checked; });
     box.appendChild(h('label',{style:'display:flex;align-items:flex-start;font-size:12px;line-height:1.45;margin:6px 2px;'+(dark?'color:#e8e2cf;':'')},[cb,h('span',{},[].concat(content,[req?h('span',{style:'color:'+red+';font-weight:800;'},' *'):null]))]));
     get[key]={label:label||regShort(content,60),req,getv:()=>cb.checked,check:true}; };
   F.agreements.forEach(a=>{ if(a&&a.text) cbRow('ag_'+a.id, a.text, !!a.required); });
+  if(F.release.on) cbRow('c_lgRelease',[h('b',{},'Release of liability. '),h('i',{},leagueReleaseText(lg))],true,'League release of liability');
   cbRow('c_rules','I agree to follow my league’s rules (League Rules in the app).',true,'League rules agreement');
+  // ---- Geezer Ball Scorecard section: the same for every league; permanent (leagues can't remove or edit it) ----
+  secHead('Geezer Ball Scorecard','Required for every player in every league that uses the app');
+  cbRow('c_gbs',[h('b',{},'Geezer Ball Scorecard release. '),GBS_RELEASE_TEXT],true,'Geezer Ball Scorecard release');
   cbRow('c_terms',['I have read and agree to the ', h('a',{href:'#',style:'color:'+(dark?'var(--gold)':'var(--grass-1)')+';text-decoration:underline;',onclick:(e)=>{ e.preventDefault(); termsModal(); }},'Terms of Use & Privacy Notice'),'.'],true,'Terms of Use');
   cbRow('c_data',[h('b',{},'Use of my information. '),DATA_CONSENT_TEXT],true,'Use of my information');
   if(F.certify){
@@ -707,7 +743,11 @@ function buildRegFields(box, lg, o){
     for(const k of Object.keys(get)){ const g=get[k]; const v=g.getv();
       if(g.req && !v) return {error:(g.check?'Please check: ':(g.sig?'Please ':'Please answer: '))+(g.sig?'type your full name to sign':regShort(g.label,60))};
       if(k==='std_age'){ if(v){ const n=parseInt(v); if(!(n>0&&n<120)) return {error:'Please enter a valid age.'}; out.age=n; } }
-      else if(k==='std_dob') out.dob=v||null; else if(k==='std_pos') out.pos=v||'';
+      else if(k==='std_dob') out.dob=v||null; else if(k==='std_pos') out.pos=Array.isArray(v)?v.join(', '):(v||'');
+      else if(k==='std_addr') out.address=v||null; else if(k==='std_homePhone') out.homePhone=v||''; else if(k==='std_primary') out.primaryLeague=v||'';
+      else if(k==='std_days') out.cannotPlay=Array.isArray(v)?v:[]; else if(k==='std_unavail') out.unavailable=v||''; else if(k==='std_shirt') out.shirt=v||''; else if(k==='std_vol') out.volunteer=v||null;
+      else if(k==='c_lgRelease'){ out.consent.leagueRelease=!!v; out.consent.leagueReleaseText=leagueReleaseText(lg); }
+      else if(k==='c_gbs'){ out.consent.gbsRelease=!!v; out.consent.gbsReleaseText=GBS_RELEASE_TEXT; }
       else if(g.qid) out.answers[g.qid]=v;
       else if(k.startsWith('ag_')) out.agreements[k.slice(3)]=!!v;
       else if(k==='c_rules') out.consent.rules=!!v; else if(k==='c_terms') out.consent.terms=!!v; else if(k==='c_data') out.consent.data=!!v;
@@ -722,6 +762,8 @@ async function saveRegistration(uid, lg, base, data){
   await setDoc(doc(db,'registrations',id),{ leagueId:lg.id, year:y, uid, email:normEmail(base.email), name:base.name||'', phone:base.phone||'', ...data,
     formLabels:Object.fromEntries(F.questions.filter(q=>q&&q.label).map(q=>[q.id,q.label])), agreementLabels:Object.fromEntries(F.agreements.filter(a=>a&&a.text).map(a=>[a.id,a.text])),
     createdAt:Date.now(), updatedAt:Date.now() });
+  // the Geezer Ball Scorecard release is app-wide (all leagues): also kept on the player's account
+  if(data.consent && data.consent.gbsRelease){ try{ await updateDoc(doc(db,'users',uid),{gbsReleaseAt:Date.now(), gbsReleaseText:GBS_RELEASE_TEXT}); }catch(e){} }
   return {id,y};
 }
 /* Watch the signed-in player's registration for this registration year */
@@ -814,10 +856,14 @@ function regDetailModal(lg, r){
   sheet.appendChild(h('div',{class:'modalHandle'}));
   sheet.appendChild(h('h3',{},[r.name||r.email, ' ', h('span',{class:'pill-warn',style:'margin-left:6px;'},'Admin only')]));
   const row=(k,v)=>sheet.appendChild(h('div',{style:'display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:12.5px;'},[h('div',{style:'width:42%;color:var(--ink-soft);'},k),h('div',{style:'flex:1;font-weight:600;white-space:pre-wrap;'},v==null||v===''?'—':String(v))]));
-  row('Registration year', regYearLabel(lg,r.year)); row('Email', r.email); row('Cell phone', r.phone); row('Age', r.age); if(r.dob) row(regArcFullDob?'Date of birth':'Birth year', regArcFullDob?formatDate(r.dob):String(r.dob).slice(0,4)); if(r.pos) row('Preferred position', r.pos);
+  row('Registration year', regYearLabel(lg,r.year)); row('Email', r.email); row('Cell phone', r.phone); row('Age', r.age); if(r.dob) row(regArcFullDob?'Date of birth':'Birth year', regArcFullDob?formatDate(r.dob):String(r.dob).slice(0,4)); if(r.pos) row('Position(s)', r.pos);
+  if(r.address) row('Home address', [r.address.street, [r.address.city, r.address.state].filter(Boolean).join(', ')+' '+(r.address.zip||'')].filter(Boolean).join('\n'));
+  if(r.homePhone) row('Home phone', r.homePhone); if(r.primaryLeague) row('Primary league?', r.primaryLeague);
+  if(r.cannotPlay) row('Cannot play on', r.cannotPlay.join(', ')); if(r.unavailable) row('Unavailable dates', r.unavailable); if(r.shirt) row('Shirt size', r.shirt);
+  if(r.volunteer) REG_VOL.forEach(([k,lab])=>row(lab, r.volunteer[k]||'—'));
   Object.entries(r.answers||{}).forEach(([qid,v])=>row((r.formLabels||{})[qid]||((regFormFor(lg).questions.find(q=>q.id===qid)||{}).label)||'Question', v));
   Object.entries(r.agreements||{}).forEach(([aid,v])=>row(regShort((r.agreementLabels||{})[aid]||'Agreement',70), v?'✓ Agreed':'Not checked'));
-  row('League rules', (r.consent||{}).rules?'✓ Agreed':'—'); row('Terms of Use', (r.consent||{}).terms?'✓ Agreed':'—'); row('Use of my information', (r.consent||{}).data?'✓ Agreed':'—');
+  if((r.consent||{}).leagueRelease!=null) row('League release', r.consent.leagueRelease?'✓ Agreed':'—'); row('Geezer Ball Scorecard release', (r.consent||{}).gbsRelease?'✓ Agreed':'—'); row('League rules', (r.consent||{}).rules?'✓ Agreed':'—'); row('Terms of Use', (r.consent||{}).terms?'✓ Agreed':'—'); row('Use of my information', (r.consent||{}).data?'✓ Agreed':'—');
   row('Signature', r.signature?(r.signature.name+' · '+new Date(r.signature.at).toLocaleString()):'—');
   row('Seasons signed up', regSeasonsFor(lg,r).join(', '));
   sheet.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:10px;',onclick:()=>overlay.remove()},'Close'));
@@ -880,7 +926,7 @@ function registrationsReport(root){
   const qMap=new Map(); F.questions.filter(q=>q&&q.label).forEach(q=>qMap.set(q.id,{label:q.label,type:q.type}));
   base.forEach(r=>Object.keys(r.answers||{}).forEach(qid=>{ if(!qMap.has(qid)) qMap.set(qid,{label:(r.formLabels||{})[qid]||'Question',type:'text',old:true}); }));
   const ageBucket=(a)=>{ a=+a; if(!a) return ''; if(a<60) return 'Under 60'; if(a<65) return '60–64'; if(a<70) return '65–69'; if(a<75) return '70–74'; if(a<80) return '75–79'; return '80+'; };
-  const agreedAll=(r)=>!!((r.consent||{}).terms&&(r.consent||{}).data&&(r.consent||{}).rules&&Object.values(r.agreements||{}).every(Boolean));
+  const agreedAll=(r)=>!!((r.consent||{}).terms&&(r.consent||{}).data&&(r.consent||{}).rules&&Object.values(r.agreements||{}).every(Boolean)&&(r.consent||{}).gbsRelease!==false&&(r.consent||{}).leagueRelease!==false);
   cols=[];
   if(yNum==null) cols.push({key:'year',label:'Year',get:r=>regYearLabel(lg,r.year),f:'select',nowrap:true});
   cols.push({key:'name',label:'Player',get:r=>r.name||r.email||'',f:'text',bold:true,nowrap:true,left:true});
@@ -889,6 +935,14 @@ function registrationsReport(root){
   cols.push({key:'age',label:'Age',get:r=>r.age!=null?String(r.age):'',f:'select',fval:r=>ageBucket(r.age),opts:['Under 60','60–64','65–69','70–74','75–79','80+']});
   if(base.some(r=>r.dob)) cols.push({key:'dob',label:regArcFullDob?'Date of birth':'Birth year',get:r=>r.dob?(regArcFullDob?formatDate(r.dob):String(r.dob).slice(0,4)):'',fval:r=>r.dob?String(r.dob).slice(0,4):'',f:'select',nowrap:true});
   if(base.some(r=>r.pos)) cols.push({key:'pos',label:'Position',get:r=>r.pos||'',f:'select'});
+  if(base.some(r=>r.address)) cols.push({key:'addr',label:'Address',get:r=>r.address?[r.address.street,r.address.city,r.address.state,r.address.zip].filter(Boolean).join(', '):'',f:'text',short:true});
+  if(base.some(r=>r.address)) cols.push({key:'town',label:'Township',get:r=>(r.address||{}).city||'',f:'select'});
+  if(base.some(r=>r.homePhone)) cols.push({key:'hphone',label:'Home phone',get:r=>r.homePhone||'',f:'text',nowrap:true});
+  if(base.some(r=>r.primaryLeague)) cols.push({key:'primary',label:'Primary league',get:r=>r.primaryLeague||'',f:'select'});
+  if(base.some(r=>r.cannotPlay)) cols.push({key:'days',label:'Cannot play',get:r=>(r.cannotPlay||[]).map(d=>d==='None'?'None':d.slice(0,3)).join(', '),f:'text'});
+  if(base.some(r=>r.unavailable)) cols.push({key:'unav',label:'Unavailable',get:r=>r.unavailable||'',f:'text',short:true});
+  if(base.some(r=>r.shirt)) cols.push({key:'shirt',label:'Shirt',get:r=>r.shirt||'',f:'select',opts:REG_SHIRTS});
+  if(base.some(r=>r.volunteer)) REG_VOL.forEach(([k,lab])=>cols.push({key:'vol_'+k,label:{umpire:'Umpire',fields:'Field help',manage:'Manage'}[k],get:r=>(r.volunteer||{})[k]||'',f:'select',opts:['Yes','No']}));
   qMap.forEach((q,qid)=>cols.push({key:'q_'+qid,label:q.label,get:r=>{ const v=(r.answers||{})[qid]; return v==null?'':String(v); },f:(q.type==='yesno'||q.type==='choice')?'select':'text',short:true}));
   cols.push({key:'agreed',label:'Agreements',get:r=>agreedAll(r)?'✓ All':'! Missing',f:'select',opts:['✓ All','! Missing']});
   cols.push({key:'signed',label:'Signed',get:r=>r.signature?(r.signature.name+' · '+new Date(r.signature.at).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'})):'',f:'text',nowrap:true});
@@ -963,9 +1017,9 @@ function regExportWarning(lg, rows, cols, missing){
 function exportRegArchiveExcel(lg, rows, cols, missing){
   if(typeof XLSX==='undefined'){ toast('Excel library not loaded'); return; }
   if(!rows.length){ toast('No rows to export'); return; }
-  const extra=['League rules','Terms','Use of my information','Signed at'];
+  const extra=['League release','Geezer Ball Scorecard release','League rules','Terms','Use of my information','Signed at'];
   const head=cols.map(c=>c.label).concat(extra);
-  const data=[head].concat(rows.map(r=>cols.map(c=>c.key==='age'?(r.age!=null?r.age:''):c.get(r)).concat([(r.consent||{}).rules?'Yes':'No',(r.consent||{}).terms?'Yes':'No',(r.consent||{}).data?'Yes':'No',r.signature?new Date(r.signature.at).toLocaleString():''])));
+  const data=[head].concat(rows.map(r=>cols.map(c=>c.key==='age'?(r.age!=null?r.age:''):c.get(r)).concat([(r.consent||{}).leagueRelease?'Yes':((r.consent||{}).leagueRelease===false?'No':''),(r.consent||{}).gbsRelease?'Yes':'No',(r.consent||{}).rules?'Yes':'No',(r.consent||{}).terms?'Yes':'No',(r.consent||{}).data?'Yes':'No',r.signature?new Date(r.signature.at).toLocaleString():''])));
   const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(data), 'Registrations');
   if(missing && missing.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([['Name','Email','Why']].concat(missing.map(m=>[m.name||'',m.email||'',m.why]))), 'Missing');
   const yl = regArcYear==='all' ? 'all years' : regYearLabel(lg,regArcYear);
@@ -992,8 +1046,12 @@ function regFormEditor(root){
   root.appendChild(c1);
   // standard
   const c2=h('div',{class:'card'}); c2.appendChild(h('h3',{},'Standard questions'));
-  [['age','Age','Always re-entered each year — never filled in from last year'],['dob','Date of birth','Filled in from last year'],['pos','Preferred position','Filled in from last year']].forEach(([k,label,note])=>{ const v=F.standard[k];
-    c2.appendChild(row([h('div',{style:'flex:1;'},[h('b',{},label),h('div',{style:'font-size:11px;color:var(--ink-soft);'},note)]), v.on?pill():null, tg(v.on,()=>save({standard:{...F.standard,[k]:{...v,on:!v.on}}}))])); });
+  const optPill=()=>h('span',{style:'font-size:9.5px;font-weight:800;padding:2px 7px;border-radius:8px;background:#eee;color:#666;'},'OPTIONAL');
+  [['age','Age','Always re-entered each year — never filled in from last year'],['dob','Date of birth','Filled in from last year'],['pos','Position(s) you play','Tap one or more · filled in from last year'],
+   ['addr','Home address','Street, township, state, ZIP · filled in from last year'],['homePhone','Home phone','Optional · filled in from last year'],['primary','Will this be your primary league?','Yes / No'],
+   ['days','Days I cannot play','Tap Mon–Sun or “None” · re-entered each year'],['unavail','Expected dates of unavailability','Optional · re-entered each year'],
+   ['shirt','Shirt size','Small – XXX-Large · filled in from last year'],['vol','Volunteering','Umpire (paid) · field maintenance · managing a team — Yes / No each']].forEach(([k,label,note])=>{ const v=F.standard[k];
+    c2.appendChild(row([h('div',{style:'flex:1;'},[h('b',{},label),h('div',{style:'font-size:11px;color:var(--ink-soft);'},note)]), v.on?(v.req?pill():optPill()):null, tg(v.on,()=>save({standard:{...F.standard,[k]:{...v,on:!v.on}}}))])); });
   root.appendChild(c2);
   // questions
   const c3=h('div',{class:'card'}); c3.appendChild(h('h3',{},'League questions'));
@@ -1020,7 +1078,9 @@ function regFormEditor(root){
   ags.forEach((a,i)=>{ const ti=h('textarea',{rows:'2',style:'flex:1;min-width:200px;'}); ti.value=a.text||''; ti.addEventListener('change',()=>{ const n=ags.slice(); n[i]={...a,text:ti.value.trim()}; save({agreements:n}); });
     c4.appendChild(row([ti, pill(), h('button',{class:'btn btn-danger btn-sm',onclick:()=>save({agreements:ags.filter((_,k)=>k!==i)})},'✕')])); });
   c4.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin:6px 0 4px;',onclick:()=>save({agreements:ags.concat([{id:'a'+Date.now().toString(36),text:'I agree to the league waiver and release of liability.',required:true}])})},'+ Add agreement'));
-  [['League rules','I agree to follow my league’s rules.'],['Terms of Use & Privacy Notice','I have read and agree to the Terms of Use & Privacy Notice.'],['Use of my information',DATA_CONSENT_TEXT]].forEach(([t,txt])=>c4.appendChild(row([h('div',{style:'flex:1;'},[h('b',{},t+' '),h('span',{style:'font-size:10.5px;color:var(--ink-soft);'},'🔒 always included'),h('div',{style:'font-size:11px;color:var(--ink-soft);line-height:1.4;margin-top:2px;'},txt)]), pill(true)])));
+  { const rt=h('textarea',{rows:'4',style:'flex:1;min-width:220px;font-size:12px;'}); rt.value=leagueReleaseText(lg); rt.addEventListener('change',()=>save({release:{...F.release,text:rt.value.trim()}}));
+    c4.appendChild(row([h('div',{style:'flex:1;min-width:220px;'},[h('b',{},'League release of liability '),h('span',{style:'font-size:10.5px;color:var(--ink-soft);'},'(your league’s waiver — edit the wording)'),rt]), F.release.on?pill():null, tg(F.release.on,()=>save({release:{...F.release,on:!F.release.on}}))])); }
+  [['Geezer Ball Scorecard release',GBS_RELEASE_TEXT],['League rules','I agree to follow my league’s rules.'],['Terms of Use & Privacy Notice','I have read and agree to the Terms of Use & Privacy Notice.'],['Use of my information',DATA_CONSENT_TEXT]].forEach(([t,txt])=>c4.appendChild(row([h('div',{style:'flex:1;'},[h('b',{},t+' '),h('span',{style:'font-size:10.5px;color:var(--ink-soft);'},'🔒 always included'),h('div',{style:'font-size:11px;color:var(--ink-soft);line-height:1.4;margin-top:2px;'},txt)]), pill(true)])));
   c4.appendChild(row([h('div',{style:'flex:1;'},[h('b',{},'Player certifies by typing their full name'),h('div',{style:'font-size:11px;color:var(--ink-soft);'},'Must match their name · date and time stamped')]), tg(F.certify,()=>save({certify:!F.certify}))]));
   root.appendChild(c4);
 }
@@ -1561,7 +1621,7 @@ function renderShell(){
   // Schedule and Hit zone have their own season chips on the page, so no header season drop-down there
   const needsTeamPicker = ['roster','lineup','scorecard','batting','draft','record'].includes(S.activeTab);
   const needsTeamSelect = ['lineup','scorecard','batting','hitzone','schedule','history','record'].includes(S.activeTab);
-  const showLeagueSel = isSuperAdmin() && S.leagues.length>1;
+  const showLeagueSel = isSuperAdmin() && S.leagues.length>1 && S.activeTab==='superadmin'; // league switcher lives in Super Admin only
   if(needsTeamPicker || showLeagueSel){
     teamPickRow.classList.remove('hidden');
     if(showLeagueSel){
@@ -1665,7 +1725,7 @@ function renderShell(){
   const fn = Router.tabs[S.activeTab];
   if(fn) fn(content); else content.appendChild(h('p',{},'Not available.'));
   { const ad=geezerAdBox(S.activeTab, S.activeTab==='chat'?{preferNonGold:true}:null); if(ad) content.appendChild(ad); }
-  content.appendChild(h('p',{class:'copyright'},'\u00a9 '+new Date().getFullYear()+' Kevin L. Hoover. Geezer Ball \u2013 ScoreCard. All rights reserved.'));
+  content.appendChild(h('p',{class:'copyright'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.'));
   const oldMark=document.getElementById('appMark'); if(oldMark) oldMark.remove();
   { const ab=appBrand();
     document.body.appendChild(h('div',{id:'appMark',class:'appMark'},[ ab.logoDataUrl?h('img',{src:ab.logoDataUrl,alt:''}):null, ab.appName||'' ]));
@@ -1858,8 +1918,8 @@ function renderAuth(wrap){
   card.appendChild(h('p',{class:'sub'}, joining?'Join the league':'Welcome back'));
   if(S.authError) card.appendChild(h('div',{class:'authErr'}, S.authError));
   if(S.authMessage) card.appendChild(h('div',{class:'authMsg'}, S.authMessage));
-  if(S.authMode==='sponsor'){ card.removeChild(card.lastChild); if(S.authError||S.authMessage){ card.removeChild(card.lastChild); if(S.authError&&S.authMessage) card.removeChild(card.lastChild); } renderSponsorAuth(card); panel.appendChild(card); wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Kevin L. Hoover. Geezer Ball \u2013 ScoreCard. All rights reserved.')); return; }
-  if(joining){ renderJoinForm(card, lgImg, lgTitle); panel.appendChild(card); wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Kevin L. Hoover. Geezer Ball \u2013 ScoreCard. All rights reserved.')); return; }
+  if(S.authMode==='sponsor'){ card.removeChild(card.lastChild); if(S.authError||S.authMessage){ card.removeChild(card.lastChild); if(S.authError&&S.authMessage) card.removeChild(card.lastChild); } renderSponsorAuth(card); panel.appendChild(card); wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.')); return; }
+  if(joining){ renderJoinForm(card, lgImg, lgTitle); panel.appendChild(card); wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.')); return; }
   const emailInp = h('input',{type:'email',placeholder:'Email',autocomplete:'email',value:S.loginPrefill||''});
   const passInp = h('input',{type:'password',placeholder:'Password',autocomplete:signup?'new-password':'current-password'});
   const pick = (signup || listedLeagues().length>1) ? leaguePickerField(lg=>{ lgImg.src=(lg&&lg.logoDataUrl)||DEFAULT_LOGO; lgTitle.textContent=lg?(lg.shortName||lg.name):'Geezer Ball Scorecard'; }) : null;
@@ -1886,7 +1946,7 @@ function renderAuth(wrap){
     h('span',{class:'arrow'},'\u2192')
   ]));
   { const ad=geezerAdBox('landing'); if(ad){ ad.style.maxWidth=ad.classList.contains('adPair')?'520px':'400px'; ad.style.position='relative'; ad.style.zIndex='1'; panel.appendChild(ad); } }
-  wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Kevin L. Hoover. Geezer Ball \u2013 ScoreCard. All rights reserved.'));
+  wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.'));
 }
 
 function manageClockTicker(){
@@ -3524,6 +3584,8 @@ let superSub='leagues';
 let bigBoardSearch='';
 function formatClock(ms){ const total=Math.max(0,Math.ceil(ms/1000)); const m=Math.floor(total/60),s=total%60; return `${m}:${s.toString().padStart(2,'0')}`; }
 function seasonSignups(){ return S.signups.filter(x=>x.seasonId===S.currentSeasonId).sort((a,b)=>(a.name||'').localeCompare(b.name||'')); }
+// Scale: 1 = best, 100 = lowest. Unrated players (0) always sort last.
+function ratingCmp(a,b){ const A=signupRating(a)||9999, B=signupRating(b)||9999; return A-B; }
 function signupRating(x){ const e=x.eval||{}; const p=+e.power||0, d=+e.defense||0; if(!p&&!d) return 0; return Math.round(p&&d?(p+d)/2:(p||d)); }
 let evalCompareSeasonId=null;
 /* ---- Returning vs new: match this season's sign-ups to players from past seasons in this league ---- */
@@ -3575,7 +3637,7 @@ function priorStatsFor(x, prior){ prior=prior||priorStatsByName(); const be=x.em
 /* ---- Evaluation sheet: download pre-filled, import back ---- */
 function downloadEvalSheet(){
   const rows=seasonSignups().slice().sort((a,b)=>rosterLastKey(a.name).localeCompare(rosterLastKey(b.name))); const idx=pastIndex();
-  const head=['Player','Email','Status','Last season','G','AVG','R','H','Last rank','Power (1-100)','Defense (1-100)','Notes','Pos'];
+  const head=['Player','Email','Status','Last season','G','AVG','R','H','Last rank','Power (1=best, 100)','Defense (1=best, 100)','Notes','Pos'];
   const data=[head].concat(rows.map(x=>{ const e=x.eval||{}; const m=matchFor(x,idx); const ret=m.st==='returning'&&m.p; const st=ret?m.p.lastStats:null;
     return [x.name||'',x.email||'', m.st==='returning'?'Returning':(m.st==='maybe'?'Maybe — confirm in Player list':'New'), ret?(m.p.lastSeasonName||''):'', st?st.GP:'', st?+(+st.AVG||0).toFixed(3):'', st?st.R:'', st?st.H:'', e.lastRank!=null?e.lastRank:'', e.power!=null?e.power:'', e.defense!=null?e.defense:'', e.comment||'', x.pos||'']; }));
   const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(data); ws['!cols']=[24,28,12,14,5,7,5,5,9,13,14,32,6].map(w=>({wch:w}));
@@ -3662,7 +3724,7 @@ async function undoLastDraftPick(){
 function draftBoardView(root, canSetup){
   const d=S.draft;
   const signups=seasonSignups();
-  const avail=signups.filter(x=>!x.drafted).sort((a,b)=>signupRating(b)-signupRating(a) || (a.eval&&a.eval.lastRank||999)-(b.eval&&b.eval.lastRank||999));
+  const avail=signups.filter(x=>!x.drafted).sort((a,b)=>ratingCmp(a,b) || (a.eval&&a.eval.lastRank||999)-(b.eval&&b.eval.lastRank||999));
   const teams=S.teams.filter(t=>t.active!==false);
   if(canSetup){
     const setup=h('div',{class:'card'}); setup.appendChild(h('h3',{},'Draft Setup'));
@@ -3981,10 +4043,29 @@ function approvalsView(root){
   root.appendChild(c2);
   { const mc=chatModerationCard(); if(mc) root.appendChild(mc); }
 }
+// Player Eval: sort + position helpers. Positions are stored as a comma list ("SS, 2B") so the draft board, rosters and exports keep working.
+let evalSort={key:null,dir:1}; let evalF={};
+function evalPosPicker(x){
+  let sel=evalPosList(x).filter(pp=>EVAL_POS.includes(pp)); // keeps tap order: first = main position
+  const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet'}); overlay.appendChild(sheet);
+  overlay.addEventListener('click',e=>{ if(e.target===overlay) overlay.remove(); });
+  const names={P:'Pitcher',C:'Catcher','1B':'First base','2B':'Second base','3B':'Third base',SS:'Shortstop',RV:'Rover',LF:'Left field',LCF:'Left-center',RCF:'Right-center',RF:'Right field',EH:'Extra hitter'};
+  const grid=h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:8px;margin:6px 0 14px;'});
+  const draw=()=>{ grid.innerHTML=''; EVAL_POS.forEach(pp=>{ const on=sel.includes(pp); const n=sel.indexOf(pp)+1;
+    grid.appendChild(h('button',{style:'padding:10px 4px;border-radius:10px;cursor:pointer;border:1.5px solid '+(on?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ sel=on?sel.filter(v=>v!==pp):[...sel,pp]; draw(); }},[h('div',{style:'font-weight:900;font-size:15px;'},[pp, on?h('sup',{style:'font-size:10px;margin-left:3px;'},String(n)):null]),h('div',{style:'font-size:10.5px;opacity:.85;'},names[pp])])); }); };
+  draw();
+  sheet.appendChild(h('div',{class:'modalHandle'})); sheet.appendChild(h('h3',{},'Positions — '+(x.name||'')));
+  sheet.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 4px;'},'Tap every position this player can play, main position first. Tap again to remove. The number shows the order.'));
+  sheet.appendChild(grid);
+  sheet.appendChild(h('div',{style:'display:flex;gap:8px;'},[h('button',{class:'btn btn-outline',style:'flex:1;',onclick:()=>overlay.remove()},'Cancel'),
+    h('button',{class:'btn btn-primary',style:'flex:1;',onclick:async()=>{
+      try{ await updateDoc(doc(db,'signups',x.id),{pos:sel.join(', ')}); overlay.remove(); toast('Positions saved'); }catch(e){ toast('Could not save: '+(e.message||e)); } }},'Save')]));
+  document.body.appendChild(overlay);
+}
 function playerEvalView(root){
   const rows=seasonSignups(); const prior=priorStatsByName();
   const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Player Evaluation'));
-  card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Rate Power and Defense 1\u2013100; Rating is their average'+(seasonMethod()==='draft'?' and drives the Big Board order':'')+'. Prior stats are shown for one season at a time (by email, then by name) so different seasons don\u2019t get blended.'));
+  card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Rate Power and Defense 1\u2013100, where 1 is the best; Rating is their average (lower is better)'+(seasonMethod()==='draft'?' and drives the Big Board order':'')+'. Prior stats are shown for one season at a time (by email, then by name) so different seasons don\u2019t get blended.'));
   { const opts=priorSeasonOptions(); const sel=h('select',{style:'width:auto;font-size:12.5px;'});
     if(!opts.length) sel.appendChild(h('option',{value:''},'No completed seasons with games yet'));
     opts.forEach(o=>{ const op=h('option',{value:o.id},o.name); if(o.id===evalCompareSeason()) op.setAttribute('selected','selected'); sel.appendChild(op); });
@@ -3996,12 +4077,56 @@ function playerEvalView(root){
     if(isAdmin()) card.appendChild(h('p',{style:'font-size:11px;color:var(--ink-soft);margin:-4px 0 10px;'},'First season? Download the sheet (pre-filled with everyone signed up), fill in Power/Defense/Notes in Excel, and import it back. Rows are matched by email, then name; nobody is created from the sheet.'));
   }
   if(!rows.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No sign-ups yet.')); root.appendChild(card); return; }
-  const t=h('table',{class:'dataTable',style:'min-width:760px;'});
-  t.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Player'),h('th',{},'Pos'),h('th',{},'Last yr rank'),h('th',{},'AVG'),h('th',{},'OBP'),h('th',{},'SLG'),h('th',{},'Power'),h('th',{},'Defense'),h('th',{},'Rating'),h('th',{style:'text-align:left;'},'Comment')]));
-  rows.forEach(x=>{
+  // ---- filters live in the second title row (drop-downs, no keyboard) ----
+  const view=rows.filter(x=>{ const e=x.eval||{}; const st=priorStatsFor(x,prior); const f=evalF;
+    if(f.who==='new' && st) return false; if(f.who==='ret' && !st) return false;
+    if(f.pos==='none' && evalPosList(x).length) return false; if(f.pos && f.pos!=='none' && !evalPosList(x).includes(f.pos)) return false;
+    if(f.rank){ const r=e.lastRank==null||e.lastRank===''?null:+e.lastRank; if(f.rank==='none'){ if(r!=null) return false; } else if(f.rank==='any'){ if(r==null) return false; } else if(r==null||r>+f.rank) return false; }
+    for(const k of ['AVG','OBP','SLG']) if(f[k]!=null && !(st && +st[k]>=f[k])) return false;
+    for(const k of ['power','defense','rating']){ const v=k==='rating'?(signupRating(x)||null):(e[k]==null?null:+e[k]); if(f[k]==='none'){ if(v!=null) return false; } else if(f[k]!=null && !(v!=null && v<=f[k])) return false; }
+    if(f.note==='yes' && !e.comment) return false; if(f.note==='no' && e.comment) return false;
+    return true; });
+  // ---- sortable header ----
+  const val={
+    name:x=>(x.name||'').toLowerCase(),
+    pos:x=>{ const l=evalPosList(x); return l.length?EVAL_POS.indexOf(l[0]):null; },
+    lastRank:x=>{ const v=(x.eval||{}).lastRank; return v==null||v===''?null:+v; },
+    AVG:x=>{ const st=priorStatsFor(x,prior); return st?+st.AVG:null; },
+    OBP:x=>{ const st=priorStatsFor(x,prior); return st?+st.OBP:null; },
+    SLG:x=>{ const st=priorStatsFor(x,prior); return st?+st.SLG:null; },
+    power:x=>{ const v=(x.eval||{}).power; return v==null?null:+v; },
+    defense:x=>{ const v=(x.eval||{}).defense; return v==null?null:+v; },
+    rating:x=>signupRating(x)||null };
+  if(evalSort.key && val[evalSort.key]){ const f=val[evalSort.key], d=evalSort.dir;
+    view.sort((a,b)=>{ const A=f(a), B=f(b); if(A==null&&B==null) return 0; if(A==null) return 1; if(B==null) return -1; return (A<B?-1:A>B?1:0)*d; }); }
+  const th=(key,label,left)=>{ const on=evalSort.key===key;
+    return h('th',{style:'cursor:pointer;user-select:none;white-space:nowrap;'+(left?'text-align:left;':'')+(on?'color:var(--grass-1);':''),title:'Sort',onclick:()=>{
+      const asc=['name','pos','lastRank','power','defense','rating'].includes(key);
+      if(evalSort.key!==key){ evalSort={key, dir:asc?1:-1}; } else if(evalSort.dir===(asc?1:-1)){ evalSort.dir*=-1; } else { evalSort={key:null,dir:1}; }
+      renderShell(); }},[label, h('span',{style:'font-size:9px;margin-left:3px;opacity:'+(on?1:.35)+';'},on?(evalSort.dir>0?'▲':'▼'):'⇅')]); };
+  const t=h('table',{class:'dataTable batTbl',style:'min-width:760px;'});
+  t.appendChild(h('tr',{},[th('name','Player',true),th('pos','Pos'),th('lastRank','Last yr rank'),th('AVG','AVG'),th('OBP','OBP'),th('SLG','SLG'),th('power','Power'),th('defense','Defense'),th('rating','Rating'),h('th',{style:'text-align:left;'},'Comment')]));
+  const sortOpt=(key)=>{ const k=key==='rank'?'lastRank':key; return evalSort.key===k&&evalSort.dir===1?[]:[['__sort','\u2191 Sort 1, 2, 3\u2026']]; };
+  const dd=(key,opts)=>{ const sel=h('select',{}); opts.forEach(([v,l])=>{ const o=h('option',{value:v},l); if(String(evalF[key]==null?'':evalF[key])===v) o.setAttribute('selected','selected'); sel.appendChild(o); });
+    if(evalF[key]!=null && evalF[key]!=='') sel.classList.add('on');
+    sel.addEventListener('change',()=>{ const v=sel.value;
+      if(v==='__sort'){ evalSort={key:key==='rank'?'lastRank':key, dir:1}; renderShell(); return; }
+      if(v==='') delete evalF[key]; else evalF[key]=(/^[\d.]+$/.test(v)&&!['rank'].includes(key))?parseFloat(v):v; renderShell(); }); return h('th',{},sel); };
+  const usedPos=EVAL_POS.filter(pp=>rows.some(x=>evalPosList(x).includes(pp)));
+  const rate=[.2,.25,.3,.35,.4,.5,.6].map(v=>[String(v),'\u2265 '+fmt3(v)]); const score=[10,20,30,40,50].map(v=>[String(v),'1\u2013'+v]);
+  t.appendChild(h('tr',{class:'batFilters'},[
+    dd('who',[['','All'],['ret','Returning'],['new','New']]),
+    dd('pos',[['','All']].concat(usedPos.map(pp=>[pp,pp])).concat([['none','Not set']])),
+    dd('rank',[['','All']].concat(sortOpt('rank')).concat([['10','Top 10'],['20','Top 20'],['30','Top 30'],['any','Ranked'],['none','Not ranked']])),
+    dd('AVG',[['','All']].concat(rate)), dd('OBP',[['','All']].concat(rate)), dd('SLG',[['','All']].concat(rate)),
+    dd('power',[['','All']].concat(sortOpt('power')).concat(score).concat([['none','Not rated']])), dd('defense',[['','All']].concat(sortOpt('defense')).concat(score).concat([['none','Not rated']])), dd('rating',[['','All']].concat(sortOpt('rating')).concat(score).concat([['none','Not rated']])),
+    dd('note',[['','All'],['yes','Has notes'],['no','No notes']])]));
+  if(!view.length) t.appendChild(h('tr',{},h('td',{colspan:'10',style:'text-align:center;color:var(--ink-soft);font-size:12.5px;padding:12px;'},'No players match these filters.')));
+  view.forEach(x=>{
     const st=priorStatsFor(x,prior); const e=x.eval||{};
     const num=(k,val)=>{ const i=h('input',{type:'number',min:0,max:100,value:val!=null?val:'',style:'width:60px;padding:5px;text-align:center;'}); i.addEventListener('change',()=>updateDoc(doc(db,'signups',x.id),{['eval.'+k]:i.value===''?null:parseInt(i.value)})); return i; };
-    const posInp=h('input',{type:'text',value:x.pos||'',placeholder:'Pos',style:'width:60px;padding:5px;text-align:center;'}); posInp.addEventListener('change',()=>updateDoc(doc(db,'signups',x.id),{pos:posInp.value.trim()}));
+    const pl=evalPosList(x);
+    const posInp=h('button',{title:'Set positions',style:'min-width:64px;padding:4px 7px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;color:'+(pl.length?'var(--ink)':'var(--ink-soft)')+';',onclick:()=>evalPosPicker(x)},pl.length?pl.join(', '):'+ Pos');
     const cInp=h('input',{type:'text',value:e.comment||'',placeholder:'Notes',style:'padding:5px;min-width:160px;'}); cInp.addEventListener('change',()=>updateDoc(doc(db,'signups',x.id),{'eval.comment':cInp.value.trim()}));
     t.appendChild(h('tr',{},[
       h('td',{style:'text-align:left;font-weight:700;'},[x.name, st?null:h('span',{class:'pill-gold',style:'margin-left:6px;'},'New')]),
@@ -5140,10 +5265,10 @@ Router.register('feed', (root)=>{
 
 /* ===================== TERMS TAB ===================== */
 const TERMS_CLAUSES = [
-  ['1. Who we are and what this is.','This app, Geezer Ball Scorecard, is owned and operated by Kevin L. Hoover, doing business as Geezer Ball Scorecard (the \u201capp owner\u201d). Your league uses it to run registration, rosters, schedules, live scoring, statistics, and league communications. By creating an account or submitting a sign-up, you agree to these Terms and to the data practices described here.'],
+  ['1. Who we are and what this is.','This app, Geezer Ball Scorecard, is owned and operated by its owner (the \u201capp owner\u201d). Your league uses it to run registration, rosters, schedules, live scoring, statistics, and league communications. By creating an account or submitting a sign-up, you agree to these Terms and to the data practices described here.'],
   ['2. Information we collect.','Information you provide: name, age, email, phone number, preferred position, payment status, and anything you type into the app. Information generated by using the app: game results, at-bats, batting and fielding statistics, draft rankings and evaluations, and usage data such as which screens you view and for how long, along with your device and browser type.'],
   ['3. How we use it.','To run the league — registration, the draft, rosters, schedules, scoring, standings, and history; to show statistics and results to other league members; to contact you about league business; to improve the app; and to support the league\u2019s sponsors and partners as described below.'],
-  ['4. How we share it.','Within the league: your name, team, and statistics are visible to other members, and league officials and team managers can see your contact details. With sponsors and partners: the app owner and your league may share, license, or sell information about you — including your name, contact information, participation, statistics, and usage data — to third-party sponsors, advertisers, and business partners, who may use it for their own marketing and analytics. With service providers that host and operate the app (for example, Google Firebase). As required by law or to protect the league, its members, or others.'],
+  ['4. How we share it.','Within the app: your name, team, and statistics are visible to members of your league and to other users of the app, and league officials and team managers can see your contact details. With sponsors and partners: the app owner and your league may share, license, or sell information about you — including your name, contact information, participation, statistics, and usage data — to third-party sponsors, advertisers, and business partners, who may use it for their own marketing and analytics. With service providers that host and operate the app (for example, Google Firebase). As required by law or to protect the league, its members, or others.'],
   ['5. Your choices.','You can ask your league administrator to correct your information or remove you from the league, which will also stop future sharing with sponsors. Statistics already recorded in completed games may be kept as part of the league\u2019s historical record. Where required by law, you may have additional rights to access, correct, delete, or restrict the use of your information; contact your league administrator to exercise them.'],
   ['6. Retention.','We keep your information for as long as you participate in the league and afterward as part of season history, unless you ask for it to be removed.'],
   ['7. Use of the app.','You receive a limited, non-transferable right to use the app for league purposes. Don\u2019t misuse it, attempt to access other leagues\u2019 data, or use it for anything unlawful. You must be at least 18 to create an account.'],
@@ -5494,7 +5619,10 @@ const HELP_KB = [
   {k:'status upcoming active completed not played', q:'What do the schedule statuses mean?', a:'Upcoming = scheduled, Active = being scored now, Completed = final score entered, Not played = past date never scored.'},
   {k:'roster add player team', q:'How do I add a player to a roster?', a:'Roster tab (admin) → Add Player: name and team. Rosters are otherwise filled by the draft.'},
   {k:'draft board pick clock pause undo finalize', q:'How does the draft work?', a:'Draft Board (right menu). Admin sets order, rounds and clock, then Start. The team on the clock taps Draft next to a player on the Big Board. Admin can Pause, Reset clock, Undo last pick, and Final draft → Rosters.'},
-  {k:'player eval rating power defense rank', q:'How do player ratings work?', a:'Player Eval tab: last-season stats fill in by name; enter Power and Defense (1–100). Rating is their average and sets the Big Board order.'},
+  {k:'registration form address shirt size volunteer umpire days release waiver', q:'What does the yearly registration ask?', a:'Besides name, email and cell phone: age, positions (tap one or more), home address, home phone (optional), primary league yes/no, days you can’t play, dates you’ll be away (optional), shirt size, and whether you’ll umpire, help with fields or manage. Admins turn each one on or off in Admin → Players → Registration form. Every player also accepts the league’s release of liability and the Geezer Ball Scorecard release, then signs by typing their name.'},
+  {k:'geezer ball scorecard release liability every league permanent', q:'What is the Geezer Ball Scorecard release?', a:'A release every player accepts in every league that uses the app. It says the app is free and provided as is, and releases the software owner and Geezer Ball Scorecard from claims about using the app or league play. Leagues can’t remove or change it; it is separate from each league’s own release.'},
+  {k:'player eval sort column position filter positions multiple', q:'How do I sort Player Eval or set positions?', a:'Player Eval: tap any column title (Player, Pos, Last yr rank, AVG, OBP, SLG, Power, Defense, Rating) to sort; tap again to flip the order, a third time to clear. Tap a player’s Pos button to pick every position they play (main position first). The drop-downs under each column title filter the list (for example Pos = LF, Power 1–20, Rating = Not rated). Ratings run 1–100 with 1 the best; set as many as you like.'},
+  {k:'player eval rating power defense rank', q:'How do player ratings work?', a:'Player Eval tab: last-season stats fill in by name; enter Power and Defense from 1 to 100, where 1 is the best. Rating is their average (lower is better) and sets the Big Board order.'},
   {k:'sign up register season new player join', q:'How does a new player sign up?', a:'On the sign-in page tap “New here? Join the league”. One form does it all: pick your league, enter your name, age, phone, email and a password, and tap Join the league. You’re registered for the season and your login is created. You’ll see “Waiting for approval” until your league admin accepts you.'},
   {k:'account create login sign in again password returning', q:'How do I sign in again?', a:'Open the app and use the Sign In box with the email and password you chose when you joined — it’s the same login every season. Forgot your password? Tap “Forgot password?” and check your email (and spam folder).'},
   {k:'forgot password reset', q:'I forgot my password', a:'On the sign-in page tap “Forgot password?” and enter your email. A reset link is sent to you.'},
@@ -5591,7 +5719,7 @@ const FAQ_DATA = [
     { q:'What happens when the pick clock runs out?', a:'By default nothing — the clock shows 0:00 and the pick stays open until it’s made. The admin can turn on “Auto-pick when the clock runs out” in Draft Setup to have the top-rated available player picked automatically.' },
     { q:'Can the draft be paused?', a:'Yes. The admin has Pause / Resume and Reset clock buttons at the top of the Draft Board. While paused, nobody can pick and the clock holds.' },
     { q:'A manager picked the wrong player — can it be undone?', a:'Yes. The admin taps “Undo last pick” at the top of the Draft Board. The player goes back on the Big Board, comes off the team’s roster, and that team is back on the clock. Tap it again to go back further. Only the most recent pick can be undone at a time.' },
-    { q:'Where do the Big Board ratings come from?', a:'The Player Eval tab (right menu, managers and admins). Last-season stats fill in automatically by name; Power and Defense (1–100) are entered there and averaged into the Rating.' },
+    { q:'Where do the Big Board ratings come from?', a:'The Player Eval tab (right menu, managers and admins). Last-season stats fill in automatically by name; Power and Defense (1–100, 1 = best) are entered there and averaged into the Rating.' },
     { q:'Why is there a #number next to players on the Roster?', a:'That’s their overall draft pick. The admin can hide it for members in Admin → Settings → Roster display.' }
   ]},
   { category:'Schedule & games', items:[
@@ -5815,7 +5943,7 @@ async function simulateTestDraft(){
   // pull fresh signups
   const snap=await getDocs(collection(db,'signups'));
   let pool=snap.docs.map(x=>({id:x.id,...x.data()})).filter(x=>x.seasonId===S.currentSeasonId && !x.drafted);
-  pool.sort((a,b)=>signupRating(b)-signupRating(a));
+  pool.sort(ratingCmp);
   const total=(d.rounds||1)*d.order.length; let picks=(d.picks||[]).slice();
   const counts={};
   while(picks.length<total && pool.length){
@@ -6466,7 +6594,7 @@ ${sec('Views by tab',C.pageViews,'Click rate shown under each bar')}${sec('Click
 ${sec('Views by advertisement type',C.typeViews,'National, regional, and local campaigns')}${sec('Clicks by advertisement type',C.typeClicks)}<table>${tr(['Type','Views','Clicks','CTR'],true)}${typeRows}</table>
 ${C.trendViews?sec('Trend',C.trendViews):''}${C.trendClicks?C.trendClicks.outerHTML:''}
 <section><h2>By sponsor</h2><table>${tr(['Sponsor','Type','Views','Clicks','CTR'].concat(AD_ACTIONS.map(x=>x[1])),true)}${sponsorRows}</table></section>
-<footer>Views count an ad actually shown on screen; clicks count taps that opened the ad’s details. Figures are anonymous totals. © ${new Date().getFullYear()} Kevin L. Hoover. Geezer Ball – ScoreCard.</footer>
+<footer>Views count an ad actually shown on screen; clicks count taps that opened the ad’s details. Figures are anonymous totals. © ${new Date().getFullYear()} Geezer Ball Scorecard.</footer>
 </body></html>`;
   downloadBlob(new Blob([html],{type:'text/html'}), 'Ad report - '+who+' - '+new Date().toISOString().slice(0,10)+'.html');
   toast('Report downloaded — open it and tap Print / Save as PDF');
@@ -6994,7 +7122,7 @@ function builderSteps(sn){
   const rated=ups.filter(x=>signupRating(x)>0).length;
   if(m==='draft'){
     const d=S.draft||{}; const started=!!(d.order&&d.order.length); const picks=(d.picks||[]).length; const final=d.status==='final';
-    steps.push({key:'eval',title:'Evaluation',who:'ADMIN + MANAGERS',sub:rated+' of '+nUp+' rated',done:nUp>0&&rated>=nUp,go:{tab:'eval'},help:'Rate each player Power and Defense (1–100). Easiest: ① Export template (names and last season’s stats filled in), fill it in, ② Import eval file.'});
+    steps.push({key:'eval',title:'Evaluation',who:'ADMIN + MANAGERS',sub:rated+' of '+nUp+' rated',done:nUp>0&&rated>=nUp,go:{tab:'eval'},help:'Rate each player Power and Defense (1–100, 1 = best). Easiest: ① Export template (names and last season’s stats filled in), fill it in, ② Import eval file.'});
     steps.push({key:'draft',title:'Draft',who:'ADMIN + MANAGERS',sub:final?'Complete · '+picks+' picks':(started?picks+' picks made':'Set order, rounds and pick clock → Start draft'),done:final||d.status==='done',go:{tab:'draft'},help:'Set the draft order, rounds and pick clock, then Start draft. Managers pick on the Draft Board.'});
     steps.push({key:'final',title:'Final draft approved',who:'ADMIN',sub:final?'Approved — teams assigned':'Review the board, then tap Final draft → Rosters',done:final,go:{tab:'draft'},help:'When the board is complete, tap Final draft → Rosters on the Draft Board to approve it.'});
     const nPl=(S.allPlayersForFeed||[]).filter(pl=>pl.seasonId===sn.id).length;
@@ -7486,7 +7614,7 @@ function renderSponsorPortal(){
     h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:8px 0 0;'},'Anonymous totals across all leagues where your ad shows. No player names or contact details are shared.')]));
   main.appendChild(h('div',{class:'sectiontitle',style:'margin-top:6px;'},'Sponsor agreement'));
   agreementView(main, spCtx(a), 'sponsor');
-  wrap.appendChild(h('div',{class:'authFoot',style:'color:var(--ink-soft);text-align:center;padding-bottom:20px;'},'© '+new Date().getFullYear()+' Kevin L. Hoover. Geezer Ball – ScoreCard. All rights reserved.'));
+  wrap.appendChild(h('div',{class:'authFoot',style:'color:var(--ink-soft);text-align:center;padding-bottom:20px;'},'© '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.'));
   setTimeout(()=>{ wrap.scrollTop=y; },0);
 }
 
