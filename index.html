@@ -5621,6 +5621,7 @@ const HELP_KB = [
   {k:'draft board pick clock pause undo finalize', q:'How does the draft work?', a:'Draft Board (right menu). Admin sets order, rounds and clock, then Start. The team on the clock taps Draft next to a player on the Big Board. Admin can Pause, Reset clock, Undo last pick, and Final draft → Rosters.'},
   {k:'registration form address shirt size volunteer umpire days release waiver', q:'What does the yearly registration ask?', a:'Besides name, email and cell phone: age, positions (tap one or more), home address, home phone (optional), primary league yes/no, days you can’t play, dates you’ll be away (optional), shirt size, and whether you’ll umpire, help with fields or manage. Admins turn each one on or off in Admin → Players → Registration form. Every player also accepts the league’s release of liability and the Geezer Ball Scorecard release, then signs by typing their name.'},
   {k:'geezer ball scorecard release liability every league permanent', q:'What is the Geezer Ball Scorecard release?', a:'A release every player accepts in every league that uses the app. It says the app is free and provided as is, and releases the software owner and Geezer Ball Scorecard from claims about using the app or league play. Leagues can’t remove or change it; it is separate from each league’s own release.'},
+  {k:'ad performance report month quarter year compare sponsors test data clear', q:'How do I read ad performance?', a:'Super Admin → Advertisement → Performance. Pick Month, Quarter or Year and a From/To range; choose what the rows are (sponsor, league, team, viewer type, tab or ad type) and narrow by sponsor, league, team or viewer. The table shows views (clicks underneath) per period with totals; tick up to 6 rows to compare them as lines, by views, clicks or click rate. Test data — admin testing and any test periods — is left out unless you pick Include or Test only, and can be deleted in the Test data box.'},
   {k:'player eval sort column position filter positions multiple', q:'How do I sort Player Eval or set positions?', a:'Player Eval: tap any column title (Player, Pos, Last yr rank, AVG, OBP, SLG, Power, Defense, Rating) to sort; tap again to flip the order, a third time to clear. Tap a player’s Pos button to pick every position they play (main position first). The drop-downs under each column title filter the list (for example Pos = LF, Power 1–20, Rating = Not rated). Ratings run 1–100 with 1 the best; set as many as you like.'},
   {k:'player eval rating power defense rank', q:'How do player ratings work?', a:'Player Eval tab: last-season stats fill in by name; enter Power and Defense from 1 to 100, where 1 is the best. Rating is their average (lower is better) and sets the Big Board order.'},
   {k:'sign up register season new player join', q:'How does a new player sign up?', a:'On the sign-in page tap “New here? Join the league”. One form does it all: pick your league, enter your name, age, phone, email and a password, and tap Join the league. You’re registered for the season and your login is created. You’ll see “Waiting for approval” until your league admin accepts you.'},
@@ -5642,6 +5643,8 @@ const HELP_KB = [
   {k:'registration form edit questions agreements admin design', q:'How do I change the registration form?', a:'Admin → Players → Registration form: switch standard questions on or off, add your own questions (short answer, paragraph, yes/no, choose one, number, date), add agreements such as a waiver, and set when the registration year starts. Every field is required. Preview shows exactly what players see.'},
   {k:'stats season separate pickup formal two seasons mixed which season', q:'Are my stats from different seasons kept separate?', a:'Yes. Report and Hit Zone show one season at a time. Tap a “Stats for” chip at the top to switch seasons — the chip shows FORMAL, INFORMAL or PICKUP so morning pickup and league stats never mix.'},
   {k:'schedule admin player view add game table', q:'How does the Schedule table work?', a:'One table for every season: Date, Time, Teams, Field, Score, Status, with a light colored ribbon starting each season. Players only read it. Admins see a gold “Admin only” strip with ✎ Change schedule, + Add game (adds a new row — pick the season, date, time, teams, field, repeat weekly) and Template / Import.'},
+  {k:'sponsor report pdf print export cost per lead coupon renewal', q:'How do I give a sponsor their report?', a:'Super Admin → Advertisement → Performance: pick the sponsor in the Sponsor filter and set From/To, then tap “📄 Sponsor report”. A one-page report opens showing times seen, taps, actions, coupons copied, cost per lead (fee ÷ actions), views by month, who saw it and where it showed. Use “🖨 Print / Save as PDF” to email it, or “⬇ Download file”. Test data is always left out, and totals are anonymous. Sponsors can also open their own report with “📄 View my report” on their sign-in page (their fee isn’t shown there).'},
+  {k:'compare ads chart medals share sparkline', q:'How do I compare ads?', a:'In Performance, tick up to 6 rows in the table and open Compare. Each ad gets a scorecard with its total, a medal for the top three, a ▲/▼ change versus the previous full period and a mini trend line, plus a share bar and a line chart. Switch between Views, Clicks and Click rate.'},
   {k:'two ads side by side sponsor split half', q:'Can two sponsors show side by side?', a:'Super Admin → Advertisement → Where ads show → “2 ads side by side” row: switch it on for a page and two different sponsors share that spot, half each. Both stay clickable with their coupons.'},
   {k:'test sign-ups fake players practice clear', q:'How do I practise season setup with fake players?', a:'Admin → Settings → Test data → Test sign-ups: choose how many players (with or without ratings, plus accounts awaiting approval), then walk through the Season Builder. Clear test data removes it all for that league and season.'},
   {k:'hit zone heat map filter', q:'What does Hit Zone show?', a:'Every ball in play this season. Filter by team and player, tap a zone for its count, or export to Excel.'},
@@ -6082,20 +6085,27 @@ function couponLive(a){ if(!(a.couponCode||a.couponOffer)) return false; const t
 /* ---- anonymous ad counters (batched; super admin's own activity not counted) ---- */
 const adBuf={}; const adSeen={};
 function adCountSelf(){ try{ return localStorage.getItem('gbAdCountSelf')==='1'; }catch(e){ return false; } }
+// Who counts: players/managers = real. Super Admin / league admins = only when switched on, and then as TEST data (kept apart, clearable).
+function adTestMode(){ const cfg=S.adConfig||{}; if(isSuperAdmin()) return cfg.testSuper?'test':'skip'; if(isAdmin()) return cfg.testAdmin?'test':'skip'; return 'real'; }
 function adTrack(a, kind, place, action){
-  if(!a || !a.id || place==='__preview__' || (isSuperAdmin() && !adCountSelf())) return;
+  if(!a || !a.id || place==='__preview__') return;
+  const tm=adTestMode(); if(tm==='skip') return; const isTest=tm==='test';
   const lid=viewerLeagueId()||'none'; const date=new Date().toISOString().slice(0,10);
-  const key=date+'_'+a.id+'_'+lid;
-  const b=adBuf[key]||(adBuf[key]={adId:a.id, company:a.company||'', leagueId:lid, region:leagueRegion(lid)||'', campaign:adCampaign(a), date, views:{}, clicks:{}, actions:{}});
+  const role=apViewerRole(), tid=(S.user&&myTeamId())||''; const key=date+'_'+a.id+'_'+lid+'_'+role+(tid?'_'+tid:'')+(isTest?'_test':'');
+  const b=adBuf[key]||(adBuf[key]={adId:a.id, company:a.company||'', leagueId:lid, region:leagueRegion(lid)||'', campaign:adCampaign(a), date, test:isTest, role, teamId:tid||null, views:{}, clicks:{}, actions:{}});
   if(kind==='view') b.views[place]=(b.views[place]||0)+1;
   else if(kind==='click') b.clicks[place]=(b.clicks[place]||0)+1;
   else if(kind==='action') b.actions[action]=(b.actions[action]||0)+1;
-  if(isSuperAdmin()) adSelfTallyAdd(key, kind==='view'?'views':kind==='click'?'clicks':'actions', kind==='action'?action:place);
 }
 // Tally of what THIS device's Super Admin counted in test mode, so it can be cleared again
 function adSelfTally(){ try{ return JSON.parse(localStorage.getItem('gbAdSelfTally')||'{}')||{}; }catch(e){ return {}; } }
 function adSelfTallyAdd(key, f, k){ try{ const t=adSelfTally(); const e=t[key]||(t[key]={views:{},clicks:{},actions:{}}); e[f][k]=(e[f][k]||0)+1; localStorage.setItem('gbAdSelfTally',JSON.stringify(t)); }catch(e){} }
 function adSelfTallyTotal(){ const t=adSelfTally(); let v=0,c=0; Object.values(t).forEach(e=>{ v+=Object.values(e.views||{}).reduce((x,y)=>x+y,0); c+=Object.values(e.clicks||{}).reduce((x,y)=>x+y,0)+Object.values(e.actions||{}).reduce((x,y)=>x+y,0); }); return {views:v,clicks:c}; }
+async function adClearTestData(){
+  adFlush(); const rows=(adPerf.rows||[]).filter(r=>r.test); let n=0;
+  for(const r of rows){ try{ await deleteDoc(doc(db,'adStats',r.id)); n++; }catch(e){ console.warn('clear test',e); } }
+  adPerf.rows=(adPerf.rows||[]).filter(r=>!r.test); toast('Cleared test data ('+n+' record'+(n===1?'':'s')+')'); renderShell();
+}
 async function adClearSelfTally(){
   adFlush();
   const t=adSelfTally(); const keys=Object.keys(t); if(!keys.length){ toast('Nothing to clear on this device'); return; }
@@ -6110,7 +6120,7 @@ async function adClearSelfTally(){
 function adFlush(){
   Object.keys(adBuf).forEach(key=>{
     const b=adBuf[key]; delete adBuf[key];
-    const patch={adId:b.adId, company:b.company, leagueId:b.leagueId, region:b.region, campaign:b.campaign, date:b.date, updatedAt:Date.now()};
+    const patch={adId:b.adId, company:b.company, leagueId:b.leagueId, region:b.region, campaign:b.campaign, date:b.date, updatedAt:Date.now()}; if(b.test) patch.test=true; if(b.role) patch.role=b.role; if(b.teamId) patch.teamId=b.teamId;
     ['views','clicks','actions'].forEach(f=>{ const m={}; Object.entries(b[f]).forEach(([k,n])=>{ if(n) m[k]=increment(n); }); if(Object.keys(m).length) patch[f]=m; });
     setDoc(doc(db,'adStats',key), patch, {merge:true}).catch(()=>{});
   });
@@ -6409,12 +6419,6 @@ function adSettingsView(root){
   sc.appendChild(h('button',{class:cfg.enabled?'btn btn-danger btn-block':'btn btn-gold btn-block',onclick:()=>adSetCfg({enabled:!cfg.enabled})}, cfg.enabled?'Turn ads OFF':'Turn ads ON'));
   const rot=h('input',{type:'number',min:4,max:120,value:cfg.rotateSeconds||8,style:'max-width:120px;'}); rot.addEventListener('change',()=>adSetCfg({rotateSeconds:Math.max(4,parseInt(rot.value)||8)}));
   sc.appendChild(h('div',{class:'fieldRow',style:'margin-top:12px;'},[h('label',{},'Default seconds per ad (an advertiser can override this)'),rot]));
-  { const cb=h('input',{type:'checkbox',style:'width:auto;margin-right:8px;'}); cb.checked=adCountSelf(); cb.addEventListener('change',()=>{ try{ localStorage.setItem('gbAdCountSelf',cb.checked?'1':'0'); }catch(e){} toast(cb.checked?'Test mode on \u2014 your views and clicks on this device will be counted':'Test mode off'); renderShell(); });
-    sc.appendChild(h('label',{style:'display:flex;align-items:flex-start;font-size:13px;margin-top:12px;'},[cb,h('span',{},[h('b',{},'Test mode: count my own views & clicks (this device only)'),h('div',{style:'font-size:11.5px;color:var(--ink-soft);'},'Normally your Super Admin activity is left out so it doesn\u2019t inflate sponsor numbers. Turn this on to test tracking, then turn it off.')])]));
-    const tt=adSelfTallyTotal(); const has=tt.views+tt.clicks>0;
-    sc.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:8px;padding-left:26px;'},[
-      h('button',Object.assign({class:'btn btn-sm btn-ghost',style:has?'':'opacity:.5;',onclick:()=>confirmModal('Clear test views & clicks?','Removes the '+tt.views+' view'+(tt.views===1?'':'s')+' and '+tt.clicks+' click'+(tt.clicks===1?'':'s')+' your Super Admin account counted on this device from the sponsor totals. Other devices and real player activity are not touched.',adClearSelfTally)},has?{}:{disabled:'disabled'}),'Clear my test views & clicks (this device)'),
-      h('span',{style:'font-size:11.5px;color:var(--ink-soft);'},has?'Counted from this device so far: '+tt.views+' view'+(tt.views===1?'':'s')+', '+tt.clicks+' click'+(tt.clicks===1?'':'s'):'Nothing counted from this device yet')])); }
   root.appendChild(sc);
   { const on=!!cfg.requireAgreement; const ac=h('div',{class:'card'}); ac.appendChild(h('h3',{},['Sponsor agreements ', h('span',{class:on?'pill-role':'pill-warn'},on?'REQUIRED':'NOT REQUIRED')]));
     ac.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},on?'An ad only shows once its sponsor agreement is executed (both signatures). You can override one sponsor at a time inside its record.':'Ads show whether or not the sponsor has signed. Turn this on once your current sponsors have signed — any ad without an executed agreement will then stop showing.'));
@@ -6431,7 +6435,24 @@ function adSettingsView(root){
   root.appendChild(g);
 }
 /* ===================== AD PERFORMANCE ===================== */
-let adPerf={range:30, type:'all', sponsor:'all', league:'all', loaded:false, loading:false, rows:[]};
+let adPerf={range:30, type:'all', sponsor:'all', league:'all', data:'real', from:null, to:null, loaded:false, loading:false, rows:[]};
+const MONTH_NAMES=['January','February','March','April','May','June','July','August','September','October','November','December'];
+function ymLabel(ym){ const [y,m]=ym.split('-'); return MONTH_NAMES[+m-1]+' '+y; }
+function ymOf(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); }
+function ymEnd(ym){ const [y,m]=ym.split('-').map(Number); return new Date(y,m,0).toISOString().slice(0,10); }
+function adPerfMonths(){ const out=[]; const d=new Date(); d.setDate(1); for(let i=0;i<24;i++){ out.push(ymOf(d)); d.setMonth(d.getMonth()-1); }
+  const first=(adPerf.rows||[]).map(r=>r.date).filter(Boolean).sort()[0]; return first?out.filter(m=>m>=first.slice(0,7)):out.slice(0,12); }
+// [fromDate, toDate] inclusive, '' = open
+function adPerfWindow(){ const r=adPerf.range, today=new Date().toISOString().slice(0,10);
+  if(r==='all') return ['',''];
+  if(typeof r==='number') return [new Date(Date.now()-(r-1)*86400000).toISOString().slice(0,10), ''];
+  if(r==='ytd') return [new Date().getFullYear()+'-01-01',''];
+  if(String(r).startsWith('m:')){ const ym=r.slice(2); return [ym+'-01', ymEnd(ym)]; }
+  if(r==='ap'){ const ks=apBuild(); const f=ks.from, t=ks.to; const st=k=>ap.period==='year'?k+'-01-01':(ap.period==='quarter'?k.slice(0,4)+'-'+String((+k.slice(6)-1)*3+1).padStart(2,'0')+'-01':k+'-01');
+    const en=k=>ap.period==='year'?k+'-12-31':(ap.period==='quarter'?ymEnd(k.slice(0,4)+'-'+String(+k.slice(6)*3).padStart(2,'0')):ymEnd(k)); return [st(f),en(t)]; }
+  if(r==='custom'){ const f=adPerf.from||ymOf(new Date()), t=adPerf.to||f; const a=f<=t?f:t, b=f<=t?t:f; return [a+'-01', ymEnd(b)]; }
+  return ['','']; }
+function adRowKept(r){ const t=apIsTest(r); return adPerf.data==='both' || (adPerf.data==='test' ? t : !t); }
 async function loadAdStats(){
   adPerf.loading=true; renderShell();
   try{ const snap=await getDocs(collection(db,'adStats')); adPerf.rows=snap.docs.map(d=>({id:d.id,...d.data()})); adPerf.loaded=true; }
@@ -6442,9 +6463,9 @@ const AD_ACTIONS=[['website','Website'],['call','Call'],['email','Email'],['dire
 function placeLabel(id){ return (AD_PLACEMENTS.find(x=>x[0]===id)||[id,id])[1]; }
 function sumObj(o){ return Object.values(o||{}).reduce((n,v)=>n+(+v||0),0); }
 function adPerfData(){
-  const since = adPerf.range==='all' ? '' : new Date(Date.now()-(adPerf.range-1)*86400000).toISOString().slice(0,10);
+  const [since, until] = adPerfWindow();
   const adsById=new Map((S.advertisers||[]).map(a=>[a.id,a]));
-  const rows=adPerf.rows.filter(r=>(!since||r.date>=since) && (adPerf.type==='all'||r.campaign===adPerf.type) && (adPerf.sponsor==='all'||r.adId===adPerf.sponsor) && (adPerf.league==='all'||r.leagueId===adPerf.league));
+  const rows=adPerf.rows.filter(r=>adRowKept(r) && (!since||r.date>=since) && (!until||r.date<=until) && (adPerf.type==='all'||r.campaign===adPerf.type) && (adPerf.sponsor==='all'||r.adId===adPerf.sponsor) && (adPerf.league==='all'||r.leagueId===adPerf.league));
   const D={views:0,clicks:0,actions:{},byPage:{},byType:{},bySponsor:{},byLeague:{},daily:{},since};
   rows.forEach(r=>{
     const v=sumObj(r.views), c=sumObj(r.clicks); D.views+=v; D.clicks+=c;
@@ -6478,58 +6499,244 @@ function adPerfCharts(D){
   };
 }
 function adPerfFilterLabel(){
-  const parts=[adPerf.range==='all'?'All time':('Last '+adPerf.range+' days')];
+  const r=adPerf.range; const [a,b]=adPerfWindow();
+  const parts=[r==='all'?'All time':(typeof r==='number'?'Last '+r+' days':(r==='ytd'?'Year to date':(String(r).startsWith('m:')?ymLabel(r.slice(2)):(ymLabel(a.slice(0,7))+(a.slice(0,7)!==b.slice(0,7)?' – '+ymLabel(b.slice(0,7)):'')))))];
+  if(adPerf.data==='test') parts.push('TEST data only'); else if(adPerf.data==='both') parts.push('real + test');
   if(adPerf.type!=='all') parts.push(AD_CAMPAIGNS[adPerf.type]+' ads');
   if(adPerf.sponsor!=='all') parts.push(((S.advertisers||[]).find(a=>a.id===adPerf.sponsor)||{}).company||'Sponsor');
   if(adPerf.league!=='all') parts.push(((S.leagues||[]).find(l=>l.id===adPerf.league)||{}).name||'League');
   return parts.join(' · ');
 }
+/* ===== Ad performance: one report table + one chart, by month / quarter / year ===== */
+const AP_ROLES=[['player','Players'],['manager','Managers'],['admin','League admins'],['super','Super Admin'],['guest','Signed out (sign-in page)'],['unknown','Not recorded (before roles were tracked)']];
+const AP_GROUPS=[['sponsor','Sponsor'],['league','League'],['team','Team'],['role','Viewer type'],['tab','Tab (page)'],['type','Ad type']];
+const AP_COLORS=['#2a78d6','#eb6834','#1baf7a','#eda100','#e87ba4','#008300']; // validated categorical order (fixed, never cycled)
+let ap={compare:null, colorOf:{}, metric:'v', period:'month', from:null, to:null, group:'sponsor', sponsor:'all', league:'all', team:'all', role:'all', test:'exclude', sort:'total'};
+function apViewerRole(){ if(!S.user) return 'guest'; if(isSuperAdmin()) return 'super'; if(isAdmin()) return 'admin'; if(isManager()) return 'manager'; return 'player'; }
+function apTestPeriods(){ return ((S.adConfig||{}).testPeriods||[]).filter(p=>p&&p.from&&p.to); }
+function apInTestPeriod(date){ return apTestPeriods().some(p=>date>=p.from && date<=p.to); }
+function apIsTest(r){ return !!r.test || apInTestPeriod(r.date||''); }
+function apKey(date){ if(ap.period==='year') return date.slice(0,4); if(ap.period==='quarter'){ const m=+date.slice(5,7); return date.slice(0,4)+'-Q'+(Math.floor((m-1)/3)+1); } return date.slice(0,7); }
+function apLabel(k, short){ if(ap.period==='year') return k; if(ap.period==='quarter') return k.slice(5)+' '+(short?'’'+k.slice(2,4):k.slice(0,4));
+  const d=new Date(k+'-01T00:00:00'); return d.toLocaleDateString(undefined,{month:short?'short':'long',year:short?'2-digit':'numeric'}); }
+// every month/quarter/year from the earlier of (first ad data, 2 years ago) through the current period — gaps included, so From/To always have choices
+function apAllKeys(){ const now=new Date(); const first=(adPerf.rows||[]).map(r=>r.date).filter(Boolean).sort()[0];
+  const start=new Date(now.getFullYear()-2, now.getMonth(), 1); const d=first && new Date(first+'T00:00:00')<start ? new Date(first.slice(0,7)+'-01T00:00:00') : start;
+  const ks=new Set(); const cur=new Date(d); while(cur<=now){ ks.add(apKey(ymOf(cur)+'-01')); cur.setMonth(cur.getMonth()+1); } ks.add(apKey(now.toISOString().slice(0,10)));
+  return [...ks].sort(); }
+function apGroupOf(r){
+  switch(ap.group){
+    case 'sponsor': { const a=(S.advertisers||[]).find(x=>x.id===r.adId); return [r.adId,(a&&a.company)||r.company||'Unknown sponsor']; }
+    case 'league': return [r.leagueId||'none', r.leagueId==='none'?'Sign-in page (no league)':(((S.leagues||[]).find(l=>l.id===r.leagueId)||{}).name||'Unknown league')];
+    case 'team': return [r.teamId||'none', r.teamId?(teamNameById(r.teamId)||'Unknown team'):'No team'];
+    case 'role': { const k=r.role||'unknown'; return [k,(AP_ROLES.find(x=>x[0]===k)||[k,k])[1]]; }
+    case 'type': return [r.campaign||'national', AD_CAMPAIGNS[r.campaign||'national']||r.campaign];
+  } return ['?','?']; }
+// returns {keys, groups:[{id,name,cells:{key:{v,c,a}},tot}], tot, col}
+function apBuild(){
+  const all=apAllKeys(); const from=ap.from||all[Math.max(0,all.length-(ap.period==='month'?6:ap.period==='quarter'?4:3))], to=ap.to||all[all.length-1];
+  const keys=all.filter(k=>k>=from && k<=to);
+  const rows=(adPerf.rows||[]).filter(r=>r.date && keys.includes(apKey(r.date))
+    && (ap.test==='include' || (ap.test==='only'?apIsTest(r):!apIsTest(r)))
+    && (ap.sponsor==='all'||r.adId===ap.sponsor) && (ap.league==='all'||r.leagueId===ap.league)
+    && (ap.team==='all'||r.teamId===ap.team) && (ap.role==='all'||(r.role||'unknown')===ap.role));
+  const G={}; const col={}; keys.forEach(k=>col[k]={v:0,c:0,a:0}); const tot={v:0,c:0,a:0}; const acts={};
+  const add=(o,v,c,a)=>{ o.v+=v; o.c+=c; o.a+=a; };
+  rows.forEach(r=>{ const k=apKey(r.date);
+    if(ap.group==='tab'){ const pl=new Set([...Object.keys(r.views||{}),...Object.keys(r.clicks||{})]);
+      pl.forEach(p=>{ const v=+((r.views||{})[p])||0, c=+((r.clicks||{})[p])||0; const g=G[p]||(G[p]={id:p,name:placeLabel(p),cells:{},tot:{v:0,c:0,a:0}}); const cell=g.cells[k]||(g.cells[k]={v:0,c:0,a:0}); add(cell,v,c,0); add(g.tot,v,c,0); });
+      const a=sumObj(r.actions); if(a){ const g=G.__act||(G.__act={id:'__act',name:'Actions (details card)',cells:{},tot:{v:0,c:0,a:0}}); const cell=g.cells[k]||(g.cells[k]={v:0,c:0,a:0}); add(cell,0,0,a); add(g.tot,0,0,a); }
+    } else { const [id,name]=apGroupOf(r); const g=G[id]||(G[id]={id,name,cells:{},tot:{v:0,c:0,a:0}}); const cell=g.cells[k]||(g.cells[k]={v:0,c:0,a:0});
+      const v=sumObj(r.views), c=sumObj(r.clicks), a=sumObj(r.actions); add(cell,v,c,a); add(g.tot,v,c,a); }
+    add(col[k],sumObj(r.views),sumObj(r.clicks),sumObj(r.actions)); add(tot,sumObj(r.views),sumObj(r.clicks),sumObj(r.actions));
+    Object.entries(r.actions||{}).forEach(([ak,n])=>{ acts[ak]=(acts[ak]||0)+(+n||0); });
+    if(ap.group!=='tab'){ const [gid]=apGroupOf(r); const g=G[gid]; if(g){ g.cp=(g.cp||0)+(+((r.actions||{}).coupon)||0); } } });
+  const groups=Object.values(G).sort((a,b)=>ap.sort==='name'?a.name.localeCompare(b.name):(b.tot.v-a.tot.v)||a.name.localeCompare(b.name));
+  return {keys, groups, tot, col, from, to, all, acts};
+}
+// professional single-series column chart with hover
+function apColumnChart(keys, vals, title, color, fmtTip){
+  const W=640,H=230,L=48,R=12,T=16,B=34; const n=keys.length; const pw=W-L-R, ph=H-T-B;
+  const mx=Math.max(1,...vals); const step=(()=>{ const r=mx/4; const p=Math.pow(10,Math.floor(Math.log10(r||1))); for(const m of [1,2,2.5,5,10]) if(m*p>=r) return m*p; return 10*p; })(); const top=step*4;
+  const slot=pw/Math.max(1,n), bw=Math.min(46,slot*0.56);
+  let svg=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${title}" style="width:100%;height:auto;display:block;font-family:var(--font-body,system-ui);">`;
+  for(let g=0;g<=4;g++){ const y=T+ph-(g/4)*ph; svg+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="#e6dfcd" stroke-width="1"/><text x="${L-8}" y="${y+4}" text-anchor="end" font-size="11" fill="#6b746c">${(step*g).toLocaleString()}</text>`; }
+  svg+=`<line x1="${L}" x2="${W-R}" y1="${T+ph}" y2="${T+ph}" stroke="#b9b09a" stroke-width="1"/>`;
+  const li=vals.length-1;
+  keys.forEach((k,i)=>{ const v=vals[i]; const h2=v/top*ph; const x=L+slot*i+(slot-bw)/2, y=T+ph-h2; const r=Math.min(4,h2/2);
+    svg+=`<g class="apBar" data-i="${i}"><rect x="${L+slot*i}" y="${T}" width="${slot}" height="${ph}" fill="transparent"/>`;
+    if(h2>0) svg+=`<path d="M${x},${T+ph} V${y+r} Q${x},${y} ${x+r},${y} H${x+bw-r} Q${x+bw},${y} ${x+bw},${y+r} V${T+ph} Z" fill="${color}"/>`;
+    if(i===li||v===Math.max(...vals)) svg+=`<text x="${x+bw/2}" y="${y-6}" text-anchor="middle" font-size="11" font-weight="700" fill="#1e2a22">${v.toLocaleString()}</text>`;
+    svg+=`<text x="${x+bw/2}" y="${H-12}" text-anchor="middle" font-size="11" fill="#4a564c">${apLabel(k,true)}</text></g>`; });
+  svg+='</svg>';
+  const box=h('div',{style:'position:relative;'}); box.appendChild(h('div',{style:'font-size:13px;font-weight:800;margin:0 0 4px;'},title));
+  const wrap=document.createElement('div'); wrap.innerHTML=svg; box.appendChild(wrap);
+  const tip=h('div',{style:'position:absolute;pointer-events:none;display:none;background:#1e2a22;color:#fff;border-radius:8px;padding:6px 9px;font-size:12px;line-height:1.4;box-shadow:0 4px 12px rgba(0,0,0,.2);white-space:nowrap;z-index:2;'}); box.appendChild(tip);
+  wrap.querySelectorAll('.apBar').forEach(g=>{ g.addEventListener('mouseenter',e=>{ const i=+g.dataset.i; tip.innerHTML=fmtTip(i); tip.style.display='block'; });
+    g.addEventListener('mousemove',e=>{ const b=box.getBoundingClientRect(); tip.style.left=Math.min(b.width-150,e.clientX-b.left+12)+'px'; tip.style.top=(e.clientY-b.top-10)+'px'; });
+    g.addEventListener('mouseleave',()=>{ tip.style.display='none'; }); });
+  return box;
+}
+function apCompareChart(R){
+  const box=h('div',{});
+  if(ap.compare===null){ ap.compare=R.groups.slice(0,3).map(g=>g.id); }
+  ap.compare=ap.compare.filter(id=>R.groups.some(g=>g.id===id));
+  // colors follow the entity: an id keeps its slot while it stays selected
+  Object.keys(ap.colorOf).forEach(id=>{ if(!ap.compare.includes(id)) delete ap.colorOf[id]; });
+  ap.compare.forEach(id=>{ if(ap.colorOf[id]==null){ const used=new Set(Object.values(ap.colorOf)); ap.colorOf[id]=[0,1,2,3,4,5].find(i=>!used.has(i)); } });
+  const gname=(AP_GROUPS.find(g=>g[0]===ap.group)||[])[1];
+  box.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;'},[h('div',{style:'font-size:13px;font-weight:800;flex:1;'},'Compare '+gname.toLowerCase()+'s'),
+    h('div',{class:'segControl',style:'width:auto;'},[['v','Views'],['c','Clicks'],['r','Click rate']].map(([v,l])=>h('button',{class:ap.metric===v?'active':'',onclick:()=>{ ap.metric=v; renderShell(); }},l)))]));
+  const sel=R.groups.filter(g=>ap.compare.includes(g.id));
+  if(!sel.length){ box.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:6px 0;'},'Tick up to 6 rows in the report table below to compare them here.')); return box; }
+  const val=(o)=>!o?0:(ap.metric==='v'?o.v:ap.metric==='c'?o.c:(o.v?o.c/o.v*100:0));
+  const fmtV=(x)=>ap.metric==='r'?x.toFixed(1)+'%':Math.round(x).toLocaleString();
+  const mName={v:'views',c:'clicks',r:'click rate'}[ap.metric];
+  const totOf=(g)=>ap.metric==='v'?g.tot.v:ap.metric==='c'?g.tot.c:(g.tot.v?g.tot.c/g.tot.v*100:0);
+  const ranked=sel.slice().sort((a,b)=>totOf(b)-totOf(a));
+  const curK=apKey(new Date().toISOString().slice(0,10)); const ks2=R.keys.length>=3 && R.keys[R.keys.length-1]===curK ? R.keys.slice(0,-1) : R.keys; // skip the in-progress period
+  const lastK=ks2[ks2.length-1], prevK=ks2[ks2.length-2];
+  const medal=['🥇','🥈','🥉'];
+  const cards=h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px;margin:4px 0 14px;'});
+  ranked.forEach((g,ri)=>{ const c=AP_COLORS[ap.colorOf[g.id]]; const now=val(g.cells[lastK]), before=prevK?val(g.cells[prevK]):0;
+    const ch=before?((now-before)/before*100):null; const up=ch!=null&&ch>=0;
+    const sp=R.keys.map(k=>val(g.cells[k])); const smx=Math.max(1,...sp); const sw=150, sh=34;
+    const spark=sp.length>1?`<svg viewBox="0 0 ${sw} ${sh}" style="width:100%;height:34px;display:block;"><path d="${sp.map((v,i)=>(i?'L':'M')+(i*sw/(sp.length-1)).toFixed(1)+','+(sh-3-(v/smx)*(sh-6)).toFixed(1)).join(' ')} L${sw},${sh} L0,${sh} Z" fill="${c}" fill-opacity=".14"/><path d="${sp.map((v,i)=>(i?'L':'M')+(i*sw/(sp.length-1)).toFixed(1)+','+(sh-3-(v/smx)*(sh-6)).toFixed(1)).join(' ')}" fill="none" stroke="${c}" stroke-width="2" stroke-linejoin="round"/></svg>`:'';
+    const card=h('div',{style:'position:relative;border:1px solid var(--line);border-top:4px solid '+c+';border-radius:12px;padding:10px 12px 8px;background:#fff;box-shadow:0 2px 8px rgba(30,42,34,.06);'},[
+      h('div',{style:'display:flex;align-items:center;gap:6px;'},[h('span',{style:'font-size:16px;'},medal[ri]||('#'+(ri+1))),h('b',{style:'font-size:12.5px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'},g.name)]),
+      h('div',{style:'font-family:var(--font-mono);font-size:24px;font-weight:800;line-height:1.15;margin-top:4px;'},fmtV(totOf(g))),
+      h('div',{style:'font-size:10.5px;color:var(--ink-soft);'},mName+' · '+apLabel(R.from,true)+(R.from!==R.to?'–'+apLabel(R.to,true):'')),
+      ch==null?h('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:3px;'},'—'):h('div',{style:'display:inline-flex;align-items:center;gap:3px;font-size:11px;font-weight:800;margin-top:4px;padding:2px 7px;border-radius:10px;background:'+(up?'#e3f1e6':'#fbe6e3')+';color:'+(up?'#1f6b34':'#a8331f')+';'},[(up?'▲ ':'▼ ')+Math.abs(ch).toFixed(0)+'%', h('span',{style:'font-weight:600;color:var(--ink-soft);'},' '+apLabel(lastK,true)+' vs '+apLabel(prevK,true))])]);
+    const spw=document.createElement('div'); spw.style.marginTop='6px'; spw.innerHTML=spark; card.appendChild(spw); cards.appendChild(card); });
+  // share of total (views or clicks): one 100% bar with 2px gaps
+  let share=null; if(ap.metric!=='r'){ const st=ranked.reduce((n,g)=>n+totOf(g),0); if(st>0){ share=h('div',{style:'margin:0 0 14px;'},[h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;'},'Share of '+mName),
+      h('div',{style:'display:flex;gap:2px;height:22px;border-radius:6px;overflow:hidden;'},ranked.map(g=>{ const p=totOf(g)/st*100; return h('div',{title:g.name+': '+p.toFixed(0)+'%',style:'flex:0 0 '+p+'%;background:'+AP_COLORS[ap.colorOf[g.id]]+';display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800;'},p>=9?p.toFixed(0)+'%':''); }))]); } }
+  box.appendChild(cards); if(share) box.appendChild(share);
+  const keys=R.keys; const W=640,H=250,L=48,Rp=150,T=14,B=30; const pw=W-L-Rp, ph=H-T-B; const n=keys.length;
+  const all=sel.flatMap(g=>keys.map(k=>val(g.cells[k]))); const mx=Math.max(ap.metric==='r'?1:1,...all);
+  const step=(()=>{ const r=mx/4; const p=Math.pow(10,Math.floor(Math.log10(r||1))); for(const m of [1,2,2.5,5,10]) if(m*p>=r) return m*p; return 10*p; })(); const top=step*4;
+  const x=(i)=>L+(n<=1?pw/2:i*pw/(n-1)), y=(v)=>T+ph-(v/top)*ph;
+  let svg=`<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Comparison chart" style="width:100%;height:auto;display:block;">`;
+  for(let g=0;g<=4;g++){ const yy=T+ph-(g/4)*ph; svg+=`<line x1="${L}" x2="${L+pw}" y1="${yy}" y2="${yy}" stroke="#e6dfcd"/><text x="${L-8}" y="${yy+4}" text-anchor="end" font-size="11" fill="#6b746c">${ap.metric==='r'?(step*g).toFixed(step<1?1:0)+'%':(step*g).toLocaleString()}</text>`; }
+  svg+=`<line x1="${L}" x2="${L+pw}" y1="${T+ph}" y2="${T+ph}" stroke="#b9b09a"/>`;
+  keys.forEach((k,i)=>{ svg+=`<text x="${x(i)}" y="${H-10}" text-anchor="middle" font-size="11" fill="#4a564c">${apLabel(k,true)}</text>`; });
+  // end labels, nudged apart so they never collide
+  const ends=sel.map(g=>({g, y:y(val(g.cells[keys[n-1]]))})).sort((a,b)=>a.y-b.y);
+  for(let i=1;i<ends.length;i++) if(ends[i].y-ends[i-1].y<14) ends[i].y=ends[i-1].y+14;
+  svg+='<defs>'+sel.map(g=>{ const c=AP_COLORS[ap.colorOf[g.id]]; return `<linearGradient id="apg${ap.colorOf[g.id]}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c}" stop-opacity="${sel.length>2?0.10:0.18}"/><stop offset="1" stop-color="${c}" stop-opacity="0"/></linearGradient>`; }).join('')+'</defs>';
+  sel.forEach(g=>{ const c=AP_COLORS[ap.colorOf[g.id]]; const pts=keys.map((k,i)=>[x(i),y(val(g.cells[k]))]);
+    if(pts.length>1) svg+=`<path d="M${pts[0][0]},${T+ph} ${pts.map(p=>'L'+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')} L${pts[pts.length-1][0]},${T+ph} Z" fill="url(#apg${ap.colorOf[g.id]})"/>`;
+    svg+=`<path d="${pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="none" stroke="${c}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    pts.forEach(p=>{ svg+=`<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${c}" stroke="#fffdf8" stroke-width="2"/>`; }); });
+  ends.forEach(e=>{ const c=AP_COLORS[ap.colorOf[e.g.id]]; const nm=e.g.name.length>16?e.g.name.slice(0,15)+'…':e.g.name; svg+=`<line x1="${L+pw+6}" x2="${L+pw+14}" y1="${e.y}" y2="${e.y}" stroke="${c}" stroke-width="2"/><text x="${L+pw+18}" y="${e.y+4}" font-size="11" fill="#1e2a22"><tspan font-weight="800">${fmtV(val(e.g.cells[keys[n-1]]))}</tspan> ${nm.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</text>`; });
+  // hover columns
+  keys.forEach((k,i)=>{ const x0=n<=1?L:x(i)-pw/(2*Math.max(1,n-1)); const wd=n<=1?pw:pw/Math.max(1,n-1); svg+=`<rect class="apHov" data-i="${i}" x="${Math.max(L,x0)}" y="${T}" width="${wd}" height="${ph}" fill="transparent"/>`; });
+  svg+='</svg>';
+  const wrap=h('div',{style:'position:relative;'}); wrap.innerHTML=svg; box.appendChild(wrap);
+  const tip=h('div',{style:'position:absolute;pointer-events:none;display:none;background:#1e2a22;color:#fff;border-radius:8px;padding:7px 10px;font-size:12px;line-height:1.5;box-shadow:0 4px 12px rgba(0,0,0,.2);z-index:2;'}); wrap.appendChild(tip);
+  const cross=document.createElementNS('http://www.w3.org/2000/svg','line'); cross.setAttribute('stroke','#8a8f87'); cross.setAttribute('stroke-dasharray','3,3'); cross.setAttribute('y1',T); cross.setAttribute('y2',T+ph); cross.style.display='none'; wrap.querySelector('svg').appendChild(cross);
+  wrap.querySelectorAll('.apHov').forEach(r=>{ r.addEventListener('mousemove',e=>{ const i=+r.dataset.i; cross.setAttribute('x1',x(i)); cross.setAttribute('x2',x(i)); cross.style.display='';
+      tip.innerHTML='<b>'+apLabel(keys[i],false)+'</b><br>'+sel.slice().sort((a,b)=>val(b.cells[keys[i]])-val(a.cells[keys[i]])).map(g=>'<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+AP_COLORS[ap.colorOf[g.id]]+';margin-right:6px;"></span>'+g.name.replace(/</g,'&lt;')+': <b>'+fmtV(val(g.cells[keys[i]]))+'</b>').join('<br>');
+      const b=wrap.getBoundingClientRect(); tip.style.display='block'; tip.style.left=Math.min(b.width-200,e.clientX-b.left+14)+'px'; tip.style.top=Math.max(0,e.clientY-b.top-20)+'px'; });
+    r.addEventListener('mouseleave',()=>{ tip.style.display='none'; cross.style.display='none'; }); });
+  return box;
+}
 function adPerformanceView(root){
   if(!adPerf.loaded && !adPerf.loading){ loadAdStats(); }
-  const fc=h('div',{class:'card'}); fc.appendChild(h('h3',{},['Ad performance', h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ adFlush(); setTimeout(loadAdStats,800); }},adPerf.loading?'Loading…':'↻ Refresh')]));
-  if(!adCountSelf()) fc.appendChild(h('div',{class:'alertBanner',style:'cursor:pointer;margin-bottom:10px;',onclick:()=>{ adSub='settings'; renderShell(); }},[h('span',{},'ℹ️'),h('span',{style:'flex:1;font-size:12.5px;'},'Your own views and clicks as Super Admin aren’t counted. To test, turn on Test mode in Settings, or view and tap ads from a player account.'),h('span',{style:'font-weight:800;'},'Settings →')]));
-  fc.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Views = an ad actually shown on screen. Clicks = someone tapped a clickable ad to open its details. Actions = taps on Website, Call, Email, Directions, or Copy coupon. Counts are anonymous totals, update about once a minute, and your own Super Admin activity isn’t counted.'));
-  const sel=(label,cur,opts,on)=>{ const s2=h('select',{}); opts.forEach(([v,l])=>{ const o=h('option',{value:v},l); if(String(v)===String(cur)) o.setAttribute('selected','selected'); s2.appendChild(o); }); s2.addEventListener('change',()=>{ on(s2.value); renderShell(); }); return h('div',{style:'flex:1 1 150px;'},[h('div',{style:'font-size:10px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:3px;'},label),s2]); };
-  fc.appendChild(h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;'},[
-    sel('Time range',adPerf.range,[[7,'Last 7 days'],[30,'Last 30 days'],[90,'Last 90 days'],[365,'Last 12 months'],['all','All time']],v=>{ adPerf.range=v==='all'?'all':parseInt(v); }),
-    sel('Ad type',adPerf.type,[['all','All types'],['national','National'],['regional','Regional'],['local','Local']],v=>{ adPerf.type=v; }),
-    sel('Sponsor',adPerf.sponsor,[['all','All sponsors']].concat((S.advertisers||[]).slice().sort((a,b)=>(a.company||'').localeCompare(b.company||'')).map(a=>[a.id,a.company||'?'])),v=>{ adPerf.sponsor=v; }),
-    sel('League',adPerf.league,[['all','All leagues']].concat((S.leagues||[]).map(l=>[l.id,l.name])).concat([['none','Sign-in page (no league yet)']]),v=>{ adPerf.league=v; })
-  ]));
-  root.appendChild(fc);
   if(adPerf.loading && !adPerf.loaded){ root.appendChild(h('p',{style:'text-align:center;color:var(--ink-soft);'},'Loading…')); return; }
-  const D=adPerfData();
+  const R=apBuild();
+  // ---- Filters: one card, one grid ----
+  const fc=h('div',{class:'card'});
+  fc.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:10px;'},[h('h3',{style:'margin:0;flex:1;'},'Ad performance'),
+    h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ adFlush(); setTimeout(loadAdStats,800); }},adPerf.loading?'Loading…':'↻ Refresh')]));
+  const lab=(t,el)=>h('label',{style:'display:flex;flex-direction:column;gap:3px;font-size:10.5px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;'},[t,el]);
+  const sel=(cur,opts,on)=>{ const s=h('select',{style:'font-size:13px;'}); opts.forEach(([v,l])=>{ const o=h('option',{value:v},l); if(String(v)===String(cur)) o.setAttribute('selected','selected'); s.appendChild(o); }); s.addEventListener('change',()=>{ on(s.value); renderShell(); }); return s; };
+  const seg=h('div',{class:'segControl',style:'width:auto;'},[['month','Month'],['quarter','Quarter'],['year','Year']].map(([v,l])=>h('button',{class:ap.period===v?'active':'',onclick:()=>{ ap.period=v; ap.from=null; ap.to=null; renderShell(); }},l)));
+  const kOpts=R.all.map(k=>[k,apLabel(k,false)]);
+  const teams=(S.allTeams||S.teams||[]).filter(t=>(adPerf.rows||[]).some(r=>r.teamId===t.id));
+  fc.appendChild(h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;align-items:end;'},[
+    lab('Show by',seg), lab('From',sel(R.from,kOpts,v=>ap.from=v)), lab('To',sel(R.to,kOpts,v=>ap.to=v)),
+    lab('Rows',sel(ap.group,AP_GROUPS,v=>{ ap.group=v; ap.compare=null; ap.colorOf={}; })),
+    lab('Sponsor',sel(ap.sponsor,[['all','All sponsors']].concat((S.advertisers||[]).slice().sort((a,b)=>(a.company||'').localeCompare(b.company||'')).map(a=>[a.id,a.company||'?'])),v=>ap.sponsor=v)),
+    lab('League',sel(ap.league,[['all','All leagues']].concat((S.leagues||[]).map(l=>[l.id,l.name])).concat([['none','Sign-in page']]),v=>ap.league=v)),
+    lab('Team',sel(ap.team,[['all','All teams']].concat(teams.map(t=>[t.id,t.name])),v=>ap.team=v)),
+    lab('Viewer',sel(ap.role,[['all','Everyone']].concat(AP_ROLES),v=>ap.role=v)),
+    lab('Test data',sel(ap.test,[['exclude','Leave out (real only)'],['include','Include'],['only','Test only']],v=>ap.test=v))]));
+  root.appendChild(fc);
+  // ---- KPI strip ----
   const kc=h('div',{class:'card'});
-  kc.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin-bottom:8px;'},adPerfFilterLabel()));
-  kc.appendChild(h('div',{class:'kpiRow'},[
-    h('div',{class:'kpi'},[h('div',{class:'k'},'Views'),h('div',{class:'v'},D.views.toLocaleString())]),
-    h('div',{class:'kpi'},[h('div',{class:'k'},'Clicks'),h('div',{class:'v'},D.clicks.toLocaleString())]),
-    h('div',{class:'kpi'},[h('div',{class:'k'},'Click rate'),h('div',{class:'v'},pct(D.clicks,D.views))]),
-    h('div',{class:'kpi',title:'After opening a clickable ad, taps on Website, Call, Email, Directions or Copy coupon'},[h('div',{class:'k'},'Actions ⓘ'),h('div',{class:'v'},D.actionsTotal.toLocaleString()),h('div',{class:'s'},AD_ACTIONS.filter(([k])=>D.actions[k]).map(([k,l])=>l+' '+D.actions[k]).join(' · ')||'none yet')])
-  ]));
-  kc.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'},[
-    h('button',{class:'btn btn-gold btn-sm',onclick:()=>downloadAdReport(D)},'⬇ Download report (charts)'),
-    h('button',{class:'btn btn-outline btn-sm',onclick:()=>downloadAdExcel(D)},'⬇ Download Excel (data)')
-  ]));
-  kc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:6px 0 0;'},'Tip: pick one sponsor above, then download — that makes the report for that sponsor.'));
-  kc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.45;'},[h('b',{},'Actions'),' = what people did after tapping a clickable ad: opened the website, called, emailed, got directions, or copied the coupon code. It’s the best sign an ad turned into a customer.']));
+  const kpi=(k,v,s)=>h('div',{style:'flex:1 1 120px;padding:4px 14px;border-left:3px solid var(--line);'},[h('div',{style:'font-size:10.5px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;'},k),h('div',{style:'font-size:26px;font-weight:800;font-family:var(--font-mono);line-height:1.2;'},v),s?h('div',{style:'font-size:11px;color:var(--ink-soft);'},s):null]);
+  kc.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin-bottom:8px;'},apLabel(R.from,false)+(R.from!==R.to?' – '+apLabel(R.to,false):'')+(ap.test==='exclude'?' · test data left out':ap.test==='only'?' · TEST data only':' · includes test data')));
+  kc.appendChild(h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;'},[kpi('Views',R.tot.v.toLocaleString()),kpi('Clicks',R.tot.c.toLocaleString()),kpi('Click rate',pct(R.tot.c,R.tot.v)),kpi('Actions',R.tot.a.toLocaleString(),AD_ACTIONS.filter(([k])=>R.acts[k]).map(([k,l])=>l+' '+R.acts[k]).join(' · ')||'website, call, directions, coupon'),kpi('Coupons copied',(R.acts.coupon||0).toLocaleString(),'included in Actions')]));
   root.appendChild(kc);
-  root.appendChild(adTrendCard());
-  if(!D.views && !D.clicks){ root.appendChild(emptyState('No ad activity yet','Views and clicks appear here as members use the app with ads turned on.','diamond')); return; }
-  const C=adPerfCharts(D);
-  const chartCard=(title,a,b,la,lb)=>{ const c=h('div',{class:'card'}); c.appendChild(h('h3',{},title)); if(a){ c.appendChild(h('div',{class:'sectiontitle'},la)); c.appendChild(a); } if(b){ c.appendChild(h('div',{class:'sectiontitle',style:'margin-top:12px;'},lb)); c.appendChild(b); } return c; };
-  root.appendChild(chartCard('By tab (page)',C.pageViews,C.pageClicks,'Views by tab — click rate under each bar','Clicks by tab'));
-  root.appendChild(chartCard('By advertisement type',C.typeViews,C.typeClicks,'Views by type — click rate under each bar','Clicks by type'));
-  const sc=h('div',{class:'card'}); sc.appendChild(h('h3',{},'By sponsor'));
-  const t=h('table',{class:'dataTable',style:'min-width:760px;'});
-  t.appendChild(h('tr',{},['Sponsor','Type','Tier','Views','Clicks','CTR'].concat(AD_ACTIONS.map(x=>x[1])).map((c,i)=>h('th',{style:i===0?'text-align:left;':''},c))));
-  Object.entries(D.bySponsor).sort((a,b)=>b[1].views-a[1].views).forEach(([id,r])=>t.appendChild(h('tr',{},[h('td',{style:'text-align:left;font-weight:700;cursor:pointer;color:var(--grass-1);text-decoration:underline;',onclick:()=>{ adPerf.sponsor=id; renderShell(); }},r.company),h('td',{},AD_CAMPAIGNS[r.campaign]||r.campaign),h('td',{},r.tier),h('td',{},r.views.toLocaleString()),h('td',{},r.clicks.toLocaleString()),h('td',{},pct(r.clicks,r.views))].concat(AD_ACTIONS.map(([k])=>h('td',{},String(r.actions[k]||0)))))));
-  const sw=h('div',{class:'gridScroll'}); sw.appendChild(t); sc.appendChild(sw); root.appendChild(sc);
-  const lc=h('div',{class:'card'}); lc.appendChild(h('h3',{},'By league'));
-  const lt=h('table',{class:'dataTable'}); lt.appendChild(h('tr',{},['League','Region','Views','Clicks','CTR'].map((c,i)=>h('th',{style:i<2?'text-align:left;':''},c))));
-  Object.entries(D.byLeague).sort((a,b)=>b[1].views-a[1].views).forEach(([n,r])=>lt.appendChild(h('tr',{},[h('td',{style:'text-align:left;'},n),h('td',{style:'text-align:left;'},r.region||'—'),h('td',{},r.views.toLocaleString()),h('td',{},r.clicks.toLocaleString()),h('td',{},pct(r.clicks,r.views))])));
-  const lw=h('div',{class:'gridScroll'}); lw.appendChild(lt); lc.appendChild(lw); root.appendChild(lc);
+  // ---- Chart ----
+  const cc=h('div',{class:'card'});
+  const vs=R.keys.map(k=>R.col[k].v), cs=R.keys.map(k=>R.col[k].c);
+  const tipFor=(i)=>{ const c=R.col[R.keys[i]]; return '<b>'+apLabel(R.keys[i],false)+'</b><br>'+c.v.toLocaleString()+' views · '+c.c.toLocaleString()+' clicks<br>'+pct(c.c,c.v)+' click rate · '+c.a.toLocaleString()+' actions'; };
+  const grid=h('div',{style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:18px;'});
+  grid.appendChild(apColumnChart(R.keys,vs,'Views by '+ap.period,'#2f5233',tipFor));
+  grid.appendChild(apColumnChart(R.keys,cs,'Clicks by '+ap.period,'#c99a3a',tipFor));
+  cc.appendChild(grid); root.appendChild(cc);
+  const cmp=h('div',{class:'card'}); cmp.appendChild(apCompareChart(R)); root.appendChild(cmp);
+  // ---- The report table ----
+  const tc=h('div',{class:'card'});
+  tc.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;'},[h('h3',{style:'margin:0;flex:1;'},'Report by '+(AP_GROUPS.find(g=>g[0]===ap.group)||[])[1].toLowerCase()),
+    h('button',{class:'btn btn-outline btn-sm',onclick:()=>apExcel(R)},'⬇ Excel'),h('button',{class:'btn btn-gold btn-sm',title:'One-page report for the sponsor picked in the Sponsor filter, for the From–To range. Test data is always left out.',onclick:sponsorReportFromPerformance},'📄 Sponsor report')]));
+  const t=h('table',{class:'dataTable apTable'});
+  const sticky='position:sticky;left:0;background:var(--white);z-index:1;text-align:left;';
+  t.appendChild(h('tr',{},[h('th',{style:sticky+'cursor:pointer;',onclick:()=>{ ap.sort=ap.sort==='name'?'total':'name'; renderShell(); }},(AP_GROUPS.find(g=>g[0]===ap.group)||[])[1]+(ap.sort==='name'?' ▲':''))].concat(R.keys.map(k=>h('th',{style:'white-space:nowrap;'},apLabel(k,true)))).concat([h('th',{style:'border-left:2px solid var(--line);cursor:pointer;',onclick:()=>{ ap.sort='total'; renderShell(); }},'Total views'+(ap.sort==='total'?' ▼':'')),h('th',{},'Clicks'),h('th',{},'CTR'),h('th',{},'Actions'),h('th',{title:'Times the coupon code was copied'},'Coupons')])));
+  const cell=(o)=>h('td',{style:'white-space:nowrap;'},o&&(o.v||o.c||o.a)?[h('div',{style:'font-weight:700;'},o.v.toLocaleString()),h('div',{style:'font-size:10.5px;color:var(--ink-soft);'},o.c+' clk')]:h('span',{style:'color:#bbb;'},'—'));
+  if(!R.groups.length) t.appendChild(h('tr',{},h('td',{colspan:String(R.keys.length+6),style:'text-align:center;color:var(--ink-soft);padding:14px;'},'No ad activity for these filters.')));
+  const cbFor=(g)=>{ const on=(ap.compare||[]).includes(g.id); const full=(ap.compare||[]).length>=6;
+    const cb=h('input',{type:'checkbox',style:'width:auto;margin:0;accent-color:'+(on?AP_COLORS[ap.colorOf[g.id]]:'var(--grass-1)')+';'}); cb.checked=on; if(!on&&full) cb.disabled=true;
+    cb.addEventListener('change',()=>{ ap.compare=ap.compare||[]; ap.compare=cb.checked?ap.compare.concat([g.id]):ap.compare.filter(x=>x!==g.id); renderShell(); });
+    cb.title=on?'In the comparison chart':(full?'6 already selected':'Add to the comparison chart'); return cb; };
+  R.groups.forEach(g=>t.appendChild(h('tr',{},[h('td',{style:sticky+'font-weight:700;'},[h('span',{style:'margin-right:7px;'},cbFor(g)),(ap.compare||[]).includes(g.id)?h('span',{style:'display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;background:'+AP_COLORS[ap.colorOf[g.id]]+';'}):null,g.name])].concat(R.keys.map(k=>cell(g.cells[k]))).concat([h('td',{style:'border-left:2px solid var(--line);font-weight:800;'},g.tot.v.toLocaleString()),h('td',{},g.tot.c.toLocaleString()),h('td',{},pct(g.tot.c,g.tot.v)),h('td',{},g.tot.a.toLocaleString()),h('td',{},ap.group==='tab'?'—':(g.cp||0).toLocaleString())]))));
+  if(R.groups.length>1) t.appendChild(h('tr',{style:'border-top:2px solid var(--ink);'},[h('td',{style:sticky+'font-weight:800;'},'Total')].concat(R.keys.map(k=>cell(R.col[k]))).concat([h('td',{style:'border-left:2px solid var(--line);font-weight:800;'},R.tot.v.toLocaleString()),h('td',{style:'font-weight:800;'},R.tot.c.toLocaleString()),h('td',{style:'font-weight:800;'},pct(R.tot.c,R.tot.v)),h('td',{style:'font-weight:800;'},R.tot.a.toLocaleString()),h('td',{style:'font-weight:800;'},(R.acts.coupon||0).toLocaleString())])));
+  const sw=h('div',{class:'gridScroll'}); sw.appendChild(t); tc.appendChild(sw);
+  tc.appendChild(h('p',{style:'font-size:11px;color:var(--ink-soft);margin:8px 0 0;line-height:1.45;'},'Tick a row to add it to the comparison chart (up to 6). Each cell: views, with clicks underneath. Views = an ad shown on screen; clicks = a tap that opened the ad’s details; actions = website, call, email, directions or coupon taps. Anonymous totals — no individual player is identified.'));
+  root.appendChild(tc);
+  root.appendChild(apTestCard());
 }
+function apExcel(R){
+  if(typeof XLSX==='undefined'){ toast('Excel export unavailable'); return; }
+  const g=(AP_GROUPS.find(x=>x[0]===ap.group)||[])[1];
+  const head=[g].concat(R.keys.flatMap(k=>[apLabel(k,false)+' views',apLabel(k,false)+' clicks'])).concat(['Total views','Total clicks','CTR %','Actions','Coupons copied']);
+  const rows=R.groups.map(x=>[x.name].concat(R.keys.flatMap(k=>{ const c=x.cells[k]||{v:0,c:0}; return [c.v,c.c]; })).concat([x.tot.v,x.tot.c,x.tot.v?+(x.tot.c/x.tot.v*100).toFixed(1):0,x.tot.a,x.cp||0]));
+  const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([head].concat(rows)),'Report');
+  XLSX.writeFile(wb,'Ad report by '+g.toLowerCase()+'.xlsx');
+}
+// ---- Test data: admin/super admin switches + named test periods ----
+function apTestCard(){
+  const cfg=S.adConfig||{}; const tc=h('div',{class:'card',style:'border:2px dashed var(--gold);'});
+  tc.appendChild(h('h3',{},['🧪 Test data ', h('span',{class:'pill-gold'},'kept out of reports unless you include it')]));
+  const yn=(label,sub,on,key)=>h('div',{style:'display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--line);'},[h('div',{style:'flex:1;'},[h('b',{style:'font-size:13px;'},label),h('div',{style:'font-size:11px;color:var(--ink-soft);'},sub)]),
+    h('div',{class:'segControl',style:'width:auto;'},[['yes','Yes'],['no','No']].map(([v,l])=>h('button',{class:(on?'yes':'no')===v?'active':'',onclick:()=>adSetCfg({[key]:v==='yes'})},l)))]);
+  tc.appendChild(yn('Count Super Admin views & clicks (as test)','Your own testing on any device',!!cfg.testSuper,'testSuper'));
+  tc.appendChild(yn('Count league admin views & clicks (as test)','Every league’s admins',!!cfg.testAdmin,'testAdmin'));
+  tc.appendChild(h('div',{style:'font-size:12px;font-weight:800;margin:12px 0 4px;'},'Test periods'));
+  tc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:0 0 6px;'},'Everything recorded between these dates — by anyone — is treated as test data. Use it for a demo week or a launch trial.'));
+  const tp=apTestPeriods(); const t=h('table',{class:'dataTable'});
+  t.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Name'),h('th',{},'From'),h('th',{},'To'),h('th',{},'Views'),h('th',{},'Clicks'),h('th',{})]));
+  if(!tp.length) t.appendChild(h('tr',{},h('td',{colspan:'6',style:'text-align:center;color:var(--ink-soft);'},'No test periods yet.')));
+  tp.forEach(p=>{ const rs=(adPerf.rows||[]).filter(r=>r.date>=p.from&&r.date<=p.to); const v=rs.reduce((n,r)=>n+sumObj(r.views),0), c=rs.reduce((n,r)=>n+sumObj(r.clicks),0);
+    t.appendChild(h('tr',{},[h('td',{style:'text-align:left;font-weight:700;'},p.name||'Test period'),h('td',{},formatDate(p.from)),h('td',{},formatDate(p.to)),h('td',{},v.toLocaleString()),h('td',{},c.toLocaleString()),
+      h('td',{style:'white-space:nowrap;'},[h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Delete this period’s data?','Permanently deletes '+v.toLocaleString()+' views and '+c.toLocaleString()+' clicks recorded '+formatDate(p.from)+' – '+formatDate(p.to)+'. The period stays listed.',()=>apDeleteRows(rs),{danger:true,confirmLabel:'Delete data'})},'🗑 Data'),' ',
+        h('button',{class:'btn btn-outline btn-sm',onclick:()=>adSetCfg({testPeriods:apTestPeriods().filter(x=>x.id!==p.id)})},'✕ Period')])])); });
+  const sw=h('div',{class:'gridScroll'}); sw.appendChild(t); tc.appendChild(sw);
+  const nm=h('input',{type:'text',placeholder:'e.g. Pre-launch demo',style:'flex:2 1 160px;'}), f=h('input',{type:'date',style:'flex:1 1 130px;'}), to=h('input',{type:'date',style:'flex:1 1 130px;'});
+  tc.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;'},[nm,f,to,h('button',{class:'btn btn-primary btn-sm',onclick:()=>{ if(!f.value||!to.value){ toast('Pick the from and to dates'); return; } const a=f.value<=to.value?f.value:to.value, b=f.value<=to.value?to.value:f.value;
+    adSetCfg({testPeriods:apTestPeriods().concat([{id:'tp'+Date.now().toString(36),name:nm.value.trim()||'Test period',from:a,to:b}])}); }},'+ Add test period')]));
+  const tagged=(adPerf.rows||[]).filter(r=>r.test); const tv=tagged.reduce((n,r)=>n+sumObj(r.views),0), tk=tagged.reduce((n,r)=>n+sumObj(r.clicks),0);
+  tc.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;border-top:1px solid var(--line);margin-top:12px;padding-top:10px;'},[
+    h('div',{style:'flex:1;font-size:12.5px;'},[h('b',{},'Admin test data: '),tv.toLocaleString()+' views · '+tk.toLocaleString()+' clicks']),
+    h('button',{class:'btn btn-sm',style:'background:var(--leather-2);color:#fff;border-color:var(--leather-2);'+(tagged.length?'':'opacity:.5;'),onclick:()=>{ if(!tagged.length){ toast('No admin test data'); return; } confirmModal('Clear admin test data?','Permanently deletes '+tv.toLocaleString()+' views and '+tk.toLocaleString()+' clicks recorded by admins while testing was on. Players’ and managers’ data is not touched.',()=>apDeleteRows(tagged),{danger:true,confirmLabel:'Clear'}); }},'🗑 Clear admin test data')]));
+  return tc;
+}
+async function apDeleteRows(rows){ adFlush(); let n=0; const ids=new Set(rows.map(r=>r.id));
+  for(const r of rows){ try{ await deleteDoc(doc(db,'adStats',r.id)); n++; }catch(e){ console.warn('delete ad stat',e); } }
+  adPerf.rows=(adPerf.rows||[]).filter(r=>!ids.has(r.id)); toast('Deleted '+n+' record'+(n===1?'':'s')); renderShell(); }
+
 let adTrendPeriod='month';
 let adTrendHidden=(()=>{ try{ return localStorage.getItem('gbAdTrendHidden')==='1'; }catch(e){ return false; } })();
 function adTrendKey(date){ if(!date) return ''; if(adTrendPeriod==='year') return date.slice(0,4); if(adTrendPeriod==='quarter'){ const m=parseInt(date.slice(5,7),10); return date.slice(0,4)+'-Q'+(Math.floor((m-1)/3)+1); } return date.slice(0,7); }
@@ -6540,7 +6747,7 @@ function adTrendCard(){
   c.appendChild(h('h3',{},['Trend', hideBtn]));
   if(adTrendHidden){ c.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0;'},'Trend chart hidden. Tap Show to bring it back.')); return c; }
   c.appendChild(h('div',{class:'segControl',style:'margin-bottom:10px;'},[['month','Month'],['quarter','Quarter'],['year','Year']].map(([v,l])=>h('button',{class:adTrendPeriod===v?'active':'',onclick:()=>{ adTrendPeriod=v; renderShell(); }},l))));
-  const rows=(adPerf.rows||[]).filter(r=>(adPerf.type==='all'||r.campaign===adPerf.type) && (adPerf.sponsor==='all'||r.adId===adPerf.sponsor) && (adPerf.league==='all'||r.leagueId===adPerf.league));
+  const rows=(adPerf.rows||[]).filter(r=>adRowKept(r) && (adPerf.type==='all'||r.campaign===adPerf.type) && (adPerf.sponsor==='all'||r.adId===adPerf.sponsor) && (adPerf.league==='all'||r.leagueId===adPerf.league));
   const b={}; rows.forEach(r=>{ const k=adTrendKey(r.date); if(!k) return; const x=b[k]||(b[k]={v:0,c:0,a:0}); x.v+=sumObj(r.views); x.c+=sumObj(r.clicks); x.a+=sumObj(r.actions); });
   const keys=Object.keys(b).sort();
   c.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:0 0 8px;'},'All time, by '+adTrendPeriod+'. Uses the Ad type, Sponsor and League filters above (not the time range).'));
@@ -6566,6 +6773,112 @@ function downloadAdExcel(D){
   const who=adPerf.sponsor!=='all'?(((S.advertisers||[]).find(a=>a.id===adPerf.sponsor)||{}).company||'Sponsor'):'All sponsors';
   XLSX.writeFile(wb,'Ad report - '+who+' - '+new Date().toISOString().slice(0,10)+'.xlsx'); toast('Excel file downloaded');
 }
+/* ===== Sponsor report: one printable page per sponsor (export as PDF or file) ===== */
+// opts: {ad, rows (adStats docs), from:'YYYY-MM-DD'|'', to:'YYYY-MM-DD'|'', fee:number|null}
+function sponsorReportHTML(o){
+  const esc=(t)=>String(t==null?'':t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const a=o.ad||{}; const from=o.from||'', to=o.to||'';
+  const rows=(o.rows||[]).filter(r=>r.adId===a.id && r.date && !apIsTest(r) && (!from||r.date>=from) && (!to||r.date<=to));
+  const S0={v:0,c:0,acts:{},roles:{},places:{},months:{},leagues:new Set()};
+  rows.forEach(r=>{ const v=sumObj(r.views), c=sumObj(r.clicks); S0.v+=v; S0.c+=c;
+    Object.entries(r.actions||{}).forEach(([k,n])=>S0.acts[k]=(S0.acts[k]||0)+(+n||0));
+    const role=r.role||'unknown'; S0.roles[role]=(S0.roles[role]||0)+v;
+    Object.entries(r.views||{}).forEach(([p,n])=>S0.places[p]=(S0.places[p]||0)+(+n||0));
+    const m=r.date.slice(0,7); S0.months[m]=(S0.months[m]||0)+v; if(r.leagueId&&r.leagueId!=='none') S0.leagues.add(r.leagueId); });
+  const A=sumObj(S0.acts), cp=S0.acts.coupon||0;
+  const lgNames=[...S0.leagues].map(id=>((S.leagues||[]).find(l=>l.id===id)||{}).name).filter(Boolean);
+  const where=lgNames.length===1?lgNames[0]:(lgNames.length?lgNames.length+' senior softball leagues':'senior softball leagues');
+  const fmtD=(d)=>d?new Date(d+'T00:00:00').toLocaleDateString(undefined,{month:'long',year:'numeric'}):'';
+  const minD=rows.map(r=>r.date).sort()[0]||from, maxD=rows.map(r=>r.date).sort().slice(-1)[0]||to;
+  const period=(minD?fmtD(from||minD):'')+((to||maxD)&&fmtD(to||maxD)!==fmtD(from||minD)?' – '+fmtD(to||maxD):'');
+  const tier=(AD_TIERS[adTier(a)]||{}).label||''; const fee=o.fee!=null&&+o.fee>0?+o.fee:null;
+  const oneIn=S0.c?Math.max(1,Math.round(S0.v/S0.c)):null;
+  const actLine=AD_ACTIONS.filter(([k])=>S0.acts[k]).map(([k,l])=>(k==='coupon'?'coupon':l.toLowerCase())+' '+S0.acts[k]).join(' · ')||'none yet';
+  const initials=(a.company||'?').split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0].toUpperCase()).join('');
+  // monthly columns (fill gaps)
+  const months=[]; if(minD||from){ const d=new Date(((from||minD).slice(0,7))+'-01T00:00:00'), end=new Date(((to||maxD||new Date().toISOString()).slice(0,7))+'-01T00:00:00'); while(d<=end && months.length<24){ months.push(ymOf(d)); d.setMonth(d.getMonth()+1); } }
+  const mv=months.map(m=>S0.months[m]||0); const curM=ymOf(new Date());
+  const peak=mv.length?months[mv.indexOf(Math.max(...mv))]:null;
+  let chart=''; if(months.length){ const W=420,H=170,L=34,R=8,T=18,B=24,pw=W-L-R,ph=H-T-B; const mx=Math.max(1,...mv);
+    const st=(()=>{ const r=mx/4; const p=Math.pow(10,Math.floor(Math.log10(r||1))); for(const k of [1,2,2.5,5,10]) if(k*p>=r) return k*p; return 10*p; })(), TOPV=st*4;
+    const slot=pw/months.length, bw=Math.min(30,slot*.6);
+    chart=`<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;font-family:system-ui">`;
+    for(let g=0;g<=4;g++){ const y=T+ph-g/4*ph; chart+=`<line x1="${L}" x2="${W-R}" y1="${y}" y2="${y}" stroke="#ece6d6"/><text x="${L-6}" y="${y+4}" text-anchor="end" font-size="10" fill="#7a827a">${(st*g).toLocaleString()}</text>`; }
+    months.forEach((m,i)=>{ const n=mv[i], h2=n/TOPV*ph, x=L+slot*i+(slot-bw)/2, y=T+ph-h2, r=Math.min(4,h2/2); const c=m===peak?'#c99a3a':'#2f5233';
+      if(h2>0) chart+=`<path d="M${x},${T+ph} V${y+r} Q${x},${y} ${x+r},${y} H${x+bw-r} Q${x+bw},${y} ${x+bw},${y+r} V${T+ph} Z" fill="${c}"/>`;
+      if(months.length<=12) chart+=`<text x="${x+bw/2}" y="${y-5}" text-anchor="middle" font-size="10.5" font-weight="700" fill="#1e2a22">${n.toLocaleString()}</text>`;
+      chart+=`<text x="${x+bw/2}" y="${H-8}" text-anchor="middle" font-size="10.5" fill="#5a655c">${new Date(m+'-01T00:00:00').toLocaleDateString(undefined,{month:'short'})}${m===curM?'*':''}</text>`; });
+    chart+=`<line x1="${L}" x2="${W-R}" y1="${T+ph}" y2="${T+ph}" stroke="#b9b09a"/></svg>`+(months.includes(curM)?`<div style="font-size:10px;color:#7a827a;margin-top:2px">* ${new Date().toLocaleDateString(undefined,{month:'long'})} so far</div>`:''); }
+  const roleNames={player:'Players',manager:'Managers',guest:'Visitors (sign-in)',admin:'League officials',super:'League officials',unknown:'Before tracking began'};
+  const rAgg={}; Object.entries(S0.roles).forEach(([k,v])=>{ const n=roleNames[k]||k; rAgg[n]=(rAgg[n]||0)+v; });
+  const rTot=Object.values(rAgg).reduce((x,y)=>x+y,0)||1; const rShades=['#2f5233','#5e8a64','#8fb394','#b9cfbc','#d6e2d8'];
+  const rRows=Object.entries(rAgg).sort((x,y)=>y[1]-x[1]).map(([n,v],i)=>`<div class="row"><span class="lab">${esc(n)}</span><span class="bar" style="width:${Math.max(3,Math.round(v/rTot*120))}px;background:${rShades[i]||'#d6e2d8'}"></span><span class="num">${Math.round(v/rTot*100)}%</span></div>`).join('');
+  const pMax=Math.max(1,...Object.values(S0.places));
+  const pRows=Object.entries(S0.places).sort((x,y)=>y[1]-x[1]).slice(0,6).map(([p,v])=>`<div class="row"><span class="lab">${esc(placeLabel(p))}</span><span class="bar" style="width:${Math.max(3,Math.round(v/pMax*110))}px;background:#c99a3a"></span><span class="num">${v.toLocaleString()}</span></div>`).join('');
+  const trend=peak?('Your ad was seen most in '+new Date(peak+'-01T00:00:00').toLocaleDateString(undefined,{month:'long'})+'.'):'';
+  const ends=a.endDate?formatDate(a.endDate):null; const nextYr=(a.endDate?+a.endDate.slice(0,4):new Date().getFullYear())+1;
+  return `<!doctype html><html><head><meta charset="utf-8"><title>Sponsor report — ${esc(a.company)}</title><style>
+:root{--green:#1f3d27;--green2:#2f5233;--gold:#c99a3a;--ink:#1e2a22;--soft:#5a655c;--line:#e3dccb;--paper:#fffdf8;--chalk:#f6f2e7}
+*{box-sizing:border-box}body{margin:0;background:#e9e4d6;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--ink)}
+.bar0{position:sticky;top:0;background:#1e2a22;color:#fff;padding:10px 16px;display:flex;gap:10px;align-items:center;justify-content:center;font-size:13px;z-index:5}
+.bar0 button{border:none;border-radius:8px;padding:8px 14px;font-weight:800;cursor:pointer;font-size:13px}
+.page{width:816px;max-width:100%;margin:20px auto;background:var(--paper);box-shadow:0 6px 24px rgba(0,0,0,.12)}
+.hdr{background:var(--green);color:#fff;padding:22px 32px;display:flex;align-items:center;gap:18px}
+.hdr .logo{width:58px;height:58px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;color:var(--green);font-size:22px;overflow:hidden;flex:none}
+.hdr .logo img{max-width:54px;max-height:54px;object-fit:contain}
+.hdr h1{margin:0;font-family:Georgia,serif;font-size:24px}.hdr .sub{font-size:13px;opacity:.85;margin-top:3px}
+.hdr .gb{margin-left:auto;text-align:right;font-size:11px;opacity:.85;line-height:1.4}.hdr .gb b{display:block;font-size:15px;opacity:1;color:#fff}.hdr .gb b span{color:#e0574a}
+.body{padding:24px 32px 26px}.headline{font-family:Georgia,serif;font-size:21px;line-height:1.4;margin:0 0 20px}.headline b{color:var(--green2)}
+.kpis{display:grid;grid-template-columns:repeat(${fee?4:3},1fr);gap:12px;margin-bottom:18px}
+.kpi{border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff}.kpi .k{font-size:10.5px;font-weight:800;color:var(--soft);text-transform:uppercase;letter-spacing:.05em}
+.kpi .v{font-size:30px;font-weight:800;font-family:Menlo,Consolas,monospace;margin:2px 0}.kpi .s{font-size:11.5px;color:var(--soft);line-height:1.35}
+.kpi.hero{background:var(--green);color:#fff;border-color:var(--green)}.kpi.hero .k,.kpi.hero .s{color:#d9e4da}
+.coupon{display:flex;align-items:center;gap:16px;border:2px dashed var(--gold);border-radius:14px;padding:14px 18px;background:#fff8e6;margin-bottom:20px}
+.coupon .n{font-size:36px;font-weight:900;font-family:Menlo,Consolas,monospace;color:#8a6414}.coupon .t{font-size:13.5px;line-height:1.45}
+.coupon code{background:#fff;border:1px solid var(--gold);border-radius:6px;padding:2px 8px;font-weight:800;font-size:14px}
+h2{font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:var(--soft);margin:0 0 8px}
+.grid2{display:grid;grid-template-columns:1.35fr 1fr;gap:22px;margin-bottom:18px}
+.bars .row{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12.5px}.bars .row .lab{width:122px}.bars .row .bar{height:14px;border-radius:0 4px 4px 0}
+.bars .row .num{font-family:Menlo,Consolas,monospace;font-size:12px;color:var(--soft)}.note{font-size:11.5px;color:var(--soft);line-height:1.45;margin-top:4px}
+.renew{display:flex;align-items:center;gap:16px;background:var(--chalk);border-radius:14px;padding:16px 20px;margin-top:6px}.renew .t{flex:1;font-size:13.5px;line-height:1.5}
+.renew .btn{background:var(--green);color:#fff;border-radius:10px;padding:10px 16px;font-weight:800;font-size:13px;white-space:nowrap}
+.foot{border-top:1px solid var(--line);padding:10px 32px;font-size:10.5px;color:var(--soft);display:flex;justify-content:space-between}
+@media (max-width:700px){.kpis{grid-template-columns:1fr 1fr}.grid2{grid-template-columns:1fr}.hdr{flex-wrap:wrap}.hdr .gb{margin-left:0;text-align:left}}
+@media print{body{background:#fff}.bar0{display:none}.page{margin:0;box-shadow:none;width:auto}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+</style></head><body>
+<div class="bar0"><span>Sponsor report</span><button onclick="window.print()" style="background:#c99a3a;color:#1e2a22">🖨 Print / Save as PDF</button><button id="dl" style="background:#fff;color:#1e2a22">⬇ Download file</button></div>
+<div class="page"><div class="hdr"><div class="logo">${a.imageDataUrl?`<img src="${a.imageDataUrl}" alt="">`:esc(initials)}</div>
+<div><h1>${esc(a.company||'Sponsor')}</h1><div class="sub">Sponsor report${tier?' · '+esc(tier)+' sponsor':''}${period?' · '+esc(period):''}</div></div>
+<div class="gb"><b>Geezer <span>Ball</span> Scorecard</b>${esc(lgNames.slice(0,2).join(', '))}${lgNames.length>2?' &amp; '+(lgNames.length-2)+' more':''}</div></div>
+<div class="body">
+<p class="headline">${S0.v?`Your ad was seen <b>${S0.v.toLocaleString()} times</b> by senior softball players in ${esc(where)}${A?` — and <b>${A.toLocaleString()} ${A===1?'person':'people'} took action</b>${cp?`, including <b>${cp.toLocaleString()} who copied your coupon</b>`:''}`:''}.`:'Your ad report will fill in as players see your ad.'}</p>
+<div class="kpis">
+<div class="kpi"><div class="k">Times seen</div><div class="v">${S0.v.toLocaleString()}</div><div class="s">on players’ phones and tablets</div></div>
+<div class="kpi"><div class="k">Taps</div><div class="v">${S0.c.toLocaleString()}</div><div class="s">${oneIn?'people opened your ad — about 1 in '+oneIn+' who saw it':'people who opened your ad'}</div></div>
+<div class="kpi"><div class="k">Actions</div><div class="v">${A.toLocaleString()}</div><div class="s">${esc(actLine)}</div></div>
+${fee?`<div class="kpi hero"><div class="k">Cost per lead</div><div class="v">${A?'$'+(fee/A).toFixed(2):'—'}</div><div class="s">$${fee.toLocaleString()} sponsorship${A?' ÷ '+A+' actions':''}</div></div>`:''}
+</div>
+${cp||a.couponCode?`<div class="coupon"><div class="n">${cp.toLocaleString()}</div><div class="t"><b>coupon${cp===1?'':'s'} copied.</b> ${a.couponCode?`Ask customers at the register for <code>${esc(a.couponCode)}</code> — every one you see is a sale you can trace back to this ad.`:'Each one is a player who plans to visit.'}</div></div>`:''}
+<div class="grid2"><div><h2>Seen each month</h2>${chart||'<p class="note">No views yet.</p>'}<div class="note">${esc(trend)}</div></div>
+<div><h2>Who saw it</h2><div class="bars">${rRows||'<p class="note">—</p>'}</div><h2 style="margin-top:16px">Where it showed</h2><div class="bars">${pRows||'<p class="note">—</p>'}</div>
+<div class="note">Anonymous totals — no player names or contact details are shared.</div></div></div>
+<div class="renew"><div class="t"><b>Thank you for supporting senior softball.</b> ${ends?`Your campaign runs through <b>${esc(ends)}</b>. `:''}Players are on the field several days a week through the season — renew to keep your spot for ${nextYr}.</div><div class="btn">Renew for ${nextYr} →</div></div>
+</div><div class="foot"><span>Prepared ${new Date().toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'})} · test data excluded</span><span>Geezer Ball Scorecard · Sponsor report</span></div></div>
+<script>document.getElementById('dl').onclick=function(){var h='<!doctype html>'+document.documentElement.outerHTML;var b=new Blob([h],{type:'text/html'});var u=URL.createObjectURL(b);var x=document.createElement('a');x.href=u;x.download=${JSON.stringify('Sponsor report - '+(a.company||'sponsor')+'.html')};document.body.appendChild(x);x.click();x.remove();};<\/script>
+</body></html>`;
+}
+function openSponsorReport(o){
+  const w=window.open('','_blank'); if(!w){ toast('Allow pop-ups to see the report'); return; }
+  w.document.open(); w.document.write(sponsorReportHTML(o)); w.document.close();
+}
+// Super Admin: pick a sponsor + use the Performance From/To
+function sponsorReportFromPerformance(){
+  if(ap.sponsor==='all'){ toast('Pick one sponsor in the Sponsor filter first'); return; }
+  const a=(S.advertisers||[]).find(x=>x.id===ap.sponsor); if(!a){ toast('Sponsor not found'); return; }
+  adPerf.range='ap'; const [f,t]=adPerfWindow();
+  openSponsorReport({ad:a, rows:adPerf.rows||[], from:f, to:t, fee:a.amount});
+}
+
 function downloadAdReport(D){
   const C=adPerfCharts(D);
   const who=adPerf.sponsor!=='all'?(((S.advertisers||[]).find(a=>a.id===adPerf.sponsor)||{}).company||'Sponsor'):'All sponsors';
@@ -7588,7 +7901,7 @@ function startSponsorPortal(){
   if(spPortalStarted) return; spPortalStarted=true; const id=S.profile.sponsorId; if(!id) return;
   onSnapshot(doc(db,'adsPublic',id), s=>{ S.spPublic=s.exists()?s.data():null; renderShell(); }, ()=>{ S.spPublic=null; });
   getDocs(collection(db,'adStats')).then(sn=>{ const since=new Date(Date.now()-30*86400000).toISOString().slice(0,10); const t={v:0,c:0,v30:0,c30:0,days:new Set()};
-    sn.docs.forEach(d=>{ const x=d.data(); if(x.adId!==id) return; const v=Object.values(x.views||{}).reduce((a,b)=>a+b,0), c=Object.values(x.clicks||{}).reduce((a,b)=>a+b,0)+Object.values(x.actions||{}).reduce((a,b)=>a+b,0);
+    S.spRows=[]; sn.docs.forEach(d=>{ const x=d.data(); if(x.adId!==id || apIsTest(x)) return; S.spRows.push(x); const v=Object.values(x.views||{}).reduce((a,b)=>a+b,0), c=Object.values(x.clicks||{}).reduce((a,b)=>a+b,0)+Object.values(x.actions||{}).reduce((a,b)=>a+b,0);
       t.v+=v; t.c+=c; if((x.date||'')>=since){ t.v30+=v; t.c30+=c; } });
     S.spStats=t; renderShell(); }).catch(()=>{ S.spStats={v:0,c:0,v30:0,c30:0}; renderShell(); });
 }
@@ -7611,7 +7924,8 @@ function renderSponsorPortal(){
         return tile('Status', live?'Showing':'Not showing', live?(pub.endDate?'through '+formatDate(pub.endDate):''):'starts once your agreement is executed and your ad is approved'); })(),
       tile('Views (30 days)', s?s.v30.toLocaleString():'…', s?s.v.toLocaleString()+' all time':''),
       tile('Clicks (30 days)', s?s.c30.toLocaleString():'…', s?s.c.toLocaleString()+' all time':'')]),
-    h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:8px 0 0;'},'Anonymous totals across all leagues where your ad shows. No player names or contact details are shared.')]));
+    h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:8px 0 0;'},'Anonymous totals across all leagues where your ad shows. No player names or contact details are shared.'),
+    h('div',{style:'margin-top:10px;'},h('button',Object.assign({class:'btn btn-gold btn-sm'},S.spRows?{}:{disabled:'disabled'},{onclick:()=>openSponsorReport({ad:a, rows:S.spRows||[], from:pub.startDate||'', to:'', fee:pub.amount})}),'📄 View my report'))]));
   main.appendChild(h('div',{class:'sectiontitle',style:'margin-top:6px;'},'Sponsor agreement'));
   agreementView(main, spCtx(a), 'sponsor');
   wrap.appendChild(h('div',{class:'authFoot',style:'color:var(--ink-soft);text-align:center;padding-bottom:20px;'},'© '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.'));
