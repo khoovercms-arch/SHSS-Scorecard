@@ -1714,6 +1714,8 @@ function renderShell(){
     const parts=[]; if(pa) parts.push(pa+' account'+(pa===1?'':'s')+' waiting for approval'); if(ns) parts.push(ns+' new season sign-up'+(ns===1?'':'s')); if(cq) parts.push(cq+' chat photo'+(cq===1?'':'s')+' to approve'); if(cr) parts.push(cr+' reported chat message'+(cr===1?'':'s')); if(lt) parts.push(lt+' license item'+(lt===1?'':'s')+' (signature or notice)'); if(sp) parts.push(sp+' sponsor agreement item'+(sp===1?'':'s'));
     content.appendChild(h('div',{class:'alertBanner',onclick:()=>{ if(sp && !lt && !pa && !ns && !cq && !cr){ S.activeTab='superadmin'; superSub='ads'; adSub='advertisers'; adFilter='noagr'; renderShell(); return; } if(lt && !pa && !ns && !cq && !cr){ if(isSuperAdmin()){ S.activeTab='superadmin'; superSub='licenses'; } else { S.activeTab='admin'; adminSub='license'; } renderShell(); return; } S.activeTab='admin'; adminSub=(!pa&&!ns&&(cq||cr))?'chat':'approvals'; if(adminSub==='approvals') regSub=(!pa&&ns)?'signups':'approvals'; renderShell(); }},[h('span',{style:'font-size:20px;'},'\ud83d\udd14'), h('span',{style:'flex:1;'},[h('b',{},(pa||ns)?'Players: ':((cq||cr)?'Chat: ':(lt?'License: ':'Sponsors: '))), parts.join(' \u00b7 ')]), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Review \u2192')]));
   }
+  if(isAdmin() && !(S.activeTab==='admin' && adminSub==='backup')){ const ov=bkOverdue(S.currentLeagueId); if(ov) content.appendChild(h('div',{class:'alertBanner',style:'background:#fff8e6;border-color:var(--gold);color:var(--ink);',onclick:()=>{ S.activeTab='admin'; adminSub='backup'; renderShell(); }},'\u26a0 League backup overdue: '+ov.join(' and ')+'. Tap to open Backup.')); }
+  bkCheckScheduled();
   { const ga=myGameAlerts(); const chN=ga.reduce((n,x)=>n+x.ch,0);
     if(lastChallengeCount!==null && chN>lastChallengeCount) toast('\u2691 New scoring challenge');
     lastChallengeCount=chN;
@@ -5645,6 +5647,8 @@ const HELP_KB = [
   {k:'schedule admin player view add game table', q:'How does the Schedule table work?', a:'One table for every season: Date, Time, Teams, Field, Score, Status, with a light colored ribbon starting each season. Players only read it. Admins see a gold “Admin only” strip with ✎ Change schedule, + Add game (adds a new row — pick the season, date, time, teams, field, repeat weekly) and Template / Import.'},
   {k:'sponsor report pdf print export cost per lead coupon renewal', q:'How do I give a sponsor their report?', a:'Super Admin → Advertisement → Performance: pick the sponsor in the Sponsor filter and set From/To, then tap “📄 Sponsor report”. A one-page report opens showing times seen, taps, actions, coupons copied, cost per lead (fee ÷ actions), views by month, who saw it and where it showed. Use “🖨 Print / Save as PDF” to email it, or “⬇ Download file”. Test data is always left out, and totals are anonymous. Sponsors can also open their own report with “📄 View my report” on their sign-in page (their fee isn’t shown there).'},
   {k:'compare ads chart medals share sparkline', q:'How do I compare ads?', a:'In Performance, tick up to 6 rows in the table and open Compare. Each ad gets a scorecard with its total, a medal for the top three, a ▲/▼ change versus the previous full period and a mini trend line, plus a share bar and a line chart. Switch between Views, Clicks and Click rate.'},
+  {k:'backup recovery restore cloud download file schedule', q:'How do I back up the league?', a:'Admin → Backup. “Save to cloud” keeps a snapshot in Firebase (the newest 8 are kept); “Download to this device” saves a file you control — do that from a laptop or desktop, not a phone, and keep the file in a backed-up folder or email it to the league. Turn on the schedule (day, time, cloud only or cloud + download): because the app has no server of its own, it runs the next time an admin opens Geezer Ball after that time, and a banner reminds you when a backup is overdue.'},
+  {k:'restore backup undo deleted season mistake', q:'How do I restore from a backup?', a:'Admin → Backup → Restore: tap Restore on a cloud backup, or Choose backup file for a downloaded one. You see what is in it, then choose Restore everything, one season, or chat and announcements only. A cloud backup of the current data is saved first, so a restore can be undone. Admins only.'},
   {k:'two ads side by side sponsor split half', q:'Can two sponsors show side by side?', a:'Super Admin → Advertisement → Where ads show → “2 ads side by side” row: switch it on for a page and two different sponsors share that spot, half each. Both stay clickable with their coupons.'},
   {k:'test sign-ups fake players practice clear', q:'How do I practise season setup with fake players?', a:'Admin → Settings → Test data → Test sign-ups: choose how many players (with or without ratings, plus accounts awaiting approval), then walk through the Season Builder. Clear test data removes it all for that league and season.'},
   {k:'hit zone heat map filter', q:'What does Hit Zone show?', a:'Every ball in play this season. Filter by team and player, tap a zone for its count, or export to Excel.'},
@@ -7932,17 +7936,174 @@ function renderSponsorPortal(){
   setTimeout(()=>{ wrap.scrollTop=y; },0);
 }
 
+/* ===== Backup & recovery (Admin → Backup) ===== */
+const BK_KEEP=8, BK_PART=700000; // chars per cloud part (Firestore doc limit is 1 MB)
+let bkState={list:[], listLid:null, loading:false, file:null, scope:'all', busy:''};
+function bkCfg(lid){ const lg=(S.leagues||[]).find(l=>l.id===lid)||{}; return Object.assign({day:0,hour:20,mode:'both'},lg.backup||{}); }
+function bkDayName(d){ return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d]||''; }
+function bkHourLabel(hh){ const h12=hh%12||12; return h12+':00 '+(hh>=12?'PM':'AM'); }
+function bkWhen(ts){ if(!ts) return 'Never'; const d=new Date(ts); return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})+' · '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
+function bkAgo(ts){ if(!ts) return ''; const days=Math.floor((Date.now()-ts)/86400000); return days<=0?'today':(days===1?'1 day ago':days+' days ago'); }
+function bkLastDue(cfg){ // most recent scheduled moment at or before now
+  const n=new Date(); const d=new Date(n.getFullYear(),n.getMonth(),n.getDate(),cfg.hour,0,0,0);
+  let diff=(n.getDay()-cfg.day+7)%7; d.setDate(d.getDate()-diff); if(d>n) d.setDate(d.getDate()-7); return d.getTime();
+}
+function bkNextDue(cfg){ return bkLastDue(cfg)+7*86400000; }
+function bkFileName(lg,ts){ return 'Geezer Ball – '+(lg.shortName||lg.name||'league').replace(/[^\w\- ]+/g,'')+' – '+new Date(ts).toISOString().slice(0,10)+'.json'; }
+// ---- collect everything that belongs to one league ----
+async function bkCollect(lid){
+  const docs={}; const put=(path,d)=>{ docs[path]=d; };
+  const lg=await getDoc(doc(db,'leagues',lid)); if(lg.exists()){ const d={...lg.data()}; delete d.backup; put('leagues/'+lid,d); }
+  const seasons=[]; (await getDocs(collection(db,'seasons'))).docs.forEach(s=>{ if(s.data().leagueId===lid){ put('seasons/'+s.id,s.data()); seasons.push(s.id); } });
+  const teams=[]; (await getDocs(collection(db,'teams'))).docs.forEach(t=>{ if(t.data().leagueId===lid){ put('teams/'+t.id,t.data()); teams.push(t.id); } });
+  for(const t of teams){ for(const sub of ['players','schedule','games']){ (await getDocs(collection(db,'teams',t,sub))).docs.forEach(x=>put('teams/'+t+'/'+sub+'/'+x.id,x.data())); } }
+  for(const c of ['signups','chatMessages','announcements','registrations','draftArchives','usageEvents']){ try{ (await getDocs(collection(db,c))).docs.forEach(x=>{ if(x.data().leagueId===lid) put(c+'/'+x.id,x.data()); }); }catch(e){} }
+  for(const sid of seasons){ try{ const d=await getDoc(doc(db,'draftStates',sid)); if(d.exists()) put('draftStates/'+sid,d.data()); }catch(e){} }
+  try{ const r=await getDoc(doc(db,'leagueRules',lid)); if(r.exists()) put('leagueRules/'+lid,r.data()); }catch(e){}
+  try{ (await getDocs(collection(db,'users'))).docs.forEach(x=>{ if(x.data().leagueId===lid) put('users/'+x.id,x.data()); }); }catch(e){}
+  return docs;
+}
+function bkCounts(docs){ const c={seasons:0,teams:0,players:0,games:0,signups:0,chat:0,users:0,total:0}; Object.keys(docs).forEach(p=>{ c.total++; if(p.startsWith('seasons/')) c.seasons++; else if(/^teams\/[^/]+$/.test(p)) c.teams++; else if(/\/players\//.test(p)) c.players++; else if(/\/games\//.test(p)) c.games++; else if(p.startsWith('signups/')) c.signups++; else if(p.startsWith('chatMessages/')) c.chat++; else if(p.startsWith('users/')) c.users++; }); return c; }
+function bkCountsLabel(c){ return [c.seasons+' season'+(c.seasons===1?'':'s'), c.teams+' teams', c.players+' players', c.games+' games', c.signups+' sign-ups', c.chat+' chat'].join(' · '); }
+function bkSize(n){ return n<1000000?(n/1000).toFixed(0)+' KB':(n/1000000).toFixed(1)+' MB'; }
+function bkBundle(lid,docs,type){ const lg=(S.leagues||[]).find(l=>l.id===lid)||{}; return {app:'Geezer Ball Scorecard',format:1,leagueId:lid,leagueName:lg.name||'',takenAt:Date.now(),type:type||'manual',by:S.user?S.user.email:'',counts:bkCounts(docs),docs}; }
+// ---- cloud ----
+async function bkSaveCloud(lid,bundle){
+  const json=JSON.stringify(bundle.docs); const parts=[]; for(let i=0;i<json.length;i+=BK_PART) parts.push(json.slice(i,i+BK_PART));
+  const id=lid+'_'+bundle.takenAt; const meta={leagueId:lid,leagueName:bundle.leagueName,takenAt:bundle.takenAt,type:bundle.type,by:bundle.by,counts:bundle.counts,size:json.length,parts:parts.length};
+  for(let i=0;i<parts.length;i++) await setDoc(doc(db,'backups',id,'parts',String(i)),{data:parts[i]});
+  await setDoc(doc(db,'backups',id),meta);
+  await updateDoc(doc(db,'leagues',lid),{'backup.lastCloudAt':bundle.takenAt});
+  // prune
+  const list=await bkListCloud(lid); for(const b of list.slice(BK_KEEP)) await bkDeleteCloud(b);
+  return id;
+}
+async function bkListCloud(lid){ const sn=await getDocs(collection(db,'backups')); const l=sn.docs.map(d=>({id:d.id,...d.data()})).filter(b=>b.leagueId===lid).sort((a,b)=>b.takenAt-a.takenAt); bkState.list=l; bkState.listLid=lid; return l; }
+async function bkLoadCloud(b){ let json=''; for(let i=0;i<(b.parts||1);i++){ const p=await getDoc(doc(db,'backups',b.id,'parts',String(i))); json+=p.exists()?p.data().data:''; } return {app:'Geezer Ball Scorecard',format:1,leagueId:b.leagueId,leagueName:b.leagueName,takenAt:b.takenAt,type:b.type,by:b.by,counts:b.counts,docs:JSON.parse(json)}; }
+async function bkDeleteCloud(b){ for(let i=0;i<(b.parts||1);i++){ try{ await deleteDoc(doc(db,'backups',b.id,'parts',String(i))); }catch(e){} } await deleteDoc(doc(db,'backups',b.id)); }
+// ---- device ----
+function bkDownload(bundle){
+  const lg=(S.leagues||[]).find(l=>l.id===bundle.leagueId)||{name:bundle.leagueName}; const blob=new Blob([JSON.stringify(bundle)],{type:'application/json'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=bkFileName(lg,bundle.takenAt); document.body.appendChild(a); a.click(); a.remove();
+  if(lg.id) updateDoc(doc(db,'leagues',lg.id),{'backup.lastDownloadAt':Date.now()}).catch(()=>{});
+}
+// ---- run ----
+async function bkRun(lid,mode,type){
+  if(bkState.busy) return; bkState.busy='Backing up…'; renderShell();
+  try{ const docs=await bkCollect(lid); const bundle=bkBundle(lid,docs,type||'manual');
+    if(mode==='cloud'||mode==='both') await bkSaveCloud(lid,bundle);
+    if(mode==='download'||mode==='both') bkDownload(bundle);
+    toast('Backup done — '+bkCountsLabel(bundle.counts)); }
+  catch(e){ console.error(e); toast('Backup failed: '+(e.message||e)); }
+  bkState.busy=''; await bkListCloud(lid).catch(()=>{}); renderShell();
+}
+let bkSchedChecked=false;
+function bkCheckScheduled(){ // runs once per app load for admins: catch-up scheduled backup
+  if(bkSchedChecked || !isAdmin() || !S.currentLeagueId || !S.leagues.length) return; bkSchedChecked=true;
+  const lid=S.currentLeagueId, cfg=bkCfg(lid); if(!cfg.enabled) return;
+  const due=bkLastDue(cfg); if((cfg.lastCloudAt||0)>=due) return;
+  setTimeout(()=>{ toast('Running the scheduled backup…'); bkRun(lid,cfg.mode==='both'?'both':'cloud','scheduled'); },1500);
+}
+function bkOverdue(lid){ const cfg=bkCfg(lid); if(!cfg.enabled) return null; const out=[]; if((cfg.lastCloudAt||0)<bkLastDue(cfg)) out.push('cloud backup'); if(cfg.mode==='both' && (cfg.lastDownloadAt||0)<Date.now()-14*86400000) out.push('device copy'); return out.length?out:null; }
+// ---- restore ----
+function bkFilterScope(docs,scope,seasonId){
+  if(scope==='chat') return Object.fromEntries(Object.entries(docs).filter(([p])=>p.startsWith('chatMessages/')||p.startsWith('announcements/')));
+  if(scope==='season'&&seasonId) return Object.fromEntries(Object.entries(docs).filter(([p,d])=>p==='seasons/'+seasonId || p==='draftStates/'+seasonId || (d&&d.seasonId===seasonId)));
+  return docs;
+}
+async function bkRestore(lid,bundle,scope,seasonId){
+  if(bkState.busy) return; bkState.busy='Restoring…'; renderShell();
+  try{
+    const current=await bkCollect(lid); const pre=bkBundle(lid,current,'pre-restore'); await bkSaveCloud(lid,pre);
+    const want=bkFilterScope(bundle.docs,scope,seasonId); const have=bkFilterScope(current,scope,seasonId);
+    const ref=(p)=>doc(db,...p.split('/'));
+    let n=0; for(const [p,d] of Object.entries(want)){ if(p==='leagues/'+lid){ const keep=(current[p]||{}); await setDoc(ref(p),{...d, backup:keep.backup||bkCfg(lid)}); } else await setDoc(ref(p),d); n++; }
+    let del=0; for(const p of Object.keys(have)){ if(!(p in want) && !p.startsWith('users/') && !p.startsWith('leagues/')){ await deleteDoc(ref(p)); del++; } }
+    toast('Restored '+n+' records'+(del?', removed '+del:'')+'. A backup from just before was saved to the cloud.');
+  }catch(e){ console.error(e); toast('Restore failed: '+(e.message||e)); }
+  bkState.busy=''; bkState.file=null; await bkListCloud(lid).catch(()=>{}); renderShell();
+}
+function bkConfirmRestore(lid,bundle,scope,seasonId){
+  const c=bundle.counts||bkCounts(bundle.docs); const what=scope==='chat'?'chat messages and announcements':(scope==='season'?'the season '+((bundle.docs['seasons/'+seasonId]||{}).name||''):'everything in this league');
+  confirmModal('Restore '+what+'?','This replaces the current data with the backup from '+bkWhen(bundle.takenAt)+' ('+bkCountsLabel(c)+'). Records added since then are removed. A backup of the current data is saved to the cloud first, so this can be undone.',()=>bkRestore(lid,bundle,scope,seasonId),{confirmLabel:'Restore',danger:true});
+}
+// ---- view ----
+function backupView(root){
+  const lid=S.currentLeagueId; const lg=(S.leagues||[]).find(l=>l.id===lid)||{}; const cfg=bkCfg(lid);
+  if(bkState.listLid!==lid && !bkState.loading){ bkState.loading=true; bkListCloud(lid).catch(()=>{ bkState.list=[]; bkState.listLid=lid; }).then(()=>{ bkState.loading=false; renderShell(); }); }
+  const card=(title,kids)=>h('div',{class:'card'},[h('h3',{},title)].concat(kids));
+  const kv=(k,v,warn)=>h('div',{style:'display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:13px;'},[h('span',{style:'color:var(--ink-soft);'},k),h('b',{style:warn?'color:#b3261e;':''},v)]);
+  const busy=!!bkState.busy;
+  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Backup & recovery'),h('p',{},'Two copies of everything in this league: one kept in the cloud for quick undo, one downloaded to a device the league controls.')]));
+  if(busy) root.appendChild(h('div',{class:'card',style:'text-align:center;font-weight:700;'},'⏳ '+bkState.busy+' Please stay on this page.'));
+  const over=bkOverdue(lid);
+  root.appendChild(card('Status',[
+    kv('Last cloud backup', bkWhen(cfg.lastCloudAt)+(cfg.lastCloudAt?' · '+bkAgo(cfg.lastCloudAt):''), cfg.enabled && (cfg.lastCloudAt||0)<bkLastDue(cfg)),
+    kv('Last download to a device', bkWhen(cfg.lastDownloadAt)+(cfg.lastDownloadAt?' · '+bkAgo(cfg.lastDownloadAt):''), cfg.mode==='both' && (cfg.lastDownloadAt||0)<Date.now()-14*86400000),
+    kv('Next scheduled', cfg.enabled?bkWhen(bkNextDue(cfg)):'Schedule is off'),
+    over?h('div',{style:'margin-top:8px;padding:8px 10px;border-radius:8px;background:#fff8e6;border:1px solid var(--gold);font-size:12.5px;'},'⚠ Overdue: '+over.join(' and ')+'. '+(over.includes('device copy')?'Download a backup from a laptop or desktop and keep it somewhere safe.':'Tap Save to cloud below.')):null]));
+  root.appendChild(card('Backup now',[
+    h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;'},'Includes seasons, teams, rosters, games and at-bats, schedules, sign-ups, evaluations, draft, chat, announcements, registrations, rules and member accounts. Nothing is changed or deleted.'),
+    h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'},[
+      h('button',{class:'btn btn-primary',...(busy?{disabled:'disabled'}:{}),onclick:()=>bkRun(lid,'cloud')},'☁ Save to cloud'),
+      h('button',{class:'btn btn-gold',...(busy?{disabled:'disabled'}:{}),onclick:()=>bkRun(lid,'download')},'⬇ Download to this device'),
+      h('button',{class:'btn btn-outline',...(busy?{disabled:'disabled'}:{}),onclick:()=>bkRun(lid,'both')},'Both')]),
+    h('div',{style:'margin-top:10px;padding:10px 12px;border-radius:10px;background:var(--chalk);border:1px solid var(--line);font-size:12.5px;line-height:1.5;'},[
+      h('b',{},'Use a laptop or desktop for the device copy. '),
+      'Phones and tablets often clear or lose downloads, so a backup saved there may not be around when you need it. Download from a computer the league controls, then keep the file in a folder that is backed up (OneDrive, Google Drive, iCloud) or email it to the league’s address. The file is usually under 1 MB per season.'])]));
+  // schedule
+  const daySel=h('select',{style:'width:auto;'}); for(let d=0;d<7;d++){ const o=h('option',{value:String(d)},bkDayName(d)); if(d===cfg.day) o.setAttribute('selected','selected'); daySel.appendChild(o); }
+  const hrSel=h('select',{style:'width:auto;'}); for(let hh=6;hh<=23;hh++){ const o=h('option',{value:String(hh)},bkHourLabel(hh)); if(hh===cfg.hour) o.setAttribute('selected','selected'); hrSel.appendChild(o); }
+  const save=(patch)=>updateDoc(doc(db,'leagues',lid),Object.fromEntries(Object.entries(patch).map(([k,v])=>['backup.'+k,v]))).then(()=>toast('Schedule saved')).catch(e=>toast('Could not save: '+e.message));
+  daySel.addEventListener('change',()=>save({day:+daySel.value})); hrSel.addEventListener('change',()=>save({hour:+hrSel.value}));
+  root.appendChild(card('Scheduled backup',[
+    h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:13px;'},[
+      h('div',{class:'segControl',style:'width:auto;'},[['on','On'],['off','Off']].map(([v,l])=>h('button',{class:(cfg.enabled?'on':'off')===v?'active':'',onclick:()=>save({enabled:v==='on'})},l))),
+      'Every',daySel,'at',hrSel,
+      h('div',{class:'segControl',style:'width:auto;'},[['cloud','Cloud only'],['both','Cloud + download']].map(([v,l])=>h('button',{class:cfg.mode===v?'active':'',onclick:()=>save({mode:v})},l)))]),
+    h('p',{style:'font-size:12px;color:var(--ink-soft);margin:10px 0 0;line-height:1.5;'},'The app has no server of its own, so the backup runs the next time an admin opens Geezer Ball after the scheduled time. If you pick “Cloud + download”, the file downloads to whatever device that admin is using — so make it a habit to open the app on a laptop on backup night. A banner on the Admin tab reminds you when a backup is overdue.')]));
+  // cloud list
+  const t=h('table',{class:'tbl',style:'width:100%;font-size:12.5px;'});
+  t.appendChild(h('tr',{},[h('th',{},'Date'),h('th',{},'Type'),h('th',{},'Contents'),h('th',{},'Size'),h('th',{},'')]));
+  const typeLabel={scheduled:'Scheduled',manual:'Manual','pre-restore':'Before restore'};
+  if(bkState.loading) t.appendChild(h('tr',{},h('td',{colspan:'5',style:'color:var(--ink-soft);'},'Loading…')));
+  else if(!bkState.list.length) t.appendChild(h('tr',{},h('td',{colspan:'5',style:'color:var(--ink-soft);'},'No cloud backups yet.')));
+  bkState.list.forEach(b=>t.appendChild(h('tr',{},[h('td',{style:'white-space:nowrap;'},bkWhen(b.takenAt)),h('td',{},typeLabel[b.type]||b.type),h('td',{style:'color:var(--ink-soft);'},bkCountsLabel(b.counts||{})),h('td',{},bkSize(b.size||0)),
+    h('td',{style:'white-space:nowrap;text-align:right;'},[
+      h('button',{class:'btn btn-outline btn-sm',...(busy?{disabled:'disabled'}:{}),onclick:async()=>{ try{ bkDownload(await bkLoadCloud(b)); }catch(e){ toast('Could not load: '+e.message); } }},'⬇'),' ',
+      h('button',{class:'btn btn-gold btn-sm',...(busy?{disabled:'disabled'}:{}),onclick:async()=>{ try{ bkState.file=await bkLoadCloud(b); bkState.scope='all'; renderShell(); window.scrollTo(0,document.body.scrollHeight); }catch(e){ toast('Could not load: '+e.message); } }},'Restore'),' ',
+      h('button',{class:'btn btn-outline btn-sm',title:'Delete this backup',...(busy?{disabled:'disabled'}:{}),onclick:()=>confirmModal('Delete this backup?',bkWhen(b.takenAt),async()=>{ await bkDeleteCloud(b); await bkListCloud(lid); renderShell(); },{confirmLabel:'Delete',danger:true})},'🗑')])])));
+  root.appendChild(card('Cloud backups',[h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 8px;'},'Kept in Firebase, admin-only. The newest '+BK_KEEP+' are kept; older ones are removed automatically.'),t]));
+  // restore
+  const fileInp=h('input',{type:'file',accept:'.json,application/json',style:'display:none;'});
+  fileInp.addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f) return; try{ const b=JSON.parse(await f.text()); if(b.app!=='Geezer Ball Scorecard'||!b.docs) throw new Error('not a Geezer Ball backup'); if(b.leagueId!==lid && !isSuperAdmin()) throw new Error('this file is for a different league ('+(b.leagueName||b.leagueId)+')'); bkState.file=b; bkState.scope='all'; renderShell(); }catch(err){ toast('Can’t use that file: '+err.message); } fileInp.value=''; });
+  const kids=[h('p',{style:'font-size:12.5px;margin:0 0 10px;'},'From a cloud backup above, or from a file on this device.'),fileInp,
+    h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center;'},[h('button',{class:'btn btn-outline',...(busy?{disabled:'disabled'}:{}),onclick:()=>fileInp.click()},'📂 Choose backup file…')])];
+  const F=bkState.file;
+  if(F){ const c=F.counts||bkCounts(F.docs); const seasons=Object.entries(F.docs).filter(([p])=>p.startsWith('seasons/')).map(([p,d])=>({id:p.slice(8),name:d.name||p}));
+    const seasonSel=h('select',{style:'width:auto;'}); seasons.forEach(s=>{ const o=h('option',{value:s.id},s.name); if(s.id===bkState.seasonId) o.setAttribute('selected','selected'); seasonSel.appendChild(o); }); if(!bkState.seasonId && seasons[0]) bkState.seasonId=seasons[0].id; seasonSel.addEventListener('change',()=>{ bkState.seasonId=seasonSel.value; });
+    kids.push(h('div',{style:'margin-top:10px;padding:10px 12px;border-radius:10px;background:#fff;border:1px solid var(--line);font-size:12.5px;'},[
+      h('b',{},'In this backup: '),(F.leagueName||'')+' · taken '+bkWhen(F.takenAt)+(F.by?' by '+F.by:'')+' · '+bkCountsLabel(c),
+      h('div',{style:'margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[h('div',{class:'segControl',style:'width:auto;'},[['all','Restore everything'],['season','One season only'],['chat','Chat & announcements only']].map(([v,l])=>h('button',{class:bkState.scope===v?'active':'',onclick:()=>{ bkState.scope=v; renderShell(); }},l))), bkState.scope==='season'?seasonSel:null])]));
+    kids.push(h('div',{style:'margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[h('button',{class:'btn btn-primary',...(busy?{disabled:'disabled'}:{}),onclick:()=>bkConfirmRestore(lid,F,bkState.scope,bkState.seasonId)},'Restore…'),h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ bkState.file=null; renderShell(); }},'Cancel'),h('span',{style:'font-size:12px;color:var(--ink-soft);'},'A cloud backup is saved automatically first, so a restore can be undone.')]));
+  }
+  root.appendChild(card('Restore',kids));
+  if(isSuperAdmin()) root.appendChild(h('div',{class:'card',style:'border:2px solid #4a2c6b;'},[h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:6px;'},[h('h3',{style:'margin:0;'},'All leagues'),h('span',{class:'pill-super'},'Super Admin')]),h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},'One file with every league, for your own off-site copy. Only you see this — league admins never do. Restore is done league by league above.'),
+    h('button',{class:'btn btn-outline',...(busy?{disabled:'disabled'}:{}),onclick:async()=>{ if(bkState.busy) return; bkState.busy='Backing up all leagues…'; renderShell(); try{ const all={}; for(const l of S.leagues){ all[l.id]={name:l.name,docs:await bkCollect(l.id)}; } const blob=new Blob([JSON.stringify({app:'Geezer Ball Scorecard',format:1,all:true,takenAt:Date.now(),leagues:all})],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='Geezer Ball – ALL LEAGUES – '+new Date().toISOString().slice(0,10)+'.json'; document.body.appendChild(a); a.click(); a.remove(); toast('Downloaded'); }catch(e){ toast('Failed: '+e.message); } bkState.busy=''; renderShell(); }},'⬇ Download all leagues')]));
+}
+
 Router.register('admin', (root)=>{
   const nAlert=adminAlertCount();
   const nChat=chatPhotoQueue().length+chatReported().length;
   const nSign=pendingAccounts().length+newSeasonSignups().length;
   if(adminSub==='setup') adminSub='builder';
   if(adminSub==='signup'){ adminSub='approvals'; regSub='signups'; } // old Sign-ups page now lives under Players
-  const subs=[['builder','Season Builder'],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+((isSuperAdmin()?0:licLeagueTodo())?' ('+licLeagueTodo()+')':'')]];
+  const subs=[['builder','Season Builder'],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+((isSuperAdmin()?0:licLeagueTodo())?' ('+licLeagueTodo()+')':'')],['backup','Backup'+(bkOverdue(S.currentLeagueId)?' ⚠':'')]];
   const inBuilder=['builder','seasons','teams','signup','players'].includes(adminSub);
   const seg=h('div',{class:'segControl',style:'margin-bottom:14px;'}, subs.map(([id,label])=>h('button',{class:(adminSub===id||(id==='builder'&&inBuilder))?'active':'',onclick:()=>{ adminSub=id; S.builderBack=null; renderShell(); }},label)));
   root.appendChild(seg);
   if(adminSub==='chat'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Chat'),h('p',{},'League Chat settings, photo approvals, reported messages, and restricted members.')])); chatAdminView(root); return; }
+  if(adminSub==='backup'){ backupView(root); return; }
   if(adminSub==='license'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'License'),h('p',{},'This league\u2019s agreement with '+OWNER_NAME+': sign it here, and send or acknowledge formal notices. Mirrored in Super Admin \u2192 Licenses.')])); licenseView(root, S.currentLeagueId, isSuperAdmin()?'owner':'league'); return; }
   if(adminSub==='approvals'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Players'),h('p',{},'New accounts to approve, who signed up for '+(currentSeasonName()||'this season')+' (the draft pool), yearly registrations, and the registration form.')])); regSubNav(root);
     if(regSub==='regs') registrationsReport(root); else if(regSub==='form') regFormEditor(root);
