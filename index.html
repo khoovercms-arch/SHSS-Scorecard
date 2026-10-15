@@ -5397,26 +5397,48 @@ function chatBlockModal(u, name){
 }
 function chatLiftBlock(u,name){ confirmModal('Lift the chat block for '+(name||'this member')+'?','They can read and post in League Chat again. The block stays in their history.',()=>updateDoc(doc(db,'users',u.id),{chatBanned:false,chatBlock:null}).then(()=>toast('Chat restored'))); }
 function leagueMembers(){ return (S.usersDirectory||[]).filter(u=>u.role && u.role!=='pending' && u.role!=='declined' && u.role!=='sponsor' && (!S.currentLeagueId||u.leagueId===S.currentLeagueId||!u.leagueId) && normEmail(u.email||'')!==SUPER_ADMIN_EMAIL).sort((a,b)=>(a.displayName||a.email||'').localeCompare(b.displayName||b.email||'')); }
+function nameTypeAhead(items, placeholder, onPick, onType, initial){ // same type-ahead drop-down as the Batting/Hit zone player filter
+  const wrap=h('div',{style:'position:relative;width:100%;'});
+  const inp=h('input',{type:'text',placeholder:placeholder,value:initial||'',autocomplete:'off',style:'width:100%;'});
+  const dd=h('div',{class:'batDD hidden'}); document.body.appendChild(dd);
+  const close=()=>dd.classList.add('hidden');
+  const match=(n,q)=>{ n=String(n||'').toLowerCase(); return n.startsWith(q)||n.split(/[\s,().'\-]+/).some(w=>w.startsWith(q)); };
+  const show=()=>{ const q=inp.value.trim().toLowerCase(); dd.innerHTML=''; if(!q){ close(); return; }
+    const m=items.filter(x=>match(x.label,q)).sort((a,b)=>a.label.localeCompare(b.label)).slice(0,12);
+    if(!m.length) dd.appendChild(h('div',{class:'batDDRow',style:'color:var(--ink-soft);cursor:default;'},'No players match'));
+    m.forEach(x=>{ const row=h('button',{type:'button',class:'batDDRow'},[h('span',{},x.label),x.sub?h('small',{},x.sub):null]); row.addEventListener('mousedown',e=>e.preventDefault()); row.addEventListener('click',()=>{ close(); inp.blur(); onPick(x); }); dd.appendChild(row); });
+    const r=inp.getBoundingClientRect(); dd.style.left=Math.max(8,r.left)+'px'; dd.style.top=(r.bottom+4)+'px'; dd.style.minWidth=Math.max(220,r.width)+'px'; dd.classList.remove('hidden'); };
+  inp.addEventListener('input',()=>{ if(onType) onType(inp.value); show(); });
+  inp.addEventListener('focus',show); inp.addEventListener('blur',()=>setTimeout(close,150));
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); const b=dd.querySelector('button.batDDRow'); if(b) b.click(); } });
+  setTimeout(()=>{ const obs=new MutationObserver(()=>{ if(!document.body.contains(wrap)){ dd.remove(); obs.disconnect(); } }); obs.observe(document.body,{childList:true,subtree:true}); },0);
+  wrap.appendChild(inp); return wrap; }
+function letterChips(names, cur, onPick){ // A–Z row: only letters that start a first or last name are active
+  const has=new Set(); names.forEach(n=>String(n||'').split(/\s+/).forEach(w=>{ const c=(w[0]||'').toUpperCase(); if(/[A-Z]/.test(c)) has.add(c); }));
+  const row=h('div',{style:'display:flex;flex-wrap:wrap;gap:4px;'});
+  const chip=(l,v,on)=>h('button',Object.assign({type:'button',onclick:()=>onPick(v),style:'min-width:34px;padding:6px 0;border-radius:8px;font-weight:800;font-size:13px;cursor:pointer;border:1px solid '+(cur===v?'var(--grass-1)':'var(--line)')+';background:'+(cur===v?'var(--grass-1)':'#fff')+';color:'+(cur===v?'#fff':(on?'var(--ink)':'#c9c3b4'))+';'},on?{}:{disabled:'disabled'}),l);
+  row.appendChild(chip('All','',true)); 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').forEach(L=>row.appendChild(chip(L,L,has.has(L))));
+  return row; }
+function nameStarts(n,L){ return !L || String(n||'').split(/\s+/).some(w=>(w[0]||'').toUpperCase()===L); }
 let chatBlkQ='';
 function chatBlocksCard(){
   chatExpireBlocks();
   const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Block members'));
-  card.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;'},'Tick Blocked to block a member who is '+CHAT_BLOCK_REASON.toLowerCase()+'. They move to the Blocked list; tap \u2715 there to lift the block.'));
+  card.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;'},'Type the first letters of a name to find a player, then tick Blocked to block a member who is '+CHAT_BLOCK_REASON.toLowerCase()+'. They move to the Blocked list; tap \u2715 there to lift the block.'));
   const mem=leagueMembers().filter(u=>u.role!=='admin'); const blocked=mem.filter(u=>chatBlockOf(u));
   const wrap=h('div',{class:'blkWrap',style:'display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;'});
   // left: searchable member table
   const left=h('div',{style:'flex:1 1 280px;min-width:0;'});
-  const q=h('input',{type:'search',placeholder:'Search players\u2026',value:chatBlkQ,style:'width:100%;margin-bottom:8px;'});
+  const q=h('div',{style:'margin-bottom:8px;'},nameTypeAhead(mem.map(u=>({id:u.id,label:u.displayName||u.email,sub:(chatBlockOf(u)?'Blocked \u00b7 ':'')+(u.teamId?teamNameById(u.teamId):'')})),'Type a name\u2026',x=>{ const u=mem.find(m=>m.id===x.id); chatBlkQ=x.label; drawRows(); if(u && !chatBlockOf(u)) chatBlockModal(u,x.label); },v=>{ chatBlkQ=v; drawRows(); },chatBlkQ));
   const tbox=h('div',{style:'max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;'});
   const drawRows=()=>{ tbox.innerHTML=''; const t=h('table',{class:'dataTable',style:'width:100%;font-size:13px;'});
     t.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Player'),h('th',{style:'text-align:left;'},'Team'),h('th',{},'Blocked')]));
-    const qq=chatBlkQ.trim().toLowerCase(); const rows=mem.filter(u=>!qq||(u.displayName||'').toLowerCase().includes(qq)||(u.email||'').toLowerCase().includes(qq));
+    const qq=(chatBlkQ||'').trim().toLowerCase(); const rows=mem.filter(u=>{ const n=(u.displayName||u.email||'').toLowerCase(); return !qq||n.startsWith(qq)||n.split(/[\s,().'\-]+/).some(w=>w.startsWith(qq)); });
     if(!rows.length) t.appendChild(h('tr',{},h('td',{colspan:'3',style:'color:var(--ink-soft);text-align:center;'},'No players match.')));
     rows.forEach(u=>{ const on=!!chatBlockOf(u); const cb=h('input',{type:'checkbox',style:'width:auto;'}); if(on) cb.checked=true;
       cb.addEventListener('change',()=>{ if(cb.checked){ cb.checked=false; chatBlockModal(u,u.displayName||u.email); } else { cb.checked=true; chatLiftBlock(u,u.displayName||u.email); } });
       t.appendChild(h('tr',{style:on?'background:#fbeceb;':''},[h('td',{style:'text-align:left;font-weight:700;'},[u.displayName||u.email,(u.chatBlockHistory||[]).length&&!on?h('span',{style:'font-size:10.5px;color:var(--ink-soft);font-weight:600;margin-left:6px;'},(u.chatBlockHistory||[]).length+' past'):null]),h('td',{style:'text-align:left;color:var(--ink-soft);'},u.teamId?teamNameById(u.teamId):'\u2014'),h('td',{},cb)])); });
     tbox.appendChild(t); };
-  q.addEventListener('input',()=>{ chatBlkQ=q.value; drawRows(); });
   drawRows(); left.appendChild(q); left.appendChild(tbox);
   // right: blocked list
   const right=h('div',{style:'flex:0 1 230px;min-width:200px;background:#fbeceb;border:1px solid #e7c3bf;border-radius:12px;padding:10px 12px;'});
@@ -5466,11 +5488,9 @@ function chatClearCard(){
   if(c.by==='member'){ const by={}; chatLeagueMsgs().filter(m=>!m.archived&&!m.frozen).forEach(m=>{ by[m.uid]=by[m.uid]||{name:m.name||'Member',n:0}; by[m.uid].n++; });
     const box=h('div',{style:'flex:1 1 260px;min-width:0;'});
     if(c.uid && by[c.uid]) box.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;'},[h('span',{class:'pill-role',style:'font-size:13px;padding:5px 10px;'},by[c.uid].name+' \u00b7 '+by[c.uid].n+' message'+(by[c.uid].n===1?'':'s')),h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 9px;',title:'Pick someone else',onclick:()=>{ c.uid=''; c.mq=''; renderShell(); }},'\u2715')]));
-    else { const q=h('input',{type:'search',placeholder:'Type a name\u2026',value:c.mq||'',style:'width:100%;'}); const res=h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;'});
-      const draw=()=>{ res.innerHTML=''; const qq=(c.mq||'').trim().toLowerCase(); const hits=Object.entries(by).filter(([u,x])=>!qq||x.name.toLowerCase().includes(qq)).sort((a,b)=>a[1].name.localeCompare(b[1].name)).slice(0,12);
-        if(!hits.length) res.appendChild(h('span',{style:'font-size:12px;color:var(--ink-soft);'},'No one by that name has messages.'));
-        hits.forEach(([uid,x])=>res.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ c.uid=uid; renderShell(); }},x.name+' ('+x.n+')'))); };
-      q.addEventListener('input',()=>{ c.mq=q.value; draw(); }); draw(); box.appendChild(q); box.appendChild(res); }
+    else { const items=Object.entries(by).map(([uid,x])=>({id:uid,label:x.name,sub:x.n+' message'+(x.n===1?'':'s')}));
+      if(!items.length) box.appendChild(h('span',{style:'font-size:12.5px;color:var(--ink-soft);'},'No one has messages in League Chat yet.'));
+      else box.appendChild(nameTypeAhead(items,'Type a name\u2026 (e.g. “Ga” for Gary)',x=>{ c.uid=x.id; renderShell(); })); }
     row.appendChild(box); }
   if(row.children.length) card.appendChild(row);
   card.appendChild(h('div',{class:'segControl',style:'width:auto;margin-bottom:8px;'},[['archive','Archive \u2014 hide from players'],['freeze','\u2744 Freeze \u2014 keep visible, locked']].map(([v,l])=>h('button',{class:c.mode===v?'active':'',onclick:()=>{ c.mode=v; renderShell(); }},l))));
@@ -5794,7 +5814,7 @@ const HELP_KB = [
   {k:'compare ads chart medals share sparkline', q:'How do I compare ads?', a:'In Performance, tick up to 6 rows in the table and open Compare. Each ad gets a scorecard with its total, a medal for the top three, a ▲/▼ change versus the previous full period and a mini trend line, plus a share bar and a line chart. Switch between Views, Clicks and Click rate.'},
   {k:'backup recovery restore cloud download file schedule', q:'How do I back up the league?', a:'Admin → Backup. “Save to cloud” keeps a snapshot in Firebase (the newest 8 are kept); “Download to this device” saves a file you control — do that from a laptop or desktop, not a phone, and keep the file in a backed-up folder or email it to the league. Turn on the schedule (day, time, cloud only or cloud + download): because the app has no server of its own, it runs the next time an admin opens Geezer Ball after that time, and a banner reminds you when a backup is overdue.'},
   {k:'restore backup undo deleted season mistake', q:'How do I restore from a backup?', a:'Admin → Backup → Restore: tap Restore on a cloud backup, or Choose backup file for a downloaded one. You see what is in it, then choose Restore everything, one season, or chat and announcements only. A cloud backup of the current data is saved first, so a restore can be undone. Admins only.'},
-  {k:'block player chat policy restrict remove ban suspend', q:'How do I block a player from chat?', a:'Tap Block on any of their messages in League Chat, or Admin \u2192 Chat \u2192 Block members: search for the player and tick Blocked. They move to the Blocked list on the right; tap \u2715 there to lift the block. Choose No posting (they can still read) or Removed from chat, and how long: 7 days, 30 days, rest of season, or until you lift it. The reason shown is \u201cnot in compliance with league policy\u201d; you can add a private note and remove their messages at the same time. Timed blocks lift on their own; Lift block ends one early.'},
+  {k:'block player chat policy restrict remove ban suspend', q:'How do I block a player from chat?', a:'Tap Block on any of their messages in League Chat, or Admin \u2192 Chat \u2192 Block members: start typing the player\u2019s name and pick them from the drop-down (or tick Blocked). They move to the Blocked list on the right; tap \u2715 there to lift the block. Choose No posting (they can still read) or Removed from chat, and how long: 7 days, 30 days, rest of season, or until you lift it. The reason shown is \u201cnot in compliance with league policy\u201d; you can add a private note and remove their messages at the same time. Timed blocks lift on their own; Lift block ends one early.'},
   {k:'clear chat delete old messages test archive game day season', q:'How do I clear the chat?', a:'Admin \u2192 Chat \u2192 Clear chat. Pick a date range, a game day, a season, one member, or everything, then Archive (players no longer see them; admins can view or restore) or Freeze (they stay visible, marked \u2744 frozen, and nobody can delete them). Nothing is erased, and a cloud backup is saved first. Announcements are not affected.'},
   {k:'test season real live clear fake data make real', q:'What is a TEST season and how do I clear test data?', a:'Every season is REAL (green \u2014 live, counts in stats and reports) or TEST (gold \u2014 rehearsal, never counts). You choose when you create the season; existing seasons start as TEST. Admin \u2192 \ud83e\uddea Test lists the test seasons: Clear removes a season and everything in it (sign-ups, ratings, draft, rosters, schedule, games, test accounts); Make real keeps the setup (teams, managers, schedule, sign-up window) and removes the test data, then turns the season green. A cloud backup is saved first. Only Super Admin can turn a real season back to test.'},
   {k:'fill fake data test sign-ups ratings draft auto play', q:'How do I fill a test season with fake data?', a:'Admin \u2192 \ud83e\uddea Test \u2192 Fill a test season: pick the TEST season, then go in order \u2014 1 Add test sign-ups, 2 Fill random ratings, 3 Quick test draft and Simulate all picks, 4 + Test game and Auto-play 3 innings. Everything lands in that test season only; the buttons are disabled for real seasons.'},
