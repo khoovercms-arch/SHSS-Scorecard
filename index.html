@@ -1634,7 +1634,7 @@ function renderShell(){
     if(needsTeamPicker && S.seasons.length){
       const ssel = document.getElementById('seasonPickSel');
       ssel.innerHTML='';
-      S.seasons.forEach(s=>{ const o=h('option',{value:s.id}, s.name+(s.year?' ('+s.year+')':'')); if(s.id===S.currentSeasonId) o.setAttribute('selected','selected'); ssel.appendChild(o); });
+      S.seasons.forEach(s=>{ const o=h('option',{value:s.id}, s.name+(s.year?' ('+s.year+')':'')+(seasonIsReal(s)?'':' \u00b7 TEST')); if(s.id===S.currentSeasonId) o.setAttribute('selected','selected'); ssel.appendChild(o); });
       ssel.style.display='block';
       ssel.onchange = ()=>{ S.currentSeasonId=ssel.value; S.activeGameId=null; switchSeasonListeners(); renderShell(); };
     } else { document.getElementById('seasonPickSel').style.display='none'; }
@@ -1714,6 +1714,7 @@ function renderShell(){
     const parts=[]; if(pa) parts.push(pa+' account'+(pa===1?'':'s')+' waiting for approval'); if(ns) parts.push(ns+' new season sign-up'+(ns===1?'':'s')); if(cq) parts.push(cq+' chat photo'+(cq===1?'':'s')+' to approve'); if(cr) parts.push(cr+' reported chat message'+(cr===1?'':'s')); if(lt) parts.push(lt+' license item'+(lt===1?'':'s')+' (signature or notice)'); if(sp) parts.push(sp+' sponsor agreement item'+(sp===1?'':'s'));
     content.appendChild(h('div',{class:'alertBanner',onclick:()=>{ if(sp && !lt && !pa && !ns && !cq && !cr){ S.activeTab='superadmin'; superSub='ads'; adSub='advertisers'; adFilter='noagr'; renderShell(); return; } if(lt && !pa && !ns && !cq && !cr){ if(isSuperAdmin()){ S.activeTab='superadmin'; superSub='licenses'; } else { S.activeTab='admin'; adminSub='license'; } renderShell(); return; } S.activeTab='admin'; adminSub=(!pa&&!ns&&(cq||cr))?'chat':'approvals'; if(adminSub==='approvals') regSub=(!pa&&ns)?'signups':'approvals'; renderShell(); }},[h('span',{style:'font-size:20px;'},'\ud83d\udd14'), h('span',{style:'flex:1;'},[h('b',{},(pa||ns)?'Players: ':((cq||cr)?'Chat: ':(lt?'License: ':'Sponsors: '))), parts.join(' \u00b7 ')]), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Review \u2192')]));
   }
+  if(isAdmin() && curSeasonIsTest() && !(S.activeTab==='admin' && adminSub==='test')) content.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;background:#fff6d6;border:1px solid #f3d27a;border-radius:10px;padding:6px 12px;margin:0 0 10px;font-size:12.5px;cursor:pointer;',onclick:()=>{ S.activeTab='admin'; adminSub='test'; renderShell(); }},[seasonModePill(currentSeason()),h('span',{style:'flex:1;'},h('b',{},(currentSeason()||{}).name||'')),h('span',{style:'color:var(--ink-soft);'},'Rehearsal season \u2014 doesn\u2019t count. Admin \u2192 Test \u2192')]));
   if(isAdmin() && !(S.activeTab==='admin' && adminSub==='backup')){ const ov=bkOverdue(S.currentLeagueId); if(ov) content.appendChild(h('div',{class:'alertBanner',style:'background:#fff8e6;border-color:var(--gold);color:var(--ink);',onclick:()=>{ S.activeTab='admin'; adminSub='backup'; renderShell(); }},'\u26a0 League backup overdue: '+ov.join(' and ')+'. Tap to open Backup.')); }
   bkCheckScheduled();
   { const ga=myGameAlerts(); const chN=ga.reduce((n,x)=>n+x.ch,0);
@@ -3599,7 +3600,8 @@ function pastIndex(){
   const cur=S.currentSeasonId;
   const key=[cur,S.allGamesForFeed.length,(S.allPlayersForFeed||[]).length,(S.signups||[]).length,S.seasons.length].join('|');
   if(pastIdxCache && pastIdxCache.key===key) return pastIdxCache.idx;
-  const ss=new Map(S.seasons.filter(x=>x.id!==cur).map(x=>[x.id,x]));
+  const curReal=seasonIsReal(currentSeason());
+  const ss=new Map(S.seasons.filter(x=>x.id!==cur && (!curReal || seasonIsReal(x))).map(x=>[x.id,x]));
   const ppl={};
   const add=(name,sid,email,stats)=>{ const k=normName(name); if(!k) return; const e=ppl[k]||(ppl[k]={name:String(name).trim(),key:k,emails:new Set(),seasons:{}}); if(email) e.emails.add(normEmail(email)); if(sid){ if(!(sid in e.seasons)) e.seasons[sid]=null; if(stats) e.seasons[sid]=stats; } };
   const bySeason={}; S.allGamesForFeed.filter(g=>g.completed&&g.seasonId&&ss.has(g.seasonId)).forEach(g=>{ (bySeason[g.seasonId]=bySeason[g.seasonId]||[]).push(g); });
@@ -3624,7 +3626,8 @@ function matchFor(x, idx){
 function priorSeasonOptions(){
   // completed seasons in this league with games, newest first
   const withGames=new Set(S.allGamesForFeed.filter(g=>g.completed&&g.seasonId).map(g=>g.seasonId));
-  return S.seasons.filter(x=>x.id!==S.currentSeasonId && withGames.has(x.id)).slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+  const curReal=seasonIsReal(currentSeason());
+  return S.seasons.filter(x=>x.id!==S.currentSeasonId && withGames.has(x.id) && (!curReal || seasonIsReal(x))).slice().sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
 }
 function evalCompareSeason(){ const opts=priorSeasonOptions(); if(evalCompareSeasonId && opts.some(x=>x.id===evalCompareSeasonId)) return evalCompareSeasonId; return opts[0]?opts[0].id:null; }
 function priorStatsByName(){
@@ -5304,7 +5307,7 @@ Router.register('terms', (root)=>{
 });
 
 /* ===================== LEAGUE CHAT ===================== */
-function chatBanned(){ return S.profile && S.profile.chatBanned; }
+function chatBanned(){ return !!myChatBlock(); }
 function chatCfg(){ const lg=S.leagues.find(l=>l.id===S.currentLeagueId)||{}; return { photos: lg.chatPhotos!==false, approve: !!lg.chatPhotoApprove }; }
 function photoBanned(){ return S.profile && S.profile.chatPhotoBanned; }
 function chatPhotoQueue(){ return (S.chat||[]).filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted && m.photo && m.pending); }
@@ -5348,11 +5351,154 @@ function chatModerationCard(){
   }
   return card;
 }
+/* ===== Chat blocks (policy) and Clear chat ===== */
+const CHAT_BLOCK_REASON='Not in compliance with league policy';
+function chatBlockOf(u){ // returns the active block or null (timed blocks lift themselves)
+  if(!u || !u.chatBanned) return null; const b=u.chatBlock||{level:'post'};
+  if(b.until && Date.now()>b.until) return null; return b;
+}
+function myChatBlock(){ return S.profile ? chatBlockOf(S.profile) : null; }
+function chatBlockUntilLabel(b){ return b && b.until ? new Date(b.until).toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}) : 'further notice'; }
+function chatBlockLevelLabel(b){ return (b&&b.level==='all')?'Removed from chat':'No posting'; }
+let chatBlockExpireChecked=false;
+function chatExpireBlocks(){ // admins quietly clear blocks whose time is up
+  if(chatBlockExpireChecked || !isAdmin()) return; chatBlockExpireChecked=true;
+  (S.usersDirectory||[]).filter(u=>u.chatBanned && u.chatBlock && u.chatBlock.until && Date.now()>u.chatBlock.until).forEach(u=>updateDoc(doc(db,'users',u.id),{chatBanned:false,chatBlock:null}).catch(()=>{}));
+}
+function chatBlockModal(u, name){
+  const sn=currentSeason(); const seasonEnd=sn&&sn.endDate?new Date(sn.endDate+'T23:59:59').getTime():null;
+  const st={level:'post', len:'7', note:'', purge:false};
+  const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet'}); overlay.appendChild(sheet);
+  const seg=(opts,key)=>h('div',{class:'segControl',style:'width:auto;flex-wrap:wrap;'},opts.map(([v,l])=>h('button',{class:st[key]===v?'active':'',onclick:()=>{ st[key]=v; draw(); }},l)));
+  const draw=()=>{ sheet.innerHTML='';
+    sheet.appendChild(h('h3',{style:'margin:0 0 6px;'},'Block '+(name||'this member')+' from chat'));
+    sheet.appendChild(h('p',{style:'font-size:13px;margin:0 0 12px;color:var(--ink-soft);'},['Reason: ',h('b',{style:'color:var(--ink);'},CHAT_BLOCK_REASON+'.')]));
+    sheet.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;margin:0 0 4px;'},'What they lose'));
+    sheet.appendChild(seg([['post','No posting (can still read)'],['all','Removed from chat']],'level'));
+    sheet.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;margin:12px 0 4px;'},'For how long'));
+    sheet.appendChild(seg([['7','7 days'],['30','30 days']].concat(seasonEnd&&seasonEnd>Date.now()?[['season','Rest of season']]:[]).concat([['perm','Until I lift it']]),'len'));
+    const note=h('input',{type:'text',placeholder:'Note for admins (optional)',value:st.note,style:'margin-top:12px;width:100%;'}); note.addEventListener('input',()=>{ st.note=note.value; }); sheet.appendChild(note);
+    const pc=h('input',{type:'checkbox',style:'width:auto;margin-right:8px;'}); if(st.purge) pc.checked=true; pc.addEventListener('change',()=>{ st.purge=pc.checked; });
+    const nMsgs=(S.chat||[]).filter(m=>m.uid===u.id && !m.deleted && (!S.currentLeagueId||m.leagueId===S.currentLeagueId)).length;
+    sheet.appendChild(h('label',{style:'display:flex;align-items:center;font-size:13px;margin:10px 0 0;'},[pc,'Also remove their '+nMsgs+' message'+(nMsgs===1?'':'s')+' from chat']));
+    sheet.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:10px 0 0;'},'They will see: “Your chat access is restricted until '+(st.len==='perm'?'further notice':(st.len==='season'?new Date(seasonEnd).toLocaleDateString():new Date(Date.now()+(+st.len)*86400000).toLocaleDateString()))+' — '+CHAT_BLOCK_REASON.toLowerCase()+'.”'));
+    sheet.appendChild(h('div',{style:'display:flex;gap:8px;margin-top:14px;'},[
+      h('button',{class:'btn btn-outline',style:'flex:1;',onclick:()=>overlay.remove()},'Cancel'),
+      h('button',{class:'btn',style:'flex:1;background:var(--leather-2);color:#fff;border-color:var(--leather-2);',onclick:async()=>{
+        const until=st.len==='perm'?null:(st.len==='season'?seasonEnd:Date.now()+(+st.len)*86400000);
+        const b={level:st.level,until,reason:CHAT_BLOCK_REASON,note:st.note.trim(),by:S.user.email,at:Date.now()};
+        overlay.remove();
+        try{ await updateDoc(doc(db,'users',u.id),{chatBanned:true,chatBlock:b,chatBlockHistory:arrayUnion(b)});
+          if(st.purge){ const ms=(S.chat||[]).filter(m=>m.uid===u.id && !m.deleted && !m.frozen && (!S.currentLeagueId||m.leagueId===S.currentLeagueId)); for(const m of ms) await updateDoc(doc(db,'chatMessages',m.id),{deleted:true,deletedBy:S.user.uid}); }
+          toast((name||'Member')+' blocked from chat'); }catch(e){ toast('Could not block: '+(e.message||e)); }
+      }},'Block')]));
+  };
+  draw(); document.body.appendChild(overlay);
+}
+function chatLiftBlock(u,name){ confirmModal('Lift the chat block for '+(name||'this member')+'?','They can read and post in League Chat again. The block stays in their history.',()=>updateDoc(doc(db,'users',u.id),{chatBanned:false,chatBlock:null}).then(()=>toast('Chat restored'))); }
+function leagueMembers(){ return (S.usersDirectory||[]).filter(u=>u.role && u.role!=='pending' && u.role!=='declined' && u.role!=='sponsor' && (!S.currentLeagueId||u.leagueId===S.currentLeagueId||!u.leagueId) && normEmail(u.email||'')!==SUPER_ADMIN_EMAIL).sort((a,b)=>(a.displayName||a.email||'').localeCompare(b.displayName||b.email||'')); }
+let chatBlkQ='';
+function chatBlocksCard(){
+  chatExpireBlocks();
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Block members'));
+  card.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;'},'Tick Blocked to block a member who is '+CHAT_BLOCK_REASON.toLowerCase()+'. They move to the Blocked list; tap \u2715 there to lift the block.'));
+  const mem=leagueMembers().filter(u=>u.role!=='admin'); const blocked=mem.filter(u=>chatBlockOf(u));
+  const wrap=h('div',{class:'blkWrap',style:'display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;'});
+  // left: searchable member table
+  const left=h('div',{style:'flex:1 1 280px;min-width:0;'});
+  const q=h('input',{type:'search',placeholder:'Search players\u2026',value:chatBlkQ,style:'width:100%;margin-bottom:8px;'});
+  const tbox=h('div',{style:'max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:10px;'});
+  const drawRows=()=>{ tbox.innerHTML=''; const t=h('table',{class:'dataTable',style:'width:100%;font-size:13px;'});
+    t.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Player'),h('th',{style:'text-align:left;'},'Team'),h('th',{},'Blocked')]));
+    const qq=chatBlkQ.trim().toLowerCase(); const rows=mem.filter(u=>!qq||(u.displayName||'').toLowerCase().includes(qq)||(u.email||'').toLowerCase().includes(qq));
+    if(!rows.length) t.appendChild(h('tr',{},h('td',{colspan:'3',style:'color:var(--ink-soft);text-align:center;'},'No players match.')));
+    rows.forEach(u=>{ const on=!!chatBlockOf(u); const cb=h('input',{type:'checkbox',style:'width:auto;'}); if(on) cb.checked=true;
+      cb.addEventListener('change',()=>{ if(cb.checked){ cb.checked=false; chatBlockModal(u,u.displayName||u.email); } else { cb.checked=true; chatLiftBlock(u,u.displayName||u.email); } });
+      t.appendChild(h('tr',{style:on?'background:#fbeceb;':''},[h('td',{style:'text-align:left;font-weight:700;'},[u.displayName||u.email,(u.chatBlockHistory||[]).length&&!on?h('span',{style:'font-size:10.5px;color:var(--ink-soft);font-weight:600;margin-left:6px;'},(u.chatBlockHistory||[]).length+' past'):null]),h('td',{style:'text-align:left;color:var(--ink-soft);'},u.teamId?teamNameById(u.teamId):'\u2014'),h('td',{},cb)])); });
+    tbox.appendChild(t); };
+  q.addEventListener('input',()=>{ chatBlkQ=q.value; drawRows(); });
+  drawRows(); left.appendChild(q); left.appendChild(tbox);
+  // right: blocked list
+  const right=h('div',{style:'flex:0 1 230px;min-width:200px;background:#fbeceb;border:1px solid #e7c3bf;border-radius:12px;padding:10px 12px;'});
+  right.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--leather-2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;'},'Blocked list ('+blocked.length+')'));
+  if(!blocked.length) right.appendChild(h('p',{style:'font-size:13px;margin:0;color:var(--ink-soft);'},'Nobody is blocked.'));
+  blocked.forEach(u=>{ const b=chatBlockOf(u); right.appendChild(h('div',{style:'display:flex;align-items:flex-start;gap:8px;padding:7px 0;border-top:1px solid #e7c3bf;'},[
+    h('div',{style:'flex:1;min-width:0;'},[h('div',{style:'font-weight:800;font-size:13.5px;'},u.displayName||u.email),h('div',{style:'font-size:11.5px;color:var(--ink-soft);'},chatBlockLevelLabel(b)+' \u00b7 until '+chatBlockUntilLabel(b)+(b.note?' \u00b7 \u201c'+b.note+'\u201d':''))]),
+    h('button',{class:'btn btn-outline btn-sm',title:'Lift block',style:'padding:2px 9px;',onclick:()=>chatLiftBlock(u,u.displayName||u.email)},'\u2715')])); });
+  right.appendChild(h('div',{style:'font-size:11px;color:var(--ink-soft);margin-top:6px;'},'Reason for every block: '+CHAT_BLOCK_REASON+'.'));
+  const pb=mem.filter(u=>u.chatPhotoBanned && !chatBlockOf(u));
+  if(pb.length){ right.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;margin:10px 0 4px;'},'Photos turned off'));
+    pb.forEach(u=>right.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;padding:4px 0;'},[h('span',{style:'flex:1;font-size:13px;'},u.displayName||u.email),h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 9px;',title:'Allow photos',onclick:()=>updateDoc(doc(db,'users',u.id),{chatPhotoBanned:false})},'\u2715')]))); }
+  wrap.appendChild(left); wrap.appendChild(right); card.appendChild(wrap);
+  return card;
+}
+// ---- Clear chat ----
+let chatClr={by:'range', from:'', to:'', day:'', season:'', uid:'', mode:'archive', busy:false, showArch:false, showFrozen:false};
+function chatLeagueMsgs(){ return (S.chat||[]).filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted); }
+function chatGameDays(){ const tids=new Set((S.teams||[]).map(t=>t.id)); const ds=new Set(); (S.allGamesForFeed||[]).forEach(g=>{ if(g.date && (!tids.size||tids.has(g.teamId))) ds.add(g.date); }); return [...ds].sort().reverse(); }
+function chatClearMatches(){
+  const all=chatLeagueMsgs().filter(m=>!m.archived && !m.frozen); const c=chatClr; const day=(d,end)=>new Date(d+(end?'T23:59:59':'T00:00:00')).getTime();
+  if(c.by==='range'){ if(!c.from&&!c.to) return []; return all.filter(m=>(!c.from||m.ts>=day(c.from))&&(!c.to||m.ts<=day(c.to,true))); }
+  if(c.by==='day'){ if(!c.day) return []; return all.filter(m=>m.ts>=day(c.day)&&m.ts<=day(c.day,true)); }
+  if(c.by==='season'){ const sn=(S.seasons||[]).find(x=>x.id===c.season); if(!sn) return []; const f=sn.startDate?day(sn.startDate):(sn.createdAt||0), t=sn.endDate?day(sn.endDate,true):Date.now(); return all.filter(m=>m.ts>=f&&m.ts<=t); }
+  if(c.by==='member'){ if(!c.uid) return []; return all.filter(m=>m.uid===c.uid); }
+  if(c.by==='all') return all;
+  return [];
+}
+async function chatClearRun(list){
+  if(chatClr.busy) return; chatClr.busy=true; renderShell();
+  try{
+    const lid=S.currentLeagueId; if(lid && typeof bkCollect==='function'){ try{ await bkSaveCloud(lid,bkBundle(lid,await bkCollect(lid),'before chat clear')); }catch(e){ console.warn('backup before clear failed',e); } }
+    for(const m of list){ if(chatClr.mode==='freeze') await updateDoc(doc(db,'chatMessages',m.id),{frozen:true,frozenBy:S.user.uid,frozenAt:Date.now()}); else await updateDoc(doc(db,'chatMessages',m.id),{archived:true,archivedBy:S.user.uid,archivedAt:Date.now()}); }
+    toast((chatClr.mode==='freeze'?'Froze ':'Archived ')+list.length+' message'+(list.length===1?'':'s')+'. A backup was saved first.');
+  }catch(e){ toast('Could not finish: '+(e.message||e)); }
+  chatClr.busy=false; renderShell();
+}
+function chatClearCard(){
+  const c=chatClr; const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Clear chat'));
+  card.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 8px;'},'Clear old or test messages in one step. Archive hides them from players; Freeze keeps them visible but locked so nobody can delete them. Nothing is erased. Announcements are not affected.'));
+  card.appendChild(h('div',{class:'segControl',style:'width:auto;flex-wrap:wrap;margin-bottom:8px;'},[['range','Date range'],['day','Game day'],['season','Season'],['member','One member'],['all','Everything']].map(([v,l])=>h('button',{class:c.by===v?'active':'',onclick:()=>{ c.by=v; renderShell(); }},l))));
+  const row=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;margin-bottom:8px;'});
+  const setr=(k)=>(e)=>{ c[k]=e.target.value; renderShell(); };
+  if(c.by==='range'){ const f=h('input',{type:'date',value:c.from,style:'width:auto;'}), t=h('input',{type:'date',value:c.to,style:'width:auto;'}); f.addEventListener('change',setr('from')); t.addEventListener('change',setr('to')); row.appendChild(h('span',{},'From')); row.appendChild(f); row.appendChild(h('span',{},'to')); row.appendChild(t); }
+  if(c.by==='day'){ const s=h('select',{style:'width:auto;'}); s.appendChild(h('option',{value:''},'Pick a game day…')); chatGameDays().forEach(d=>{ const o=h('option',{value:d},formatDate(d)); if(d===c.day) o.setAttribute('selected','selected'); s.appendChild(o); }); s.addEventListener('change',setr('day')); row.appendChild(s); }
+  if(c.by==='season'){ const s=h('select',{style:'width:auto;'}); s.appendChild(h('option',{value:''},'Pick a season…')); (S.seasons||[]).forEach(x=>{ const o=h('option',{value:x.id},x.name); if(x.id===c.season) o.setAttribute('selected','selected'); s.appendChild(o); }); s.addEventListener('change',setr('season')); row.appendChild(s); }
+  if(c.by==='member'){ const by={}; chatLeagueMsgs().filter(m=>!m.archived&&!m.frozen).forEach(m=>{ by[m.uid]=by[m.uid]||{name:m.name||'Member',n:0}; by[m.uid].n++; });
+    const box=h('div',{style:'flex:1 1 260px;min-width:0;'});
+    if(c.uid && by[c.uid]) box.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;'},[h('span',{class:'pill-role',style:'font-size:13px;padding:5px 10px;'},by[c.uid].name+' \u00b7 '+by[c.uid].n+' message'+(by[c.uid].n===1?'':'s')),h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 9px;',title:'Pick someone else',onclick:()=>{ c.uid=''; c.mq=''; renderShell(); }},'\u2715')]));
+    else { const q=h('input',{type:'search',placeholder:'Type a name\u2026',value:c.mq||'',style:'width:100%;'}); const res=h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;'});
+      const draw=()=>{ res.innerHTML=''; const qq=(c.mq||'').trim().toLowerCase(); const hits=Object.entries(by).filter(([u,x])=>!qq||x.name.toLowerCase().includes(qq)).sort((a,b)=>a[1].name.localeCompare(b[1].name)).slice(0,12);
+        if(!hits.length) res.appendChild(h('span',{style:'font-size:12px;color:var(--ink-soft);'},'No one by that name has messages.'));
+        hits.forEach(([uid,x])=>res.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ c.uid=uid; renderShell(); }},x.name+' ('+x.n+')'))); };
+      q.addEventListener('input',()=>{ c.mq=q.value; draw(); }); draw(); box.appendChild(q); box.appendChild(res); }
+    row.appendChild(box); }
+  if(row.children.length) card.appendChild(row);
+  card.appendChild(h('div',{class:'segControl',style:'width:auto;margin-bottom:8px;'},[['archive','Archive \u2014 hide from players'],['freeze','\u2744 Freeze \u2014 keep visible, locked']].map(([v,l])=>h('button',{class:c.mode===v?'active':'',onclick:()=>{ c.mode=v; renderShell(); }},l))));
+  const list=chatClearMatches();
+  card.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;'},[
+    h('span',{style:'font-size:13px;font-weight:700;'},list.length+' message'+(list.length===1?'':'s')+' selected'),
+    h('button',Object.assign({class:'btn btn-sm',style:'background:var(--leather-2);color:#fff;border-color:var(--leather-2);',onclick:()=>confirmModal((c.mode==='freeze'?'Freeze ':'Archive ')+list.length+' message'+(list.length===1?'':'s')+'?',(c.mode==='freeze'?'They stay in League Chat for everyone to read, marked \u2744 frozen, and nobody can delete them \u2014 a permanent record. ':'Players will no longer see them; admins can view or restore them below. ')+'Nothing is erased, and a cloud backup is saved first.',()=>chatClearRun(list),{confirmLabel:c.mode==='freeze'?'Freeze':'Archive'})},(c.busy||!list.length)?{disabled:'disabled'}:{}),c.busy?'Working…':(c.mode==='freeze'?'Freeze':'Archive'))]));
+  const arch=chatLeagueMsgs().filter(m=>m.archived);
+  if(arch.length){
+    card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;flex-wrap:wrap;'},[h('span',{style:'flex:1;'},arch.length+' archived message'+(arch.length===1?'':'s')+' (hidden from players)'),
+      h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ c.showArch=!c.showArch; renderShell(); }},c.showArch?'Hide':'View'),
+      h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Restore '+arch.length+' archived messages?','They will show in League Chat again.',async()=>{ for(const m of arch) await updateDoc(doc(db,'chatMessages',m.id),{archived:false}); toast('Restored'); })},'Restore all')]));
+    if(c.showArch){ const box=h('div',{style:'max-height:260px;overflow:auto;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:var(--chalk);'});
+      arch.slice(-200).forEach(m=>box.appendChild(h('div',{style:'font-size:12.5px;padding:4px 0;border-bottom:1px solid var(--line);'},[h('b',{},m.name||'Member'),' · '+new Date(m.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})+' — ',m.text||(m.photo?'[photo]':'')])));
+      card.appendChild(box); }
+  }
+  const fz=chatLeagueMsgs().filter(m=>m.frozen);
+  if(fz.length) card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;margin-top:10px;padding-top:10px;border-top:1px solid var(--line);font-size:13px;flex-wrap:wrap;'},[h('span',{style:'flex:1;'},'\u2744 '+fz.length+' frozen message'+(fz.length===1?'':'s')+' (visible, locked)'),
+    h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Unfreeze '+fz.length+' messages?','They return to normal messages that admins can delete again.',async()=>{ for(const m of fz) await updateDoc(doc(db,'chatMessages',m.id),{frozen:false}); toast('Unfrozen'); })},'Unfreeze all')]));
+  return card;
+}
+
 Router.register('chat', (root)=>{
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'League Chat'),h('p',{},'Talk with the whole league. Keep it friendly and within league rules.')]));
   { if(!S.annVisit) S.annVisit={at:Date.now(), key:annSeenKey()}; const ab=announcementsBox(); if(ab) root.appendChild(ab); }
   if(!S.currentLeagueId && !S.leagues.length){ root.appendChild(emptyState('No league yet','Ask your commissioner to set up the league.','diamond')); return; }
-  const msgs=S.chat.filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted && (!m.pending || isAdmin() || (S.user&&m.uid===S.user.uid))).slice(-200);
+  { const mb=myChatBlock(); if(mb && mb.level==='all' && !isAdmin()){ root.appendChild(h('div',{class:'card',style:'border:2px solid var(--leather-2);'},[h('h3',{},'League Chat is unavailable to you'),h('p',{style:'font-size:13.5px;margin:0 0 10px;line-height:1.5;'},'Your chat access is restricted until '+chatBlockUntilLabel(mb)+' \u2014 '+CHAT_BLOCK_REASON.toLowerCase()+'. Questions? Contact a league admin.'),h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.activeTab='rules'; renderShell(); }},'Read the League Rules')])); return; } }
+  const msgs=S.chat.filter(m=>(!S.currentLeagueId||m.leagueId===S.currentLeagueId) && !m.deleted && !m.archived && (!m.pending || isAdmin() || (S.user&&m.uid===S.user.uid))).slice(-200);
   const card=h('div',{class:'card chatBox'});
   const list=h('div',{class:'chatMsgs'});
   if(!msgs.length) list.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);text-align:center;padding:20px;'},'No messages yet — say hello!'));
@@ -5360,11 +5506,11 @@ Router.register('chat', (root)=>{
     const mine=S.user && m.uid===S.user.uid;
     const author=S.usersDirectory.find(u=>u.id===m.uid);
     const el=h('div',{class:'chatMsg'+(mine?' mine':'')});
-    const meta=h('div',{class:'chatMeta'},[h('strong',{style:'color:var(--ink);'},m.name||'Member'), h('span',{},new Date(m.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}))]);
+    const meta=h('div',{class:'chatMeta'},[h('strong',{style:'color:var(--ink);'},m.name||'Member'), h('span',{},new Date(m.ts).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})), m.frozen?h('span',{title:'Frozen by a league admin \u2014 kept as a record',style:'font-size:10.5px;color:#3b6f9e;font-weight:700;'},'\u2744 frozen'):null]);
     if(isAdmin()){
-      meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;',onclick:()=>confirmModal('Delete message?','Removes it for everyone.',()=>updateDoc(doc(db,'chatMessages',m.id),{deleted:true,deletedBy:S.user.uid}),{danger:true})},'Delete'));
+      if(!m.frozen) meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;',onclick:()=>confirmModal('Delete message?','Removes it for everyone.',()=>updateDoc(doc(db,'chatMessages',m.id),{deleted:true,deletedBy:S.user.uid}),{danger:true})},'Delete'));
       if(author && !mine && m.photo) meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;'+(author.chatPhotoBanned?'color:var(--grass-1);':'color:var(--leather-2);'),onclick:()=>confirmModal((author.chatPhotoBanned?'Allow photos again for ':'Turn off photos for ')+(m.name||'this member')+'?', author.chatPhotoBanned?'They can post photos again.':'They can still post text, but not photos.',()=>updateDoc(doc(db,'users',author.id),{chatPhotoBanned:!author.chatPhotoBanned}))}, author.chatPhotoBanned?'Allow photos':'No photos'));
-      if(author && !mine) meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;'+(author.chatBanned?'color:var(--grass-1);':'color:var(--leather-2);'),onclick:()=>confirmModal((author.chatBanned?'Restore chat for ':'Restrict ')+(m.name||'this member')+'?', author.chatBanned?'They will be able to post again.':'They will be able to read chat but not post until you restore them.',()=>updateDoc(doc(db,'users',author.id),{chatBanned:!author.chatBanned}))}, author.chatBanned?'Restore':'Restrict'));
+      if(author && !mine){ const ab=chatBlockOf(author); meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;'+(ab?'color:var(--grass-1);':'color:var(--leather-2);'),onclick:()=>ab?chatLiftBlock(author,m.name):chatBlockModal(author,m.name)}, ab?'Lift block':'Block')); }
     }
     if(!isAdmin() && !mine && S.user && !(m.reports||[]).some(r=>r.uid===S.user.uid)) meta.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'padding:1px 6px;font-size:10px;color:var(--ink-soft);',title:'Report to the league admin',onclick:()=>{ const why=prompt('Why are you reporting this? (optional)',''); if(why===null) return; updateDoc(doc(db,'chatMessages',m.id),{reports:arrayUnion({uid:S.user.uid,name:S.profile.displayName||S.profile.email,reason:(why||'').trim(),ts:Date.now()}),reportsCleared:false}).then(()=>toast('Reported to the league admin')); }},'Report'));
     el.appendChild(meta); if(m.text) el.appendChild(h('div',{},m.text));
@@ -5373,7 +5519,7 @@ Router.register('chat', (root)=>{
   });
   card.appendChild(list);
   const canPost = S.profile && S.profile.role!=='pending' && !chatBanned();
-  if(chatBanned()) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--leather-2);margin:8px 0 0;'},'Your posting access has been restricted by a league admin. You can still read the chat.'));
+  if(chatBanned()) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--leather-2);margin:8px 0 0;'},'Your posting access is restricted until '+chatBlockUntilLabel(myChatBlock())+' \u2014 '+CHAT_BLOCK_REASON.toLowerCase()+'. You can still read the chat.'));
   else if(!canPost) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:8px 0 0;'},'Your account is pending approval — you can read but not post yet.'));
   else {
     const cfg=chatCfg();
@@ -5428,12 +5574,11 @@ function chatAdminView(root){
         sc.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin:12px 0 2px;'},'League Announcements'));
         sc.appendChild(cb('Show announcements on Live Feed','When on, the admin can tick \u201cAlso show on Live Feed\u201d and Geezer Weezer announces it there too.',an.feed,v=>updateDoc(doc(db,'leagues',lg.id),{annFeed:v})));
         sc.appendChild(cb('Managers can post to their own team','Managers get a \u201c+ New announcement\u201d button that posts to their team only. Admins always post league-wide.',an.managers,v=>updateDoc(doc(db,'leagues',lg.id),{annManagers:v}))); }
-      sc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:6px 0 0;'},'Admins can delete any message or photo, turn photos off for one member (\u201cNo photos\u201d on their message), or restrict a member from posting entirely. Members can Report a message to you.'));
+      sc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:6px 0 0;'},'Admins can delete any message or photo, turn photos off for one member (\u201cNo photos\u201d on their message), or Block a member who is not in compliance with league policy. Members can Report a message to you.'));
       root.appendChild(sc); }
     else root.appendChild(h('div',{class:'card'},[h('h3',{},'Chat settings'),h('p',{style:'font-size:13px;margin:0;'},'Select a league first.')]));
-    const banned=S.usersDirectory.filter(u=>u.chatBanned && (!S.currentLeagueId||u.leagueId===S.currentLeagueId||!u.leagueId));
-    const pb=S.usersDirectory.filter(u=>u.chatPhotoBanned && !u.chatBanned && (!S.currentLeagueId||u.leagueId===S.currentLeagueId||!u.leagueId));
-    { const bc=h('div',{class:'card'}); bc.appendChild(h('h3',{},'Restricted members')); if(!banned.length&&!pb.length) bc.appendChild(h('p',{style:'font-size:13px;margin:0;'},'Nobody is restricted.')); banned.forEach(u=>bc.appendChild(h('div',{class:'gameListRow'},[h('div',{},[h('div',{class:'glTeams'},u.displayName||u.email),h('div',{class:'glDate'},'No posting')]), h('button',{class:'btn btn-outline btn-sm',onclick:()=>updateDoc(doc(db,'users',u.id),{chatBanned:false})},'Restore')]))); pb.forEach(u=>bc.appendChild(h('div',{class:'gameListRow'},[h('div',{},[h('div',{class:'glTeams'},u.displayName||u.email),h('div',{class:'glDate'},'No photos')]), h('button',{class:'btn btn-outline btn-sm',onclick:()=>updateDoc(doc(db,'users',u.id),{chatPhotoBanned:false})},'Allow photos')]))); root.appendChild(bc); }
+    root.appendChild(chatBlocksCard());
+    root.appendChild(chatClearCard());
   }
 }
 
@@ -5649,8 +5794,12 @@ const HELP_KB = [
   {k:'compare ads chart medals share sparkline', q:'How do I compare ads?', a:'In Performance, tick up to 6 rows in the table and open Compare. Each ad gets a scorecard with its total, a medal for the top three, a ▲/▼ change versus the previous full period and a mini trend line, plus a share bar and a line chart. Switch between Views, Clicks and Click rate.'},
   {k:'backup recovery restore cloud download file schedule', q:'How do I back up the league?', a:'Admin → Backup. “Save to cloud” keeps a snapshot in Firebase (the newest 8 are kept); “Download to this device” saves a file you control — do that from a laptop or desktop, not a phone, and keep the file in a backed-up folder or email it to the league. Turn on the schedule (day, time, cloud only or cloud + download): because the app has no server of its own, it runs the next time an admin opens Geezer Ball after that time, and a banner reminds you when a backup is overdue.'},
   {k:'restore backup undo deleted season mistake', q:'How do I restore from a backup?', a:'Admin → Backup → Restore: tap Restore on a cloud backup, or Choose backup file for a downloaded one. You see what is in it, then choose Restore everything, one season, or chat and announcements only. A cloud backup of the current data is saved first, so a restore can be undone. Admins only.'},
+  {k:'block player chat policy restrict remove ban suspend', q:'How do I block a player from chat?', a:'Tap Block on any of their messages in League Chat, or Admin \u2192 Chat \u2192 Block members: search for the player and tick Blocked. They move to the Blocked list on the right; tap \u2715 there to lift the block. Choose No posting (they can still read) or Removed from chat, and how long: 7 days, 30 days, rest of season, or until you lift it. The reason shown is \u201cnot in compliance with league policy\u201d; you can add a private note and remove their messages at the same time. Timed blocks lift on their own; Lift block ends one early.'},
+  {k:'clear chat delete old messages test archive game day season', q:'How do I clear the chat?', a:'Admin \u2192 Chat \u2192 Clear chat. Pick a date range, a game day, a season, one member, or everything, then Archive (players no longer see them; admins can view or restore) or Freeze (they stay visible, marked \u2744 frozen, and nobody can delete them). Nothing is erased, and a cloud backup is saved first. Announcements are not affected.'},
+  {k:'test season real live clear fake data make real', q:'What is a TEST season and how do I clear test data?', a:'Every season is REAL (green \u2014 live, counts in stats and reports) or TEST (gold \u2014 rehearsal, never counts). You choose when you create the season; existing seasons start as TEST. Admin \u2192 \ud83e\uddea Test lists the test seasons: Clear removes a season and everything in it (sign-ups, ratings, draft, rosters, schedule, games, test accounts); Make real keeps the setup (teams, managers, schedule, sign-up window) and removes the test data, then turns the season green. A cloud backup is saved first. Only Super Admin can turn a real season back to test.'},
+  {k:'fill fake data test sign-ups ratings draft auto play', q:'How do I fill a test season with fake data?', a:'Admin \u2192 \ud83e\uddea Test \u2192 Fill a test season: pick the TEST season, then go in order \u2014 1 Add test sign-ups, 2 Fill random ratings, 3 Quick test draft and Simulate all picks, 4 + Test game and Auto-play 3 innings. Everything lands in that test season only; the buttons are disabled for real seasons.'},
   {k:'two ads side by side sponsor split half', q:'Can two sponsors show side by side?', a:'Super Admin → Advertisement → Where ads show → “2 ads side by side” row: switch it on for a page and two different sponsors share that spot, half each. Both stay clickable with their coupons.'},
-  {k:'test sign-ups fake players practice clear', q:'How do I practise season setup with fake players?', a:'Admin → Settings → Test data → Test sign-ups: choose how many players (with or without ratings, plus accounts awaiting approval), then walk through the Season Builder. Clear test data removes it all for that league and season.'},
+  {k:'test sign-ups fake players practice clear', q:'How do I practise season setup with fake players?', a:'Admin → 🧪 Test → Fill a test season (moved from Settings). Previously: Test sign-ups: choose how many players (with or without ratings, plus accounts awaiting approval), then walk through the Season Builder. Clear test data removes it all for that league and season.'},
   {k:'hit zone heat map filter', q:'What does Hit Zone show?', a:'Every ball in play this season. Filter by team and player, tap a zone for its count, or export to Excel.'},
   {k:'report batting standings trend scoring substitutes', q:'What reports are there?', a:'Report tab: Batting (by player, team totals, team vs team), Hit Zone by location, Scoring by season/year/field, Batting Average Trend, Substitutes, and Standings.'},
   {k:'record standings win loss', q:'Where do I see standings?', a:'Record tab: pick a team for its game-by-game log, plus League Standings and the playoff bracket below.'},
@@ -5866,6 +6015,7 @@ function testSignupsHere(){ return (S.signups||[]).filter(x=>x.isTest && x.seaso
 let testGenCount=60, testGenEvals=false, testGenAccounts=true;
 async function createTestSignups(count, withEvals, withAccounts){
   if(!S.currentSeasonId){ toast('Pick a season first'); return; }
+  if(seasonIsReal(currentSeason())){ toast('Fake data only goes into TEST seasons'); return; }
   const have=new Set(testSignupsHere().map(x=>(x.name||'').toLowerCase()));
   const pool=testNamePool().filter(n=>!have.has(n.toLowerCase())).sort(()=>Math.random()-0.5).slice(0,count);
   if(!pool.length){ toast('All test names are already signed up for this season'); return; }
@@ -5877,7 +6027,7 @@ async function createTestSignups(count, withEvals, withAccounts){
     return d; });
   for(let i=0;i<docs.length;i+=25) await Promise.all(docs.slice(i,i+25).map(d=>addDoc(collection(db,'signups'),d)));
   let acc=0;
-  if(withAccounts){ for(const d of docs.slice(0,4)){ await setDoc(doc(db,'users','test_'+Math.random().toString(36).slice(2,10)),{email:d.email, displayName:d.name, role:'pending', leagueId:S.currentLeagueId||null, createdAt:Date.now(), isTest:true}); acc++; } }
+  if(withAccounts){ for(const d of docs.slice(0,4)){ await setDoc(doc(db,'users','test_'+Math.random().toString(36).slice(2,10)),{email:d.email, displayName:d.name, role:'pending', leagueId:S.currentLeagueId||null, createdAt:Date.now(), isTest:true, testSeasonId:S.currentSeasonId||null}); acc++; } }
   toast('Added '+docs.length+' test sign-ups'+(withEvals?' with evaluations':'')+(acc?' and '+acc+' test accounts awaiting approval':'')+' to '+(currentSeasonName()||'this season'));
 }
 function testSeasonIsPure(){ const sid=S.currentSeasonId; return !(S.signups||[]).some(x=>x.seasonId===sid && !x.isTest) && !(S.allPlayersForFeed||[]).some(p=>p.seasonId===sid && !p.isTest); }
@@ -5930,6 +6080,7 @@ function testSignupsCard(){
 }
 async function createTestDraftData(){
   if(!S.currentSeasonId){ toast('Pick a season first'); return; }
+  if(seasonIsReal(currentSeason())){ toast('Fake data only goes into TEST seasons'); return; }
   const activeTeams=S.teams.filter(t=>t.active!==false);
   if(activeTeams.length<2){ toast('Need at least two active teams'); return; }
   const names=testNamePool().slice(0,140);
@@ -5946,6 +6097,7 @@ async function createTestDraftData(){
   toast('Created '+n+' test sign-ups with evaluations and started a test draft');
 }
 async function simulateTestDraft(){
+  if(seasonIsReal(currentSeason())){ toast('Simulate only works in TEST seasons'); return; }
   const d=S.draft; if(!d||!d.order){ toast('No draft set up'); return; }
   // pull fresh signups
   const snap=await getDocs(collection(db,'signups'));
@@ -6020,8 +6172,8 @@ function settingsView(root){
   if(!G) root.appendChild(rc);
   // ---- Draft data ----
   if(G) root.appendChild(h('div',{class:'sectiontitle'},'Test data'));
-  if(G) root.appendChild(testSignupsCard());
-  if(!G && seasonMethod()==='draft'){
+  if(G) root.appendChild(h('div',{class:'card'},[h('h3',{},'Test data has moved'),h('p',{style:'font-size:13px;margin:0 0 8px;'},'Fake sign-ups, ratings, test drafts, test games and clearing now live in Admin \u2192 \ud83e\uddea Test.'),h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ adminSub='test'; renderShell(); }},'Open Test')]));
+  if(!G && seasonMethod()==='draft' && curSeasonIsTest()){
   root.appendChild(h('div',{class:'sectiontitle'},'Draft shortcuts'));
   const dc=h('div',{class:'card'}); dc.appendChild(h('h3',{},'Draft shortcuts & archive'));
   dc.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Quick draft: adds 140 rated test sign-ups and starts a draft with every active team. Simulate fills every remaining pick. Use Clear test data (Settings \u2192 General \u2192 Test data) to remove it all.'));
@@ -7253,6 +7405,7 @@ const SEASON_STEP_PREVIEW={
   pickup:['Season created','Game days','Build sides at each game']
 };
 // The one create form — used on Admin → Seasons and in the Season Builder's "+ New season"
+let seasonCreateMode='test';
 function seasonCreateForm(onCancel){
   const box=h('div',{style:'border:2px solid var(--gold);background:#fbf6ea;border-radius:12px;padding:12px 14px;margin-bottom:14px;'});
   const lab=(t)=>h('div',{style:'font-size:12px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;'},t);
@@ -7278,9 +7431,11 @@ function seasonCreateForm(onCancel){
     if(st.value && en.value && en.value<st.value){ toast('End date is before start date'); return; }
     if(method!=='pickup' && so.value && sc.value && sc.value<so.value){ toast('Sign-up close is before it opens'); return; }
     go.disabled=true; go.textContent='Creating…';
-    try{ await createSeasonNamed(n, method, st.value||null, en.value||null, method==='pickup'?{}:{signupOpen:so.value||null, signupClose:sc.value||null}); seasonsCreateOpen=false; if(onCancel) onCancel(true); adminSub='builder'; S.activeTab='admin'; S.builderBack=null; S.scrollToBuilder=true; renderShell(); }
+    try{ await createSeasonNamed(n, method, st.value||null, en.value||null, Object.assign({mode:seasonCreateMode}, method==='pickup'?{}:{signupOpen:so.value||null, signupClose:sc.value||null})); seasonCreateMode='test'; seasonsCreateOpen=false; if(onCancel) onCancel(true); adminSub='builder'; S.activeTab='admin'; S.builderBack=null; S.scrollToBuilder=true; renderShell(); }
     catch(e){ go.disabled=false; go.textContent='Create'; toast('Could not create: '+(e.message||e)); }
   }},'Create');
+  { const mseg=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'}); const mdraw=()=>{ mseg.innerHTML=''; [['real','\u25cf REAL \u00b7 LIVE','#1f8a4c','#fff','Counts in stats, records and reports.'],['test','\ud83e\uddea TEST','#f3d27a','#5a4300','Rehearsal \u2014 never counts; clear it any time.']].forEach(([k,l,bg,fg,d])=>mseg.appendChild(h('button',{type:'button',onclick:()=>{ seasonCreateMode=k; mdraw(); },style:'flex:1 1 200px;text-align:left;border-radius:12px;padding:10px 12px;cursor:pointer;border:2px solid '+(seasonCreateMode===k?bg:'var(--line)')+';background:'+(seasonCreateMode===k?bg:'#fff')+';color:'+(seasonCreateMode===k?fg:'var(--ink)')+';'},[h('div',{style:'font-weight:800;font-size:15px;'},l),h('div',{style:'font-size:11.5px;opacity:.85;'},d)]))); }; mdraw();
+    box.appendChild(h('div',{style:'margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);'},[h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;'},'This season is'),mseg])); }
   box.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;'},[
     h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;'},'Roster type'), seg, h('div',{style:'flex:1;'}), go]));
   box.appendChild(hint);
@@ -7392,7 +7547,7 @@ function seasonsTableCard(){
     if(!s.archived) acts.push(h('button',{class:'btn btn-outline btn-sm stWide',style:'white-space:nowrap;',onclick:()=>{ seasonsEditId=s.id; seasonsCreateOpen=false; renderShell(); }},'✎ Change'));
     acts.push(h('button',{class:'btn btn-outline btn-sm','aria-label':'More',onclick:()=>seasonActionSheet(s)},'⋯'));
     return h('tr',{class:(cur?'stCur':'')+(s.archived?' stArch':'')},[
-      h('td',{},[s.archived?h('b',{},s.name||'Season'):h('button',{class:'stName',title:'Show its setup steps below',onclick:()=>openSeasonSteps(s)},[s.name||'Season',h('span',{class:'stGo'},cur?'Steps below \u2193':'Show steps \u2193')]), cur?h('span',{style:'display:block;font-size:11px;color:var(--grass-2);font-weight:700;margin-top:2px;'},'● Currently selected'):null,
+      h('td',{},[s.archived?h('b',{},s.name||'Season'):h('button',{class:'stName',title:'Show its setup steps below',onclick:()=>openSeasonSteps(s)},[s.name||'Season',seasonModePill(s),h('span',{class:'stGo'},cur?'Steps below \u2193':'Show steps \u2193')]), cur?h('span',{style:'display:block;font-size:11px;color:var(--grass-2);font-weight:700;margin-top:2px;'},'● Currently selected'):null,
         h('small',{class:'stPhoneOnly'},seasonDateRange(s))]),
       dateCell(d.start), dateCell(d.end), h('td',{},typeTag(m)), h('td',{},seasonStatusPill(st)),
       h('td',{},h('div',{style:'display:flex;gap:6px;justify-content:flex-end;align-items:center;'},acts))]);
@@ -8018,7 +8173,7 @@ async function bkRestore(lid,bundle,scope,seasonId){
     const want=bkFilterScope(bundle.docs,scope,seasonId); const have=bkFilterScope(current,scope,seasonId);
     const ref=(p)=>doc(db,...p.split('/'));
     let n=0; for(const [p,d] of Object.entries(want)){ if(p==='leagues/'+lid){ const keep=(current[p]||{}); await setDoc(ref(p),{...d, backup:keep.backup||bkCfg(lid)}); } else await setDoc(ref(p),d); n++; }
-    let del=0; for(const p of Object.keys(have)){ if(!(p in want) && !p.startsWith('users/') && !p.startsWith('leagues/')){ await deleteDoc(ref(p)); del++; } }
+    let del=0; for(const p of Object.keys(have)){ if(!(p in want) && !p.startsWith('users/') && !p.startsWith('leagues/') && !(have[p]&&have[p].frozen)){ try{ await deleteDoc(ref(p)); del++; }catch(e){} } }
     toast('Restored '+n+' records'+(del?', removed '+del:'')+'. A backup from just before was saved to the cloud.');
   }catch(e){ console.error(e); toast('Restore failed: '+(e.message||e)); }
   bkState.busy=''; bkState.file=null; await bkListCloud(lid).catch(()=>{}); renderShell();
@@ -8065,7 +8220,7 @@ function backupView(root){
   // cloud list
   const t=h('table',{class:'tbl',style:'width:100%;font-size:12.5px;'});
   t.appendChild(h('tr',{},[h('th',{},'Date'),h('th',{},'Type'),h('th',{},'Contents'),h('th',{},'Size'),h('th',{},'')]));
-  const typeLabel={scheduled:'Scheduled',manual:'Manual','pre-restore':'Before restore'};
+  const typeLabel={scheduled:'Scheduled',manual:'Manual','pre-restore':'Before restore','before chat clear':'Before chat clear','before test clear':'Before test clear'};
   if(bkState.loading) t.appendChild(h('tr',{},h('td',{colspan:'5',style:'color:var(--ink-soft);'},'Loading…')));
   else if(!bkState.list.length) t.appendChild(h('tr',{},h('td',{colspan:'5',style:'color:var(--ink-soft);'},'No cloud backups yet.')));
   bkState.list.forEach(b=>t.appendChild(h('tr',{},[h('td',{style:'white-space:nowrap;'},bkWhen(b.takenAt)),h('td',{},typeLabel[b.type]||b.type),h('td',{style:'color:var(--ink-soft);'},bkCountsLabel(b.counts||{})),h('td',{},bkSize(b.size||0)),
@@ -8092,18 +8247,158 @@ function backupView(root){
     h('button',{class:'btn btn-outline',...(busy?{disabled:'disabled'}:{}),onclick:async()=>{ if(bkState.busy) return; bkState.busy='Backing up all leagues…'; renderShell(); try{ const all={}; for(const l of S.leagues){ all[l.id]={name:l.name,docs:await bkCollect(l.id)}; } const blob=new Blob([JSON.stringify({app:'Geezer Ball Scorecard',format:1,all:true,takenAt:Date.now(),leagues:all})],{type:'application/json'}); const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='Geezer Ball – ALL LEAGUES – '+new Date().toISOString().slice(0,10)+'.json'; document.body.appendChild(a); a.click(); a.remove(); toast('Downloaded'); }catch(e){ toast('Failed: '+e.message); } bkState.busy=''; renderShell(); }},'⬇ Download all leagues')]));
 }
 
+/* ===== Real vs Test seasons + Admin → Test tab ===== */
+function seasonIsReal(s){ return !!(s && s.mode==='real'); }
+function curSeasonIsTest(){ const s=currentSeason(); return !!s && !seasonIsReal(s); }
+function seasonModePill(s,big){ const real=seasonIsReal(s); return h('span',{title:real?'Real season: counts in stats, records and reports':'Test season: rehearsal data, never counts',style:'display:inline-block;margin-left:8px;vertical-align:middle;white-space:nowrap;font-size:'+(big?12:10.5)+'px;font-weight:800;letter-spacing:.04em;padding:'+(big?'3px 10px':'2px 8px')+';border-radius:20px;'+(real?'background:#1f8a4c;color:#fff;':'background:#f3d27a;color:#5a4300;')},real?'● REAL · LIVE':'🧪 TEST'); }
+let tsBusy='';
+function tsLeagueTeams(){ return (S.allTeams||S.teams||[]).filter(t=>!S.currentLeagueId||t.leagueId===S.currentLeagueId||!t.leagueId); }
+function tsCounts(sid){ return { su:(S.signups||[]).filter(x=>x.seasonId===sid).length, ev:(S.signups||[]).filter(x=>x.seasonId===sid&&x.eval&&(x.eval.power||x.eval.defense)).length, pl:(S.allPlayersForFeed||[]).filter(x=>x.seasonId===sid).length, g:(S.allGamesForFeed||[]).filter(x=>x.seasonId===sid).length, acc:(S.usersDirectory||[]).filter(u=>u.isTest&&u.testSeasonId===sid).length }; }
+async function tsCollect(sid){
+  const out={signups:[],players:[],schedule:[],games:[],draft:[],archives:[],users:[]};
+  (await getDocs(collection(db,'signups'))).docs.forEach(d=>{ if(d.data().seasonId===sid) out.signups.push(d.id); });
+  for(const t of tsLeagueTeams()){ for(const sub of ['players','schedule','games']){ (await getDocs(collection(db,'teams',t.id,sub))).docs.forEach(d=>{ if(d.data().seasonId===sid) out[sub].push([t.id,d.id]); }); } }
+  try{ const d=await getDoc(doc(db,'draftStates',sid)); if(d.exists()) out.draft.push(sid); }catch(e){}
+  try{ (await getDocs(collection(db,'draftArchives'))).docs.forEach(d=>{ if(d.data().seasonId===sid) out.archives.push(d.id); }); }catch(e){}
+  (S.usersDirectory||[]).filter(u=>u.isTest && String(u.id).startsWith('test_') && u.testSeasonId===sid).forEach(u=>out.users.push(u.id));
+  return out;
+}
+async function tsWipe(sid, makeReal){
+  const sn=(S.allSeasons||S.seasons||[]).find(x=>x.id===sid); if(!sn) return;
+  if(seasonIsReal(sn)){ toast('That season is REAL — it can’t be cleared here'); return; }
+  if(tsBusy) return; tsBusy=makeReal?'Making '+sn.name+' real…':'Clearing '+sn.name+'…'; renderShell();
+  try{
+    const lid=S.currentLeagueId; if(lid){ try{ await bkSaveCloud(lid,bkBundle(lid,await bkCollect(lid),'before test clear')); }catch(e){ console.warn(e); } }
+    const c=await tsCollect(sid); const P=[];
+    c.signups.forEach(id=>P.push(deleteDoc(doc(db,'signups',id))));
+    c.players.forEach(([t,id])=>P.push(deleteDoc(doc(db,'teams',t,'players',id))));
+    c.games.forEach(([t,id])=>P.push(deleteDoc(doc(db,'teams',t,'games',id))));
+    c.schedule.forEach(([t,id])=>P.push(makeReal?updateDoc(doc(db,'teams',t,'schedule',id),{completed:false}):deleteDoc(doc(db,'teams',t,'schedule',id))));
+    c.draft.forEach(id=>P.push(deleteDoc(doc(db,'draftStates',id))));
+    c.archives.forEach(id=>P.push(deleteDoc(doc(db,'draftArchives',id))));
+    c.users.forEach(id=>P.push(deleteDoc(doc(db,'users',id))));
+    for(let i=0;i<P.length;i+=40) await Promise.all(P.slice(i,i+40).map(p=>p.catch(()=>{})));
+    if(makeReal){ await updateDoc(doc(db,'seasons',sid),{mode:'real',madeRealAt:Date.now(),madeRealBy:S.user.email,rostersApprovedAt:null}); toast(sn.name+' is now REAL · LIVE'); }
+    else { await deleteDoc(doc(db,'seasons',sid)); if(S.currentSeasonId===sid){ S.currentSeasonId=null; S.activeGameId=null; } toast('Cleared '+sn.name); }
+  }catch(e){ console.error(e); toast('Could not finish: '+(e.message||e)); }
+  tsBusy=''; renderShell();
+}
+function tsConfirmClear(sn){ const k=tsCounts(sn.id);
+  confirmModal('Clear the test season “'+sn.name+'”?','Removes the season and everything in it: '+k.su+' sign-ups, '+k.pl+' roster players, '+k.g+' games, its schedule, draft and '+k.acc+' test accounts. Teams and real seasons are not touched. A cloud backup is saved first.',()=>tsWipe(sn.id,false),{danger:true,confirmLabel:'Clear season'}); }
+function tsConfirmReal(sn){ const k=tsCounts(sn.id);
+  confirmModal('Make “'+sn.name+'” REAL?','Keeps the season’s name, dates, roster type, teams, managers, schedule and sign-up window. Removes the test data: '+k.su+' sign-ups and ratings, the draft, '+k.pl+' roster players, '+k.g+' scored games and '+k.acc+' test accounts. The season turns green (REAL · LIVE) and only Super Admin can turn it back to test. A cloud backup is saved first.',()=>tsWipe(sn.id,true),{confirmLabel:'Make real'}); }
+// ---- fill tools (always the current season, which must be TEST) ----
+function tsGuard(){ const s=currentSeason(); if(!s){ toast('Pick a test season first'); return false; } if(seasonIsReal(s)){ toast('Fake data only goes into TEST seasons'); return false; } return true; }
+async function tsFillRatings(){ if(!tsGuard()) return; const sid=S.currentSeasonId; const list=(S.signups||[]).filter(x=>x.seasonId===sid); let n=0;
+  for(const x of list){ const e=x.eval||{}; await updateDoc(doc(db,'signups',x.id),{eval:{...e, power:1+Math.floor(Math.random()*90), defense:1+Math.floor(Math.random()*90), lastRank:e.lastRank||(1+Math.floor(Math.random()*120)), comment:e.comment||FAKE_COMMENTS[Math.floor(Math.random()*FAKE_COMMENTS.length)]}}); n++; }
+  toast(n?('Rated '+n+' test players'):'No sign-ups yet — add test sign-ups first'); }
+async function tsClearRatings(){ if(!tsGuard()) return; const sid=S.currentSeasonId; let n=0; for(const x of (S.signups||[]).filter(x=>x.seasonId===sid && x.eval)){ await updateDoc(doc(db,'signups',x.id),{eval:{}}); n++; } toast('Cleared ratings for '+n); }
+async function tsQuickDraft(){ if(!tsGuard()) return; const teams=S.teams.filter(t=>t.active!==false); if(teams.length<2){ toast('Add at least two teams first (Season Builder → Teams & managers)'); return; }
+  const pool=(S.signups||[]).filter(x=>x.seasonId===S.currentSeasonId && !x.drafted);
+  if(pool.length<teams.length*2){ await createTestDraftData(); return; }
+  if(!pool.some(x=>x.eval&&x.eval.power)) await tsFillRatings();
+  const order=teams.map(t=>t.id).sort(()=>Math.random()-0.5);
+  await setDoc(draftStateRef(),{ order, rounds:Math.ceil(pool.length/order.length), clockSeconds:90, picks:[], status:'active', clockStartedAt:Date.now(), isTest:true, autoPick:false, paused:false });
+  toast('Test draft started with '+pool.length+' players — open the Draft Board'); }
+function tsRoster(tid){ return (S.allPlayersForFeed||[]).filter(p=>p.teamId===tid && p.seasonId===S.currentSeasonId).sort((a,b)=>(a.order||99)-(b.order||99)).map((p,i)=>({id:p.id,name:p.name,number:p.number||'',position:p.position||'',order:i+1,isSub:false,subTeamName:''})); }
+function tsTwoTeams(){ const ts=S.teams.filter(t=>t.active!==false).map(t=>({t,n:tsRoster(t.id).length})).sort((a,b)=>b.n-a.n); return ts.length>=2?[ts[0].t,ts[1].t]:null; }
+async function tsAddGame(){ if(!tsGuard()) return; const two=tsTwoTeams(); if(!two){ toast('Add at least two teams first'); return; }
+  await createScheduledMatchup(two[0].id,two[1].id,new Date().toISOString().slice(0,10),'10:00','Test field'); toast('Test game added: '+two[1].name+' at '+two[0].name); }
+function tsSimInnings(home, away, innings){
+  const RES=[['1B',30],['2B',8],['3B',2],['HR',3],['GO',22],['FO',20],['SO',5],['BB',6],['E',2],['SF',1],['FC',1]]; const tot=RES.reduce((a,b)=>a+b[1],0);
+  const pick=()=>{ let r=Math.random()*tot; for(const [k,w] of RES){ if((r-=w)<0) return k; } return 'GO'; };
+  const HITZ=['SOF1','SOF2','SOF3','SOF4','DOF1','DOF2','DOF3','DOF4','IF2','IF4'], OUTZ=['IF1','IF2','IF3','IF4','IF5','SOF1','SOF2','SOF3','SOF4','DOF2','DOF3'];
+  const z=a=>a[Math.floor(Math.random()*a.length)];
+  const ab=[]; const score={home:{},away:{}}; const idx={home:0,away:0}; let ts=Date.now()-innings*600000;
+  for(let inn=1;inn<=innings;inn++){ for(const [half,side,team] of [['top','away',away],['bottom','home',home]]){
+    let outs=0, runs=0, b=[null,null,null], guard=0;
+    while(outs<3 && guard++<14){ const p=team[idx[side]%team.length]; idx[side]++; const r=pick(); const scored=[];
+      const adv=(n)=>{ for(let k=0;k<n;k++){ if(b[2]) scored.push(b[2]); b=[null,b[0],b[1]]; } };
+      if(r==='HR'){ b.forEach(x=>{ if(x) scored.push(x); }); scored.push(p.id); b=[null,null,null]; }
+      else if(r==='3B'){ b.forEach(x=>{ if(x) scored.push(x); }); b=[null,null,p.id]; }
+      else if(r==='2B'){ adv(2); b[1]=p.id; }
+      else if(r==='1B'||r==='E'){ adv(1); b[0]=p.id; }
+      else if(r==='BB'){ if(b[0]){ if(b[1]){ if(b[2]) scored.push(b[2]); b[2]=b[1]; } b[1]=b[0]; } b[0]=p.id; }
+      else if(r==='FC'){ outs++; b[0]=p.id; }
+      else if(r==='SF'){ outs++; if(outs<3 && b[2]){ scored.push(b[2]); b[2]=null; } }
+      else outs++;
+      runs+=scored.length;
+      ab.push({id:uid(),side,playerId:p.id,inning:inn,half,result:r,zone:(r==='SO'||r==='BB')?null:(['GO','FO','SF','FC'].includes(r)?z(OUTZ):z(HITZ)),scoredPlayerIds:scored,runsScored:scored.length,rbi:r==='E'?0:scored.length,ts:ts+=20000});
+    }
+    score[side][String(inn)]=runs; } }
+  return {ab,score};
+}
+async function tsAutoPlay(){ if(!tsGuard()) return;
+  const two=tsTwoTeams(); if(!two){ toast('Add at least two teams first'); return; }
+  const H=tsRoster(two[0].id), A=tsRoster(two[1].id); if(H.length<3||A.length<3){ toast('Rosters are empty — run Quick test draft and Simulate all picks first'); return; }
+  const sid=S.currentSeasonId; let sch=(S.allGamesForFeed||[]).length; // ensure a schedule entry
+  const snap=await getDocs(collection(db,'teams',two[0].id,'schedule'));
+  let se=snap.docs.map(d=>({id:d.id,...d.data()})).find(x=>x.seasonId===sid && x.opponentTeamId===two[1].id && !x.completed);
+  if(!se){ await tsAddGame(); const s2=await getDocs(collection(db,'teams',two[0].id,'schedule')); se=s2.docs.map(d=>({id:d.id,...d.data()})).find(x=>x.seasonId===sid && x.opponentTeamId===two[1].id && !x.completed); }
+  if(!se){ toast('Could not create the test game'); return; }
+  const g=tsSimInnings(H,A,3);
+  await addDoc(collection(db,'teams',two[0].id,'games'),{matchupId:se.matchupId,homeAway:'home',opponent:two[1].name,opponentTeamId:two[1].id,seasonId:sid,date:se.date,home:{name:two[0].name,players:H},away:{name:two[1].name,players:A},atbats:g.ab,score:g.score,base:{},outs:0,inning:4,half:'top',completed:false,inningsPlanned:7,manualScores:[],scorekeeperSide:'home',challenges:[],isTest:true,updatedAt:Date.now()});
+  toast('Played 3 innings: '+two[1].name+' '+Object.values(g.score.away).reduce((a,b)=>a+b,0)+', '+two[0].name+' '+Object.values(g.score.home).reduce((a,b)=>a+b,0)+' — see Live Feed');
+}
+function testTabView(root){
+  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},['Test ',h('span',{class:'pill-warn',style:'font-size:12px;vertical-align:middle;'},'Admin only')]),h('p',{},'Every season is either REAL (live — counts in stats and reports) or TEST (rehearsal — never counts). Clear test seasons here so test data can never mix with real data.')]));
+  if(tsBusy) root.appendChild(h('div',{class:'card',style:'text-align:center;font-weight:700;'},'⏳ '+tsBusy+' Please stay on this page.'));
+  const all=(S.seasons||[]).filter(s=>!s.archived); const tests=all.filter(s=>!seasonIsReal(s)), reals=all.filter(seasonIsReal);
+  const busy=tsBusy?{disabled:'disabled'}:{};
+  const c=h('div',{class:'card'}); c.appendChild(h('h3',{},['Test seasons ',h('span',{style:'font-size:12px;color:var(--ink-soft);font-weight:600;'},'('+tests.length+')')]));
+  const t=h('table',{class:'dataTable',style:'width:100%;font-size:13px;'});
+  t.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Season'),h('th',{},'Sign-ups'),h('th',{},'Rated'),h('th',{},'Roster players'),h('th',{},'Games'),h('th',{},'')]));
+  tests.forEach(s=>{ const k=tsCounts(s.id); t.appendChild(h('tr',{},[h('td',{style:'text-align:left;font-weight:700;'},[s.name,seasonModePill(s)]),h('td',{},String(k.su)),h('td',{},String(k.ev)),h('td',{},String(k.pl)),h('td',{},String(k.g)),
+    h('td',{style:'white-space:nowrap;text-align:right;'},[h('button',Object.assign({class:'btn btn-sm',style:'background:#1f8a4c;color:#fff;border-color:#1f8a4c;',onclick:()=>tsConfirmReal(s)},busy),'Make real…'),' ',h('button',Object.assign({class:'btn btn-danger btn-sm',onclick:()=>tsConfirmClear(s)},busy),'Clear')])])); });
+  if(!tests.length) t.appendChild(h('tr',{},h('td',{colspan:'6',style:'text-align:center;color:var(--ink-soft);'},'No test seasons.')));
+  c.appendChild(h('div',{style:'overflow:auto;'},t));
+  if(tests.length) c.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;'},[h('button',Object.assign({class:'btn btn-danger btn-sm',onclick:()=>confirmModal('Clear ALL '+tests.length+' test seasons?','Removes '+tests.map(s=>s.name).join(', ')+' and everything in them. Real seasons are not touched. A cloud backup is saved first.',async()=>{ for(const s of tests) await tsWipe(s.id,false); },{danger:true,confirmLabel:'Clear all'})},busy),'🧹 Clear ALL test seasons'),h('span',{style:'font-size:12px;color:var(--ink-soft);flex:1 1 260px;'},'Removes each test season and everything in it: sign-ups, ratings, draft, rosters, schedule, games and test accounts. A cloud backup is saved first. Real seasons are never listed here.')]));
+  root.appendChild(c);
+  root.appendChild(h('div',{class:'card',style:'border:2px solid #1f8a4c;'},[h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:6px;'},[h('h3',{style:'margin:0;flex:1;'},'Going live: “Make real”'),seasonModePill({mode:'real'},true)]),
+    h('p',{style:'font-size:12.5px;margin:0 0 8px;line-height:1.55;'},'Rehearse on a test season, then make it the real one:'),
+    h('div',{style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 18px;font-size:13px;'},[
+      h('div',{},'✓ Keep: name, dates, roster type'),h('div',{},'✕ Remove: test sign-ups and ratings'),
+      h('div',{},'✓ Keep: teams and managers'),h('div',{},'✕ Remove: test draft and rosters'),
+      h('div',{},'✓ Keep: game schedule and sign-up window'),h('div',{},'✕ Remove: scored test games and test accounts')]),
+    h('p',{style:'font-size:12px;color:var(--ink-soft);margin:8px 0 0;'},'The season then turns green — REAL · LIVE — and only Super Admin can turn a real season back to test.')]));
+  root.appendChild(h('div',{class:'card'},[h('h3',{},['Real seasons ',h('span',{style:'font-size:12px;color:var(--ink-soft);font-weight:600;'},'('+reals.length+')')]),
+    reals.length?h('div',{},reals.map(s=>h('div',{style:'display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);'},[h('div',{style:'flex:1;font-weight:700;'},[s.name,seasonModePill(s)]),
+      isSuperAdmin()?h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Turn “'+s.name+'” back to TEST?','Super Admin only. Its data will then be treated as test data and can be cleared.',()=>updateDoc(doc(db,'seasons',s.id),{mode:'test'}).then(()=>toast('Now TEST')))},'Make test'):null]))):h('p',{style:'font-size:13px;margin:0;color:var(--ink-soft);'},'None yet — your league is still in setup. All current seasons are TEST.')]));
+  // fill
+  const f=h('div',{class:'card'}); f.appendChild(h('h3',{},'Fill a test season with fake data'));
+  const sel=h('select',{style:'width:auto;'}); if(!tests.length) sel.appendChild(h('option',{value:''},'No test seasons'));
+  tests.forEach(s=>{ const o=h('option',{value:s.id},s.name); if(s.id===S.currentSeasonId) o.setAttribute('selected','selected'); sel.appendChild(o); });
+  if(tests.length && !curSeasonIsTest()) sel.insertBefore(h('option',{value:'',selected:'selected'},'Pick a test season…'),sel.firstChild);
+  sel.addEventListener('change',()=>{ if(!sel.value) return; S.currentSeasonId=sel.value; S.activeGameId=null; switchSeasonListeners(); renderShell(); });
+  f.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:13px;'},[h('b',{},'Filling:'),sel,curSeasonIsTest()?seasonModePill(currentSeason()):null]));
+  const ok=curSeasonIsTest();
+  f.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;'},ok?'Everything below goes into '+currentSeason().name+' only, in order: sign-ups → ratings → draft → game.':'Pick a TEST season above. Fake data can never go into a real season.'));
+  const dis=(ok&&!tsBusy)?{}:{disabled:'disabled'};
+  const step=(n,title,desc,btns)=>h('div',{style:'display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);'},[h('div',{style:'flex:none;width:26px;height:26px;border-radius:50%;background:var(--grass-1);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:13px;'},String(n)),h('div',{style:'flex:1;min-width:0;'},[h('div',{style:'font-weight:800;font-size:14px;'},title),h('div',{style:'font-size:12px;color:var(--ink-soft);margin:2px 0 6px;'},desc),h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;'},btns)])]);
+  const B=(label,fn,cls)=>h('button',Object.assign({class:'btn btn-sm '+(cls||'btn-outline'),onclick:fn},dis),label);
+  const cnt=h('select',Object.assign({style:'width:auto;'},dis)); [12,24,40,60,100,140].forEach(v=>{ const o=h('option',{value:String(v)},v+' players'); if(v===testGenCount) o.setAttribute('selected','selected'); cnt.appendChild(o); }); cnt.addEventListener('change',()=>{ testGenCount=+cnt.value; });
+  const sn=currentSeason()||{name:''};
+  f.appendChild(step(1,'Registration & sign-ups','Fake players with @example.com emails; 4 also get test sign-in accounts to approve.',[cnt,B('+ Add test sign-ups',()=>confirmModal('Add '+testGenCount+' test sign-ups to '+sn.name+'?','Fake players, tagged test, in this test season only.',()=>createTestSignups(testGenCount,false,true)),'btn-gold')]));
+  f.appendChild(step(2,'Player evaluation','Random Power, Defense and last-year rank for every player in this season — or clear them to practise rating by hand.',[B('Fill random ratings',tsFillRatings,'btn-gold'),B('Clear ratings',()=>confirmModal('Clear ratings in '+sn.name+'?','Power, Defense and rank are removed for this test season.',tsClearRatings))]));
+  f.appendChild(step(3,'Draft','Start a live draft with every active team, then let the app finish it.',[B('Quick test draft',tsQuickDraft,'btn-gold'),B('Simulate all picks',()=>confirmModal('Simulate the whole draft?','Auto-picks every remaining round.',simulateTestDraft))]));
+  f.appendChild(step(4,'Game day','Add a test game, then play 3 innings automatically — at-bats, hit locations and runs — so Live Feed, Hit zone and Reports fill in.',[B('+ Test game',tsAddGame),B('Auto-play 3 innings',tsAutoPlay,'btn-gold')]));
+  root.appendChild(f);
+  root.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:4px 2px 12px;'},'Chat isn’t part of a season — clear test chat in Admin → Chat → Clear chat.'));
+}
+
 Router.register('admin', (root)=>{
   const nAlert=adminAlertCount();
   const nChat=chatPhotoQueue().length+chatReported().length;
   const nSign=pendingAccounts().length+newSeasonSignups().length;
   if(adminSub==='setup') adminSub='builder';
   if(adminSub==='signup'){ adminSub='approvals'; regSub='signups'; } // old Sign-ups page now lives under Players
-  const subs=[['builder','Season Builder'],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+((isSuperAdmin()?0:licLeagueTodo())?' ('+licLeagueTodo()+')':'')],['backup','Backup'+(bkOverdue(S.currentLeagueId)?' ⚠':'')]];
+  const subs=[['builder','Season Builder'],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+((isSuperAdmin()?0:licLeagueTodo())?' ('+licLeagueTodo()+')':'')],['backup','Backup'+(bkOverdue(S.currentLeagueId)?' ⚠':'')],['test','\ud83e\uddea Test']];
   const inBuilder=['builder','seasons','teams','signup','players'].includes(adminSub);
   const seg=h('div',{class:'segControl',style:'margin-bottom:14px;'}, subs.map(([id,label])=>h('button',{class:(adminSub===id||(id==='builder'&&inBuilder))?'active':'',onclick:()=>{ adminSub=id; S.builderBack=null; renderShell(); }},label)));
   root.appendChild(seg);
   if(adminSub==='chat'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Chat'),h('p',{},'League Chat settings, photo approvals, reported messages, and restricted members.')])); chatAdminView(root); return; }
   if(adminSub==='backup'){ backupView(root); return; }
+  if(adminSub==='test'){ testTabView(root); return; }
   if(adminSub==='license'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'License'),h('p',{},'This league\u2019s agreement with '+OWNER_NAME+': sign it here, and send or acknowledge formal notices. Mirrored in Super Admin \u2192 Licenses.')])); licenseView(root, S.currentLeagueId, isSuperAdmin()?'owner':'league'); return; }
   if(adminSub==='approvals'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Players'),h('p',{},'New accounts to approve, who signed up for '+(currentSeasonName()||'this season')+' (the draft pool), yearly registrations, and the registration form.')])); regSubNav(root);
     if(regSub==='regs') registrationsReport(root); else if(regSub==='form') regFormEditor(root);
