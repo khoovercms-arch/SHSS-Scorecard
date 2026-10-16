@@ -1714,7 +1714,7 @@ function renderShell(){
     const parts=[]; if(pa) parts.push(pa+' account'+(pa===1?'':'s')+' waiting for approval'); if(ns) parts.push(ns+' new season sign-up'+(ns===1?'':'s')); if(cq) parts.push(cq+' chat photo'+(cq===1?'':'s')+' to approve'); if(cr) parts.push(cr+' reported chat message'+(cr===1?'':'s')); if(lt) parts.push(lt+' license item'+(lt===1?'':'s')+' (signature or notice)'); if(sp) parts.push(sp+' sponsor agreement item'+(sp===1?'':'s'));
     content.appendChild(h('div',{class:'alertBanner',onclick:()=>{ if(sp && !lt && !pa && !ns && !cq && !cr){ S.activeTab='superadmin'; superSub='ads'; adSub='advertisers'; adFilter='noagr'; renderShell(); return; } if(lt && !pa && !ns && !cq && !cr){ if(isSuperAdmin()){ S.activeTab='superadmin'; superSub='licenses'; } else { S.activeTab='admin'; adminSub='license'; } renderShell(); return; } S.activeTab='admin'; adminSub=(!pa&&!ns&&(cq||cr))?'chat':'approvals'; if(adminSub==='approvals') regSub=(!pa&&ns)?'signups':'approvals'; renderShell(); }},[h('span',{style:'font-size:20px;'},'\ud83d\udd14'), h('span',{style:'flex:1;'},[h('b',{},(pa||ns)?'Players: ':((cq||cr)?'Chat: ':(lt?'License: ':'Sponsors: '))), parts.join(' \u00b7 ')]), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Review \u2192')]));
   }
-  if(isAdmin() && curSeasonIsTest() && !(S.activeTab==='admin' && adminSub==='test')) content.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;background:#fff6d6;border:1px solid #f3d27a;border-radius:10px;padding:6px 12px;margin:0 0 10px;font-size:12.5px;cursor:pointer;',onclick:()=>{ S.activeTab='admin'; adminSub='test'; renderShell(); }},[seasonModePill(currentSeason()),h('span',{style:'flex:1;'},h('b',{},(currentSeason()||{}).name||'')),h('span',{style:'color:var(--ink-soft);'},'Rehearsal season \u2014 doesn\u2019t count. Admin \u2192 Test \u2192')]));
+  if(isAdmin() && curSeasonIsTest() && !(S.activeTab==='admin' && adminSub==='test')) content.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;background:#fff6d6;border:1px solid #f3d27a;border-radius:10px;padding:6px 12px;margin:0 0 10px;font-size:12.5px;cursor:pointer;',onclick:()=>{ S.activeTab='admin'; adminSub='test'; renderShell(); }},[seasonModePill(currentSeason()),h('span',{style:'flex:1;'},h('b',{},(currentSeason()||{}).name||'')),h('span',{style:'color:var(--ink-soft);'},'Rehearsal season \u2014 doesn\u2019t count. Admin \u2192 Test Mode \u2192')]));
   if(isAdmin() && !(S.activeTab==='admin' && adminSub==='backup')){ const ov=bkOverdue(S.currentLeagueId); if(ov) content.appendChild(h('div',{class:'alertBanner',style:'background:#fff8e6;border-color:var(--gold);color:var(--ink);',onclick:()=>{ S.activeTab='admin'; adminSub='backup'; renderShell(); }},'\u26a0 League backup overdue: '+ov.join(' and ')+'. Tap to open Backup.')); }
   bkCheckScheduled();
   { const ga=myGameAlerts(); const chN=ga.reduce((n,x)=>n+x.ch,0);
@@ -3717,6 +3717,7 @@ function finalizeDraftModal(complete, note){
   overlay.addEventListener('click',e=>{ if(e.target===overlay) overlay.remove(); });
   document.body.appendChild(overlay);
 }
+async function releaseDraftedSignups(){ const sid=S.currentSeasonId; const P=[]; (S.signups||[]).filter(x=>x.seasonId===sid&&x.drafted).forEach(x=>P.push(updateDoc(doc(db,'signups',x.id),{drafted:false,draftedByTeamId:null}).catch(()=>{}))); (S.allPlayersForFeed||[]).filter(p=>p.signupId&&p.seasonId===sid).forEach(p=>P.push(deleteDoc(doc(db,'teams',p.teamId,'players',p.id)).catch(()=>{}))); for(let i=0;i<P.length;i+=40) await Promise.all(P.slice(i,i+40)); return P.length; }
 async function undoLastDraftPick(){
   const d=S.draft; const picks=(d&&d.picks)||[]; if(!picks.length){ toast('No picks to undo'); return; }
   const last=picks[picks.length-1];
@@ -3750,7 +3751,7 @@ function draftBoardView(root, canSetup){
     setup.appendChild(h('label',{style:'display:flex;align-items:center;font-size:13px;margin:0 0 10px;'},[autoCb,'Auto-pick the top-rated player when the clock runs out']));
     setup.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:-6px 0 10px;'},'When off, the clock hits 0:00 and waits \u2014 the team on the clock (or you) still makes the pick.'));
     setup.appendChild(h('div',{style:'display:flex;gap:8px;'},[
-      h('button',{class:'btn btn-primary',style:'flex:1;',onclick:async()=>{ if(order.length<2){ toast('Add at least two teams'); return; } await setDoc(draftStateRef(),{order,rounds:parseInt(roundsInp.value)||1,clockSeconds:parseInt(clockInp.value)||90,picks:[],status:'active',clockStartedAt:Date.now(),autoPick:autoCb.checked,paused:false}); toast('Draft started'); }}, (d&&(d.status==='active'||d.status==='paused'))?'Restart draft':'Start draft'),
+      h('button',{class:'btn btn-primary',style:'flex:1;',onclick:async()=>{ if(order.length<2){ toast('Add at least two teams'); return; } const go=async()=>{ await releaseDraftedSignups(); await setDoc(draftStateRef(),{order,rounds:parseInt(roundsInp.value)||1,clockSeconds:parseInt(clockInp.value)||90,picks:[],status:'active',clockStartedAt:Date.now(),autoPick:autoCb.checked,paused:false}); toast('Draft started'); }; const nd=signups.filter(y=>y.drafted).length; if(nd) confirmModal('Restart the draft?',nd+' drafted player'+(nd===1?'':'s')+' go back on the board and come off their rosters. Every pick is cleared.',go,{danger:true,confirmLabel:'Restart'}); else go(); }}, (d&&(d.status==='active'||d.status==='paused'))?'Restart draft':'Start draft'),
       h('button',{class:'btn btn-outline',onclick:()=>confirmModal('Reset draft?','Clears all picks and un-drafts every player. Drafted players already added to rosters are removed too.',async()=>{
         for(const x of signups.filter(y=>y.drafted)){ await updateDoc(doc(db,'signups',x.id),{drafted:false,draftedByTeamId:null}); }
         for(const p of S.allPlayersForFeed.filter(p=>p.signupId && p.seasonId===S.currentSeasonId)){ try{ await deleteDoc(doc(db,'teams',p.teamId,'players',p.id)); }catch(e){} }
@@ -3802,6 +3803,7 @@ function draftBoardView(root, canSetup){
   sw.appendChild(table); gridCard.appendChild(sw); root.appendChild(gridCard);
   // ---- big board ----
   const bb=h('div',{class:'card'}); bb.appendChild(h('h3',{},['Player Big Board', h('span',{style:'font-size:11px;color:var(--grass-1);font-weight:700;'},avail.length+' available')]));
+  { const onBoard=new Set(((d&&d.picks)||[]).map(p=>p.signupId)); const stuck=signups.filter(x=>x.drafted&&!onBoard.has(x.id)); if(stuck.length && isAdmin()) bb.appendChild(h('div',{style:'border:2px solid var(--gold);background:#fff9e8;border-radius:10px;padding:10px 12px;margin:0 0 10px;font-size:12.5px;line-height:1.5;'},[h('b',{},stuck.length+' player'+(stuck.length===1?' is':'s are')+' marked drafted but not on this board'),', so the Big Board below is empty. Release them and they reappear with their ratings so managers can pick. ',h('button',{class:'btn btn-gold btn-sm',style:'margin-left:6px;',onclick:()=>confirmModal('Release '+stuck.length+' players to the Big Board?','They come off any roster they were added to and show up below with their evaluations. Picks already on the board stay.',async()=>{ const P=[]; stuck.forEach(x=>P.push(updateDoc(doc(db,'signups',x.id),{drafted:false,draftedByTeamId:null}).catch(()=>{}))); (S.allPlayersForFeed||[]).filter(p=>p.seasonId===S.currentSeasonId&&stuck.some(x=>x.id===p.signupId)).forEach(p=>P.push(deleteDoc(doc(db,'teams',p.teamId,'players',p.id)).catch(()=>{}))); for(let i=0;i<P.length;i+=40) await Promise.all(P.slice(i,i+40)); toast('Released — the Big Board is filled in'); })},'Release players')])); }
   if(paused) bb.appendChild(h('p',{style:'font-size:12.5px;color:var(--leather-2);font-weight:700;margin:0 0 8px;'},'Draft is paused by the commissioner \u2014 picks resume when the clock restarts.'));
   const search=h('input',{type:'text',placeholder:'Search players\u2026',value:bigBoardSearch,style:'margin-bottom:8px;'});
   search.addEventListener('input',()=>{ bigBoardSearch=search.value; });
@@ -5816,10 +5818,11 @@ const HELP_KB = [
   {k:'restore backup undo deleted season mistake', q:'How do I restore from a backup?', a:'Admin → Backup → Restore: tap Restore on a cloud backup, or Choose backup file for a downloaded one. You see what is in it, then choose Restore everything, one season, or chat and announcements only. A cloud backup of the current data is saved first, so a restore can be undone. Admins only.'},
   {k:'block player chat policy restrict remove ban suspend', q:'How do I block a player from chat?', a:'Tap Block on any of their messages in League Chat, or Admin \u2192 Chat \u2192 Block members: start typing the player\u2019s name and pick them from the drop-down (or tick Blocked). They move to the Blocked list on the right; tap \u2715 there to lift the block. Choose No posting (they can still read) or Removed from chat, and how long: 7 days, 30 days, rest of season, or until you lift it. The reason shown is \u201cnot in compliance with league policy\u201d; you can add a private note and remove their messages at the same time. Timed blocks lift on their own; Lift block ends one early.'},
   {k:'clear chat delete old messages test archive game day season', q:'How do I clear the chat?', a:'Admin \u2192 Chat \u2192 Clear chat. Pick a date range, a game day, a season, one member, or everything, then Archive (players no longer see them; admins can view or restore) or Freeze (they stay visible, marked \u2744 frozen, and nobody can delete them). Nothing is erased, and a cloud backup is saved first. Announcements are not affected.'},
-  {k:'test season real live clear fake data make real', q:'What is a TEST season and how do I clear test data?', a:'Every season is REAL (green \u2014 live, counts in stats and reports) or TEST (gold \u2014 rehearsal, never counts). You choose when you create the season; existing seasons start as TEST. Admin \u2192 \ud83e\uddea Test lists the test seasons: Clear removes a season and everything in it (sign-ups, ratings, draft, rosters, schedule, games, test accounts); Make real keeps the setup (teams, managers, schedule, sign-up window) and removes the test data, then turns the season green. A cloud backup is saved first. Only Super Admin can turn a real season back to test.'},
-  {k:'fill fake data test sign-ups ratings draft auto play', q:'How do I fill a test season with fake data?', a:'Admin \u2192 \ud83e\uddea Test \u2192 Fill a test season: pick the TEST season, then go in order \u2014 1 Add test sign-ups, 2 Fill random ratings, 3 Quick test draft and Simulate all picks, 4 + Test game and Auto-play 3 innings. Everything lands in that test season only; the buttons are disabled for real seasons.'},
-  {k:'two ads side by side sponsor split half', q:'Can two sponsors show side by side?', a:'Super Admin → Advertisement → Where ads show → “2 ads side by side” row: switch it on for a page and two different sponsors share that spot, half each. Both stay clickable with their coupons.'},
-  {k:'test sign-ups fake players practice clear', q:'How do I practise season setup with fake players?', a:'Admin → 🧪 Test → Fill a test season (moved from Settings). Previously: Test sign-ups: choose how many players (with or without ratings, plus accounts awaiting approval), then walk through the Season Builder. Clear test data removes it all for that league and season.'},
+  {k:'test season real live clear fake data make real', q:'What is a TEST season and how do I clear test data?', a:'Every season is REAL (green \u2014 live, counts in stats and reports) or TEST (gold \u2014 rehearsal, never counts). Season Builder creates REAL seasons; test seasons are created in Admin \u2192 \ud83e\uddea Test Mode \u2192 Training on \u2192 \uff0b New test season (tapping TEST in Season Builder takes you there). Existing seasons start as TEST. Admin \u2192 \ud83e\uddea Test Mode lists the test seasons: Clear removes a season and everything in it (sign-ups, ratings, draft, rosters, schedule, games, test accounts); Make real keeps the setup (teams, managers, schedule, sign-up window) and removes the test data, then turns the season green. A cloud backup is saved first. Only Super Admin can turn a real season back to test.'},
+    {k:'two ads side by side sponsor split half', q:'Can two sponsors show side by side?', a:'Super Admin → Advertisement → Where ads show → “2 ads side by side” row: switch it on for a page and two different sponsors share that spot, half each. Both stay clickable with their coupons.'},
+  {k:'test mode practise rehearse season simulate fake players training', q:'How do I practise running a season?', a:'Admin → 🧪 Test Mode. Pick or create a test season, then work down the same numbered steps as the Season Builder. On each step, “Open — do it by hand” takes you to the real screen so you learn it; “Simulate” lets the app do that step with fake data (sign-ups, ratings, draft, approval, schedule, lineups). ▶ Run all remaining steps fills in whatever is left and plays every game, so Standings, Reports, Hit zone and Live Feed fill up. Undo played games takes the games back out. Nothing in a test season touches a real one.'},
+  {k:'test mode make real convert keep teams schedule', q:'Can a test season become the real season?', a:'Yes — Admin → 🧪 Test Mode → Ready for real? → Make real. The name, dates, roster type, teams, managers, schedule and sign-up window are kept; fake sign-ups, ratings, the draft, rosters, played games and test accounts are removed. The season turns green (REAL · LIVE). Only Super Admin can turn a real season back to test.'},
+  {k:'test mode play season auto games standings reports', q:'How do I see what Standings and Reports look like with a full season?', a:'Admin → 🧪 Test Mode → the ▶ Play the season step: Play next game day plays one day’s games; Play whole season plays every scheduled game, 7 innings each. Then open Record, Reports, Hit zone, Batting and Live Feed. Undo played games clears them again so you can score a game by hand.'},
   {k:'hit zone heat map filter', q:'What does Hit Zone show?', a:'Every ball in play this season. Filter by team and player, tap a zone for its count, or export to Excel.'},
   {k:'report batting standings trend scoring substitutes', q:'What reports are there?', a:'Report tab: Batting (by player, team totals, team vs team), Hit Zone by location, Scoring by season/year/field, Batting Average Trend, Substitutes, and Standings.'},
   {k:'record standings win loss', q:'Where do I see standings?', a:'Record tab: pick a team for its game-by-game log, plus League Standings and the playoff bracket below.'},
@@ -6134,6 +6137,7 @@ async function simulateTestDraft(){
     counts[teamId]=(counts[teamId]||0)+1;
     await updateDoc(doc(db,'signups',sp.id),{drafted:true, draftedByTeamId:teamId});
     await addDoc(collection(db,'teams',teamId,'players'),{name:sp.name, number:null, position:sp.pos||'', order:counts[teamId], isSub:false, subTeamName:'', seasonId:S.currentSeasonId, signupId:sp.id, draftPick:idx+1, draftRound:round, isTest:!!sp.isTest});
+    if(picks.length%10===0) await updateDoc(draftStateRef(),{picks});
   }
   await updateDoc(draftStateRef(),{picks, status:'done'});
   toast('Simulated '+picks.length+' picks');
@@ -6192,7 +6196,7 @@ function settingsView(root){
   if(!G) root.appendChild(rc);
   // ---- Draft data ----
   if(G) root.appendChild(h('div',{class:'sectiontitle'},'Test data'));
-  if(G) root.appendChild(h('div',{class:'card'},[h('h3',{},'Test data has moved'),h('p',{style:'font-size:13px;margin:0 0 8px;'},'Fake sign-ups, ratings, test drafts, test games and clearing now live in Admin \u2192 \ud83e\uddea Test.'),h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ adminSub='test'; renderShell(); }},'Open Test')]));
+  if(G) root.appendChild(h('div',{class:'card'},[h('h3',{},'Test data has moved'),h('p',{style:'font-size:13px;margin:0 0 8px;'},'Fake sign-ups, ratings, test drafts, test games and clearing now live in Admin \u2192 \ud83e\uddea Test Mode.'),h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ adminSub='test'; renderShell(); }},'Open Test Mode')]));
   if(!G && seasonMethod()==='draft' && curSeasonIsTest()){
   root.appendChild(h('div',{class:'sectiontitle'},'Draft shortcuts'));
   const dc=h('div',{class:'card'}); dc.appendChild(h('h3',{},'Draft shortcuts & archive'));
@@ -7425,7 +7429,7 @@ const SEASON_STEP_PREVIEW={
   pickup:['Season created','Game days','Build sides at each game']
 };
 // The one create form — used on Admin → Seasons and in the Season Builder's "+ New season"
-let seasonCreateMode='test';
+let seasonCreateMode='real';
 function seasonCreateForm(onCancel){
   const box=h('div',{style:'border:2px solid var(--gold);background:#fbf6ea;border-radius:12px;padding:12px 14px;margin-bottom:14px;'});
   const lab=(t)=>h('div',{style:'font-size:12px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;'},t);
@@ -7451,10 +7455,10 @@ function seasonCreateForm(onCancel){
     if(st.value && en.value && en.value<st.value){ toast('End date is before start date'); return; }
     if(method!=='pickup' && so.value && sc.value && sc.value<so.value){ toast('Sign-up close is before it opens'); return; }
     go.disabled=true; go.textContent='Creating…';
-    try{ await createSeasonNamed(n, method, st.value||null, en.value||null, Object.assign({mode:seasonCreateMode}, method==='pickup'?{}:{signupOpen:so.value||null, signupClose:sc.value||null})); seasonCreateMode='test'; seasonsCreateOpen=false; if(onCancel) onCancel(true); adminSub='builder'; S.activeTab='admin'; S.builderBack=null; S.scrollToBuilder=true; renderShell(); }
+    try{ await createSeasonNamed(n, method, st.value||null, en.value||null, Object.assign({mode:seasonCreateMode}, method==='pickup'?{}:{signupOpen:so.value||null, signupClose:sc.value||null})); seasonCreateMode='real'; seasonsCreateOpen=false; if(onCancel) onCancel(true); adminSub='builder'; S.activeTab='admin'; S.builderBack=null; S.scrollToBuilder=true; renderShell(); }
     catch(e){ go.disabled=false; go.textContent='Create'; toast('Could not create: '+(e.message||e)); }
   }},'Create');
-  { const mseg=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'}); const mdraw=()=>{ mseg.innerHTML=''; [['real','\u25cf REAL \u00b7 LIVE','#1f8a4c','#fff','Counts in stats, records and reports.'],['test','\ud83e\uddea TEST','#f3d27a','#5a4300','Rehearsal \u2014 never counts; clear it any time.']].forEach(([k,l,bg,fg,d])=>mseg.appendChild(h('button',{type:'button',onclick:()=>{ seasonCreateMode=k; mdraw(); },style:'flex:1 1 200px;text-align:left;border-radius:12px;padding:10px 12px;cursor:pointer;border:2px solid '+(seasonCreateMode===k?bg:'var(--line)')+';background:'+(seasonCreateMode===k?bg:'#fff')+';color:'+(seasonCreateMode===k?fg:'var(--ink)')+';'},[h('div',{style:'font-weight:800;font-size:15px;'},l),h('div',{style:'font-size:11.5px;opacity:.85;'},d)]))); }; mdraw();
+  { const mseg=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'}); const mdraw=()=>{ mseg.innerHTML=''; [['real','\u25cf REAL \u00b7 LIVE','#1f8a4c','#fff','Counts in stats, records and reports.'],['test','\ud83e\uddea TEST','#f3d27a','#5a4300','Test seasons are made in Admin \u2192 Test Mode (tap to go there)']].forEach(([k,l,bg,fg,d])=>mseg.appendChild(h('button',{type:'button',onclick:()=>{ if(k==='test'){ tsNewForm={name:name.value.trim(),method:method}; seasonsCreateOpen=false; S.activeTab='admin'; adminSub='test'; renderShell(); window.scrollTo(0,0); return; } seasonCreateMode=k; mdraw(); },style:'flex:1 1 200px;text-align:left;border-radius:12px;padding:10px 12px;cursor:pointer;border:2px solid '+(seasonCreateMode===k?bg:'var(--line)')+';background:'+(seasonCreateMode===k?bg:'#fff')+';color:'+(seasonCreateMode===k?fg:'var(--ink)')+';'},[h('div',{style:'font-weight:800;font-size:15px;'},l),h('div',{style:'font-size:11.5px;opacity:.85;'},d)]))); }; mdraw();
     box.appendChild(h('div',{style:'margin-top:10px;padding-top:10px;border-top:1px dashed var(--line);'},[h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px;'},'This season is'),mseg])); }
   box.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;'},[
     h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;'},'Roster type'), seg, h('div',{style:'flex:1;'}), go]));
@@ -8271,7 +8275,7 @@ function backupView(root){
 function seasonIsReal(s){ return !!(s && s.mode==='real'); }
 function curSeasonIsTest(){ const s=currentSeason(); return !!s && !seasonIsReal(s); }
 function seasonModePill(s,big){ const real=seasonIsReal(s); return h('span',{title:real?'Real season: counts in stats, records and reports':'Test season: rehearsal data, never counts',style:'display:inline-block;margin-left:8px;vertical-align:middle;white-space:nowrap;font-size:'+(big?12:10.5)+'px;font-weight:800;letter-spacing:.04em;padding:'+(big?'3px 10px':'2px 8px')+';border-radius:20px;'+(real?'background:#1f8a4c;color:#fff;':'background:#f3d27a;color:#5a4300;')},real?'● REAL · LIVE':'🧪 TEST'); }
-let tsBusy='';
+let tsBusy='', tsNewForm=null;
 function tsLeagueTeams(){ return (S.allTeams||S.teams||[]).filter(t=>!S.currentLeagueId||t.leagueId===S.currentLeagueId||!t.leagueId); }
 function tsCounts(sid){ return { su:(S.signups||[]).filter(x=>x.seasonId===sid).length, ev:(S.signups||[]).filter(x=>x.seasonId===sid&&x.eval&&(x.eval.power||x.eval.defense)).length, pl:(S.allPlayersForFeed||[]).filter(x=>x.seasonId===sid).length, g:(S.allGamesForFeed||[]).filter(x=>x.seasonId===sid).length, acc:(S.usersDirectory||[]).filter(u=>u.isTest&&u.testSeasonId===sid).length }; }
 async function tsCollect(sid){
@@ -8281,6 +8285,7 @@ async function tsCollect(sid){
   try{ const d=await getDoc(doc(db,'draftStates',sid)); if(d.exists()) out.draft.push(sid); }catch(e){}
   try{ (await getDocs(collection(db,'draftArchives'))).docs.forEach(d=>{ if(d.data().seasonId===sid) out.archives.push(d.id); }); }catch(e){}
   (S.usersDirectory||[]).filter(u=>u.isTest && String(u.id).startsWith('test_') && u.testSeasonId===sid).forEach(u=>out.users.push(u.id));
+  out.teams=tsLeagueTeams().filter(t=>t.isTest && t.testSeasonId===sid).map(t=>t.id);
   return out;
 }
 async function tsWipe(sid, makeReal){
@@ -8297,6 +8302,7 @@ async function tsWipe(sid, makeReal){
     c.draft.forEach(id=>P.push(deleteDoc(doc(db,'draftStates',id))));
     c.archives.forEach(id=>P.push(deleteDoc(doc(db,'draftArchives',id))));
     c.users.forEach(id=>P.push(deleteDoc(doc(db,'users',id))));
+    (c.teams||[]).forEach(id=>P.push(makeReal?updateDoc(doc(db,'teams',id),{isTest:false,testSeasonId:null}):deleteDoc(doc(db,'teams',id))));
     for(let i=0;i<P.length;i+=40) await Promise.all(P.slice(i,i+40).map(p=>p.catch(()=>{})));
     if(makeReal){ await updateDoc(doc(db,'seasons',sid),{mode:'real',madeRealAt:Date.now(),madeRealBy:S.user.email,rostersApprovedAt:null}); toast(sn.name+' is now REAL · LIVE'); }
     else { await deleteDoc(doc(db,'seasons',sid)); if(S.currentSeasonId===sid){ S.currentSeasonId=null; S.activeGameId=null; } toast('Cleared '+sn.name); }
@@ -8360,50 +8366,209 @@ async function tsAutoPlay(){ if(!tsGuard()) return;
   await addDoc(collection(db,'teams',two[0].id,'games'),{matchupId:se.matchupId,homeAway:'home',opponent:two[1].name,opponentTeamId:two[1].id,seasonId:sid,date:se.date,home:{name:two[0].name,players:H},away:{name:two[1].name,players:A},atbats:g.ab,score:g.score,base:{},outs:0,inning:4,half:'top',completed:false,inningsPlanned:7,manualScores:[],scorekeeperSide:'home',challenges:[],isTest:true,updatedAt:Date.now()});
   toast('Played 3 innings: '+two[1].name+' '+Object.values(g.score.away).reduce((a,b)=>a+b,0)+', '+two[0].name+' '+Object.values(g.score.home).reduce((a,b)=>a+b,0)+' — see Live Feed');
 }
+/* ===== Test Mode: rehearse every Season Builder step, by hand or simulated ===== */
+let tsWeeks=8, tsProgress='';
+function tsSay(m){ tsProgress=m; renderShell(); }
+function tsWait(fn, ms){ return new Promise(res=>{ const t0=Date.now(); const tick=()=>{ if(fn()||Date.now()-t0>(ms||6000)) res(); else setTimeout(tick,120); }; tick(); }); }
+function tsTeamsActive(){ return S.teams.filter(t=>t.active!==false && !t.pickup); }
+function tsNextSaturday(){ const d=new Date(); d.setDate(d.getDate()+((6-d.getDay()+7)%7||7)); return d; }
+function tsISO(d){ return d.toISOString().slice(0,10); }
+async function tsAddTeams(){ if(!tsGuard()) return; const sid=S.currentSeasonId;
+  const names=['Raiders','Camo','Gray Wolves','Blue Sox','Red Hawks','Gold Rush']; const have=new Set(tsTeamsActive().map(t=>(t.name||'').toLowerCase())); let n=0, i=0;
+  for(const nm of names){ if(tsTeamsActive().length+n>=4) break; if(have.has(nm.toLowerCase())){ i++; continue; }
+    await addDoc(collection(db,'teams'),{name:nm,managerUserId:null,managerName:'Test Manager '+String.fromCharCode(65+i),pendingManagerEmail:'manager'+(i+1)+'.'+testLeagueTag()+'@example.com',active:true,leagueId:S.currentLeagueId||null,isTest:true,testSeasonId:sid,createdAt:Date.now()}); n++; i++; }
+  await tsWait(()=>tsTeamsActive().length>=4); toast(n?'Added '+n+' test teams (removed when this test season is cleared)':'Teams already in place'); }
+async function tsSimSignups(){ if(!tsGuard()) return; const sid=S.currentSeasonId; const before=(S.signups||[]).filter(x=>x.seasonId===sid).length; await createTestSignups(testGenCount,false,true); await tsWait(()=>(S.signups||[]).filter(x=>x.seasonId===sid).length>before); }
+async function tsSimDraft(){ if(!tsGuard()) return; if(tsTeamsActive().length<2){ toast('Add teams first (step 2)'); return; }
+  const sid=S.currentSeasonId; const d=S.draft;
+  if(!(d&&d.order&&d.order.length&&['active','paused','done','final'].includes(d.status))){ await tsQuickDraft(); await tsWait(()=>S.draft&&S.draft.order&&S.draft.order.length); }
+  if(S.draft&&S.draft.status==='final'){ toast('Draft is already final'); return; }
+  await simulateTestDraft(); await tsWait(()=>S.draft&&S.draft.status==='done'); }
+async function tsFinalize(){ if(!tsGuard()) return; const d=S.draft; if(!d||!d.order||!d.order.length){ toast('Run the draft first (step 6)'); return; }
+  if(d.status!=='done'&&d.status!=='final'){ await simulateTestDraft(); await tsWait(()=>S.draft&&S.draft.status==='done'); }
+  const picks=(S.draft&&S.draft.picks||[]).length; await tsWait(()=>(S.allPlayersForFeed||[]).filter(p=>p.seasonId===S.currentSeasonId).length>=picks,8000);
+  await updateDoc(draftStateRef(),{status:'final',finalizedAt:Date.now(),endedEarly:false,rosterOrder:'alpha'}); await applyRosterOrder('alpha'); await tsWait(()=>S.draft&&S.draft.status==='final');
+  toast('Draft finalized — rosters published alphabetically'); }
+async function tsSimPicks(){ if(!tsGuard()) return; const teams=tsTeamsActive(); if(teams.length<2){ toast('Add teams first (step 2)'); return; }
+  const sid=S.currentSeasonId; const ups=(S.signups||[]).filter(x=>x.seasonId===sid && !x.drafted && !x.pickTeamId).sort(ratingCmp); if(!ups.length){ toast('Everyone is already picked — add sign-ups first'); return; }
+  const counts={}; teams.forEach(t=>counts[t.id]=(S.signups||[]).filter(x=>x.seasonId===sid&&(x.pickTeamId||x.draftedByTeamId)===t.id).length);
+  const P=[]; ups.forEach(x=>{ const t=teams.slice().sort((a,b)=>counts[a.id]-counts[b.id])[0]; counts[t.id]++; P.push(updateDoc(doc(db,'signups',x.id),{pickTeamId:t.id,pickBy:'test-mode',pickAt:Date.now()})); });
+  for(let i=0;i<P.length;i+=40) await Promise.all(P.slice(i,i+40)); await tsWait(()=>!(S.signups||[]).some(x=>x.seasonId===sid&&!x.drafted&&!x.pickTeamId));
+  toast('Managers picked '+ups.length+' players — now approve the rosters'); }
+async function tsApprove(){ if(!tsGuard()) return; const sn=currentSeason(); const sid=sn.id;
+  const pend=(S.signups||[]).filter(x=>x.seasonId===sid && x.pickTeamId && !x.drafted); let n=0;
+  for(const x of pend){ const teamId=x.pickTeamId; if(!S.teams.some(t=>t.id===teamId)) continue;
+    const existing=(S.allPlayersForFeed||[]).filter(p=>p.teamId===teamId && p.seasonId===sid).length;
+    await addDoc(collection(db,'teams',teamId,'players'),{name:x.name, number:null, position:x.pos||'', order:existing+1+n, isSub:false, subTeamName:'', seasonId:sid, signupId:x.id, email:(x.email||'').toLowerCase()||null, isTest:!!x.isTest});
+    await updateDoc(doc(db,'signups',x.id),{drafted:true, draftedByTeamId:teamId}); n++; }
+  await tsWait(()=>(S.allPlayersForFeed||[]).filter(p=>p.seasonId===sid).length>=n,8000);
+  await updateDoc(doc(db,'seasons',sid),{rostersApprovedAt:Date.now(), rosterOrder:'alpha', maskDraftRank:true}); try{ await applyRosterOrder('alpha'); }catch(e){}
+  await tsWait(()=>!!(currentSeason()||{}).rostersApprovedAt); toast(n?('Approved — '+n+' players added to rosters'):'Rosters approved'); }
+async function tsGenSchedule(){ if(!tsGuard()) return; const sn=currentSeason(); const sid=sn.id;
+  if(seasonMethod(sn)==='pickup'){ const start=tsNextSaturday(); for(let w=0;w<tsWeeks;w++){ const d=new Date(start); d.setDate(d.getDate()+7*w); await createPickupGame('Home','Away',tsISO(d),'10:00','Field 1'); } await tsWait(()=>allLeagueSchedule().filter(g=>g.seasonId===sid).length>=tsWeeks); toast('Added '+tsWeeks+' pickup game days'); return; }
+  const teams=tsTeamsActive().map(t=>t.id); if(teams.length<2){ toast('Add teams first (step 2)'); return; }
+  const ids=teams.slice(); if(ids.length%2) ids.push(null); const n=ids.length; const start=tsNextSaturday(); const before=allLeagueSchedule().filter(g=>g.seasonId===sid).length; let made=0;
+  for(let w=0;w<tsWeeks;w++){ const d=new Date(start); d.setDate(d.getDate()+7*w); const date=tsISO(d); let slot=0;
+    for(let i=0;i<n/2;i++){ const a=ids[i], b=ids[n-1-i]; if(!a||!b) continue; const home=(w%2)?b:a, away=(w%2)?a:b; const times=['09:00','10:30','12:00','13:30','15:00','16:30']; await createScheduledMatchup(home,away,date,times[Math.floor(slot/2)%times.length],'Field '+(slot%2+1)); slot++; made++; }
+    ids.splice(1,0,ids.pop()); }
+  await tsWait(()=>allLeagueSchedule().filter(g=>g.seasonId===sid).length>=before+made,10000); toast('Scheduled '+made+' games over '+tsWeeks+' weeks — see the Schedule tab'); }
+async function tsSaveLineups(){ if(!tsGuard()) return; let n=0; const teams=tsTeamsActive();
+  for(const t of teams){ const r=tsRoster(t.id); if(r.length<3) continue; await setDoc(doc(db,'savedLineups',lineupSlug(t.name)),{name:t.name,coach:t.managerName||'',players:r}); n++; }
+  S.savedLineupSlugs=null; savedLineupLoad=0; ensureSavedLineups(); await tsWait(()=>!!S.savedLineupSlugs,4000);
+  toast(n?'Saved a starting lineup for '+n+' teams':'No rosters yet — finish the draft or approve rosters first'); }
+function tsUnplayed(){ const sid=S.currentSeasonId; return (S.allScheduleForFeed||[]).filter(g=>g.seasonId===sid && !g.completed && (g.pickup || g.homeAway!=='away')).sort((a,b)=>(a.date||'').localeCompare(b.date||'')||(a.time||'').localeCompare(b.time||'')); }
+async function tsPlayOne(se){ const sid=S.currentSeasonId; let H,A,ownerId,homeName,awayName,extra={};
+  if(se.pickup){ const pool=pickupPool(sid).sort(()=>Math.random()-0.5); if(pool.length<6){ toast('Pool is too small — simulate sign-ups first'); return false; } const half=Math.ceil(Math.min(pool.length,22)/2); const mk=(l)=>l.map((p,i)=>({id:p.id,name:p.name,number:'',position:p.pos||'',order:i+1,isSub:false,subTeamName:''})); H=mk(pool.slice(0,half)); A=mk(pool.slice(half,half*2)); ownerId=se.teamId; homeName=se.homeName||'Home'; awayName=se.awayName||'Away'; extra={pickup:true,opponentTeamId:null,location:se.location||''}; }
+  else { const home=S.teams.find(t=>t.id===se.teamId), away=S.teams.find(t=>t.id===se.opponentTeamId); if(!home||!away) return false; H=tsRoster(home.id); A=tsRoster(away.id); if(H.length<3||A.length<3) return false; ownerId=home.id; homeName=home.name; awayName=away.name; extra={opponentTeamId:away.id,location:se.location||''}; }
+  let g=tsSimInnings(H,A,7); const tot=s=>Object.values(s).reduce((a,b)=>a+b,0); let inn=7; if(tot(g.score.home)===tot(g.score.away)){ g=tsSimInnings(H,A,8); inn=8; }
+  await addDoc(collection(db,'teams',ownerId,'games'),Object.assign({matchupId:se.matchupId||null,homeAway:'home',opponent:awayName,seasonId:sid,date:se.date||todayISO(),time:se.time||'',home:{name:homeName,coach:'',players:H},away:{name:awayName,coach:'',players:A},atbats:g.ab,score:g.score,base:{},outs:3,inning:inn,half:'bottom',completed:true,completedAt:Date.now(),inningsPlanned:7,manualScores:[],scorekeeperSide:'home',challenges:[],isTest:true,updatedAt:Date.now()},extra));
+  try{ await updateDoc(doc(db,'teams',se.teamId,'schedule',se.id),{completed:true}); if(se.linkedScheduleId&&se.opponentTeamId) await updateDoc(doc(db,'teams',se.opponentTeamId,'schedule',se.linkedScheduleId),{completed:true}); }catch(e){}
+  return true; }
+async function tsPlay(all){ if(!tsGuard()) return; if(tsBusy) return; let list=tsUnplayed(); if(!list.length){ toast('Nothing left to play — simulate the schedule first'); return; }
+  if(!all) list=list.filter(g=>g.date===list[0].date); tsBusy='Playing '+list.length+' game'+(list.length===1?'':'s')+'…'; renderShell(); let n=0;
+  try{ for(const se of list){ if(await tsPlayOne(se)) n++; tsBusy='Playing games… '+n+' of '+list.length; renderShell(); } }catch(e){ console.error(e); toast('Stopped: '+(e.message||e)); }
+  tsBusy=''; renderShell(); toast(n?('Played '+n+' game'+(n===1?'':'s')+' — see Standings, Reports and Live Feed'):'No games could be played — rosters are empty'); }
+async function tsUndoGames(){ if(!tsGuard()) return; const sid=S.currentSeasonId; const games=(S.allGamesForFeed||[]).filter(g=>g.seasonId===sid); if(!games.length){ toast('No played games'); return; }
+  tsBusy='Removing '+games.length+' games…'; renderShell(); const P=games.map(g=>deleteDoc(doc(db,'teams',g.teamId,'games',g.id)).catch(()=>{}));
+  (S.allScheduleForFeed||[]).filter(g=>g.seasonId===sid&&g.completed).forEach(g=>P.push(updateDoc(doc(db,'teams',g.teamId,'schedule',g.id),{completed:false}).catch(()=>{})));
+  for(let i=0;i<P.length;i+=40) await Promise.all(P.slice(i,i+40)); S.activeGameId=null; tsBusy=''; renderShell(); toast('Removed '+games.length+' games — the schedule is back to unplayed'); }
+/* one simulate action per Season Builder step key */
+function tsSimFor(key, m){
+  const map={ teams:['Add 4 test teams',tsAddTeams], signups:['Simulate sign-ups',tsSimSignups], eval:['Simulate ratings',tsFillRatings], draft:['Simulate draft',tsSimDraft], final:['Simulate approval',tsFinalize], roster:['Publish rosters',tsFinalize], pick:['Simulate manager picks',tsSimPicks], approve:['Simulate approval',tsApprove], games:[m==='pickup'?'Simulate game days':'Simulate schedule',tsGenSchedule], lineups:['Simulate lineups',tsSaveLineups] };
+  return map[key]||null; }
+function tsCoach(key, m){
+  const C={ season:'Season created — change its name, dates or type with ✎ Change in the Season Builder table.',
+    teams:'Learn it: Season Builder → Teams & managers — type each team name, then the manager’s name and email. Or let the app add four test teams with fake managers.',
+    signups:'Learn it: players use “New here? Join the league” on the sign-in screen; members tap Register. You approve accounts in Admin → Players. Or let the app add fake sign-ups (4 get accounts to approve).',
+    players:'Learn it: Season Builder → Player list — check Returning / New so last season’s stats follow the right player, and confirm any Maybe. Test seasons reuse names, so you will see returning players here.',
+    eval:'Learn it: Player Eval → ⬇ Export template, fill in Power and Defense (1 = best), ⬆ Import. Or rate on screen. Or let the app fill random ratings.',
+    draft:'Learn it: Draft Board → set the order, rounds and pick clock → Start draft → managers pick. “Start draft only” sets it up so you can pick by hand; “Simulate draft” picks every round for you.',
+    final:'Learn it: on the Draft Board tap Final draft → Rosters and choose alphabetical or draft order. Or let the app finalize it.',
+    roster:'Rosters are published when the draft is finalized. Check the Roster tab; re-sort later in Admin → Settings → Roster display.',
+    pick:'Learn it: Draft tab → managers tap Pick next to players for their team; picks stay pending. Or let the app pick evenly for every team.',
+    approve:'Learn it: Draft tab → review each team → Approve rosters. Players then see their team. Or let the app approve.',
+    games: m==='pickup'?'Learn it: Schedule → Admin strip → + Add game (date, time, field, optional side names). Or let the app add one game day a week.':'Learn it: Schedule → Admin strip → + Add game (home, away, date, time, field) or ⬇ Template / ⬆ Import a whole season. Or let the app build a round-robin — every team plays once a week, two fields.',
+    lineups:'Learn it: each manager opens Lineup, sets the batting order, taps Save as starting lineup. Or let the app save one for every team from its roster.',
+    play: m==='pickup'?'Learn it: at the field, open the game day on Scorecard, build Home and Away from the pool on the Lineup tab, then score. Or let the app build sides and play.':'Learn it: Scorecard → pick the game → Use starting lineup → score each at-bat. Or let the app play every scheduled game, 7 innings, so Standings, Reports, Hit zone, Live Feed and Player Eval history fill in.' };
+  return C[key]||''; }
+async function tsRunAll(){ if(!tsGuard()||tsBusy) return; const sn=currentSeason(); const m=seasonMethod(sn); let steps;
+  const need=(k)=>{ const st=builderSteps(currentSeason()).find(x=>x.key===k); return st && !st.done; };
+  try{
+    tsBusy='Running all steps…'; renderShell();
+    if(m!=='pickup'){
+      if(tsTeamsActive().length<2){ tsBusy='Step 2 of 10 — adding teams…'; renderShell(); await tsAddTeams(); }
+      if(need('signups')){ tsBusy='Step 3 — sign-ups…'; renderShell(); await tsSimSignups(); }
+      if(need('eval')&&m==='draft'){ tsBusy='Step 5 — ratings…'; renderShell(); await tsFillRatings(); }
+      if(m==='draft'){ if(need('draft')){ tsBusy='Step 6 — drafting…'; renderShell(); await tsSimDraft(); } if(need('final')){ tsBusy='Step 7 — finalizing…'; renderShell(); await tsFinalize(); } }
+      else { if(need('pick')){ tsBusy='Step 6 — managers picking…'; renderShell(); await tsSimPicks(); } if(need('approve')){ tsBusy='Step 7 — approving rosters…'; renderShell(); await tsApprove(); } }
+      if(need('games')){ tsBusy='Game schedule…'; renderShell(); await tsGenSchedule(); }
+      if(need('lineups')){ tsBusy='Team lineups…'; renderShell(); await tsSaveLineups(); }
+    } else {
+      if(!(S.signups||[]).some(x=>x.seasonId===sn.id)){ tsBusy='Pool — sign-ups…'; renderShell(); await tsSimSignups(); }
+      if(need('games')){ tsBusy='Game days…'; renderShell(); await tsGenSchedule(); }
+    }
+    tsBusy=''; await tsPlay(true);
+  }catch(e){ console.error(e); toast('Stopped: '+(e.message||e)); }
+  tsBusy=''; renderShell(); }
 function testTabView(root){
-  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},['Test ',h('span',{class:'pill-warn',style:'font-size:12px;vertical-align:middle;'},'Admin only')]),h('p',{},'Every season is either REAL (live — counts in stats and reports) or TEST (rehearsal — never counts). Clear test seasons here so test data can never mix with real data.')]));
-  if(tsBusy) root.appendChild(h('div',{class:'card',style:'text-align:center;font-weight:700;'},'⏳ '+tsBusy+' Please stay on this page.'));
+  root.appendChild(h('div',{class:'pageHead'},[h('h2',{},['Test Mode ',h('span',{class:'pill-warn',style:'font-size:12px;vertical-align:middle;'},'Admin only')]),h('p',{},'Practise a whole season here before you run a real one. Every step below is the same step you’ll do in the Season Builder — do it by hand to learn it, or tap Simulate to let the app do it with fake data. Nothing here touches a real season.')]));
+  if(tsBusy) root.appendChild(h('div',{class:'card',style:'text-align:center;font-weight:700;border:2px solid var(--gold);'},'⏳ '+tsBusy+' Please stay on this page.'));
   const all=(S.seasons||[]).filter(s=>!s.archived); const tests=all.filter(s=>!seasonIsReal(s)), reals=all.filter(seasonIsReal);
   const busy=tsBusy?{disabled:'disabled'}:{};
-  const c=h('div',{class:'card'}); c.appendChild(h('h3',{},['Test seasons ',h('span',{style:'font-size:12px;color:var(--ink-soft);font-weight:600;'},'('+tests.length+')')]));
+  // ---- pick / create the season to train on ----
+  const f=h('div',{class:'card'});
+  const big='width:100%;box-sizing:border-box;font-size:17px;padding:11px 12px;border:1.5px solid var(--line);border-radius:10px;background:#fff;';
+  const sel=h('select',{style:big});
+  if(!curSeasonIsTest()) sel.appendChild(h('option',{value:'',selected:'selected'},tests.length?'Pick a test season…':'No test seasons yet'));
+  tests.forEach(s=>{ const o=h('option',{value:s.id},s.name+' — '+ROSTER_METHODS[seasonMethod(s)].label); if(s.id===S.currentSeasonId && !tsNewForm) o.setAttribute('selected','selected'); sel.appendChild(o); });
+  const nOpt=h('option',{value:'__new'},'＋ New test season…'); if(tsNewForm) nOpt.setAttribute('selected','selected'); sel.appendChild(nOpt);
+  sel.addEventListener('change',()=>{ if(sel.value==='__new'){ tsNewForm={name:'',method:'draft'}; renderShell(); return; } if(!sel.value) return; tsNewForm=null; S.currentSeasonId=sel.value; S.activeGameId=null; switchSeasonListeners(); renderShell(); });
+  f.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-bottom:5px;'},'Training on'));
+  f.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;margin-bottom:6px;'},[h('div',{style:'flex:1;min-width:0;'},sel),curSeasonIsTest()&&!tsNewForm?seasonModePill(currentSeason(),true):null]));
+  if(tsNewForm){ const nf=tsNewForm; const d=new Date(); const sug='Test – '+d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+    const nm=h('input',{type:'text',value:nf.name||sug,placeholder:sug,style:big+'font-size:19px;padding:14px 12px;'}); nm.addEventListener('input',()=>{ nf.name=nm.value; });
+    const types=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'}); [['draft','Formal draft'],['informal','Informal (managers pick)'],['pickup','Pickup']].forEach(([k,l])=>types.appendChild(h('button',{type:'button',onclick:()=>{ nf.method=k; nf.name=nm.value; renderShell(); },style:'flex:1 1 150px;padding:12px;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;border:2px solid '+(nf.method===k?'var(--grass-1)':'var(--line)')+';background:'+(nf.method===k?'var(--grass-1)':'#fff')+';color:'+(nf.method===k?'#fff':'var(--ink)')+';'},l)));
+    const go=h('button',{class:'btn btn-gold',style:'font-size:16px;padding:12px 20px;',onclick:async()=>{ const n=(nm.value||'').trim()||sug; go.disabled=true; go.textContent='Creating…'; try{ await createSeasonNamed(n, nf.method||'draft', null, null, {mode:'test'}); tsNewForm=null; S.activeTab='admin'; adminSub='test'; renderShell(); }catch(e){ go.disabled=false; go.textContent='Create test season'; toast('Could not create: '+(e.message||e)); } }},'Create test season');
+    f.appendChild(h('div',{style:'border:2px solid #f3d27a;background:#fff9e8;border-radius:12px;padding:12px 14px;margin-top:6px;'},[
+      h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:8px;'},[h('b',{style:'font-size:15px;flex:1;'},'New test season'),seasonModePill({mode:'test'},true)]),
+      h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;margin-bottom:4px;'},'Name'),nm,
+      h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;margin:10px 0 4px;'},'Roster type'),types,
+      h('div',{style:'display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;'},[go,h('button',{class:'btn btn-outline',onclick:()=>{ tsNewForm=null; renderShell(); }},'Cancel'),h('span',{style:'font-size:12px;color:var(--ink-soft);flex:1 1 220px;'},'Uses your league’s teams and managers if you have them; otherwise step 2 can add test teams.')])]));
+    root.appendChild(f); tsListCards(root,tests,reals,busy); return; }
+  const ok=curSeasonIsTest();
+  if(!ok){ f.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:4px 0 0;'},'Pick a TEST season above, or create one. Fake data can never go into a real season.')); root.appendChild(f); tsListCards(root,tests,reals,busy); return; }
+  const sn=currentSeason(); const m=seasonMethod(sn); const k=tsCounts(sn.id); const sched=allLeagueSchedule().filter(g=>g.seasonId===sn.id); const unplayed=tsUnplayed().length; const played=(S.allGamesForFeed||[]).filter(g=>g.seasonId===sn.id&&g.completed).length;
+  f.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;'},k.su+' sign-ups · '+k.ev+' rated · '+k.pl+' on rosters · '+tsTeamsActive().length+' teams · '+played+' of '+(played+unplayed)+' games played'));
+  const steps=builderSteps(sn); const remaining=steps.filter(x=>!x.done&&!x.optional&&!x.ongoing).length+(unplayed||!sched.length?1:0);
+  f.appendChild(h('button',Object.assign({class:'btn btn-gold',style:'width:100%;font-size:16px;padding:13px;'+(remaining?'':'opacity:.55;'),onclick:()=>confirmModal('Run all remaining steps?','Simulates every unfinished step for '+sn.name+' in order, then plays the whole schedule. Takes about a minute for 140 players. You can undo played games afterwards.',tsRunAll)},busy),remaining?'▶ Run all remaining steps ('+remaining+')':'✓ Every step is done — season played'));
+  f.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:6px 2px 0;'},'Simulates whatever isn’t done yet, in order, then plays the season — so you can look at Standings, Reports and Playoffs the way players will see them.'));
+  root.appendChild(f);
+  // ---- the step list, same as Season Builder, with Simulate buttons ----
+  const list=h('div',{class:'card noCollapse',style:'padding:12px 12px 6px;'});
+  const core=steps.filter(x=>!x.optional&&!x.nb&&!x.ongoing); const cur=steps.findIndex(x=>!x.done&&!x.optional&&!x.nb); const doneN=core.filter(x=>x.done).length; const total=steps.length+1;
+  list.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;font-size:12px;font-weight:700;margin-bottom:10px;'},[(cur<0?'Setup steps done — play the season':'Step '+(cur+1)+' of '+total),h('div',{style:'flex:1;height:8px;background:var(--chalk-2);border-radius:5px;overflow:hidden;'},h('div',{style:'height:100%;width:'+Math.round(100*doneN/Math.max(1,core.length))+'%;background:var(--gold);'}))]));
+  const dis=(ok&&!tsBusy)?{}:{disabled:'disabled'};
+  const B=(label,fn,cls)=>h('button',Object.assign({class:'btn btn-sm '+(cls||'btn-outline'),onclick:fn},dis),label);
+  const coachBox=(key)=>h('div',{style:'background:#fff9e8;border:2px solid #f3d27a;border-radius:10px;padding:8px 10px;font-size:12px;line-height:1.45;margin:6px 0 4px;'},tsCoach(key,m).split(/(Learn it:|Or let the app[^.]*\.)/).map(s=>/^Learn it:$/.test(s)?h('b',{style:'color:#7a5a00;'},s):(/^Or let the app/.test(s)?h('b',{style:'color:#7a5a00;'},s):s)));
+  const row=(i,st,isCur,extraBtns,last)=>{
+    const future=cur>=0 && i>cur && !st.done && !st.optional && !st.nb && !st.play;
+    const numStyle=st.done?'background:var(--grass-1);border-color:var(--grass-1);color:#fff;':(isCur?'background:var(--gold);border-color:var(--gold);color:#1e1a10;':(st.play?'background:#1f3b23;border-color:#1f3b23;color:#fff;':'background:#fff;color:var(--ink-soft);'));
+    const r=h('div',{style:'display:flex;gap:10px;position:relative;padding-bottom:10px;'});
+    if(!last) r.appendChild(h('div',{style:'position:absolute;left:13px;top:28px;bottom:0;width:2px;background:'+(st.done?'var(--grass-1)':'var(--line)')+';'}));
+    r.appendChild(h('div',{style:'width:28px;height:28px;border-radius:50%;flex:none;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:12px;border:2px solid var(--line);z-index:1;'+numStyle},st.play?'▶':String(i+1)));
+    const who=st.who?h('span',{style:'font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:8px;background:var(--chalk-2);color:var(--ink-soft);margin-left:5px;vertical-align:1px;'},st.who):null;
+    const tag=st.tag?h('span',{style:'font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:8px;background:#e6eefb;color:#2a4a8a;margin-left:5px;vertical-align:1px;'},st.tag):null;
+    const body=h('div',{style:'flex:1;min-width:0;padding-top:3px;'},[h('div',{style:'font-weight:800;font-size:13.5px;color:'+(st.done?'var(--grass-2)':(future?'#8a8f88':'var(--ink)'))+';'},[st.title,st.done?h('span',{style:'color:var(--grass-2);margin-left:5px;'},'✓'):null,who,tag]),h('div',{style:'font-size:11.5px;color:var(--ink-soft);margin-top:1px;'},st.sub)]);
+    if(isCur) body.appendChild(coachBox(st.key));
+    const acts=h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center;'}); extraBtns.forEach(b=>{ if(b) acts.appendChild(b); }); if(acts.children.length) body.appendChild(acts);
+    r.appendChild(body); return r; };
+  steps.forEach((st,i)=>{
+    const isCur=i===cur; const btns=[];
+    if(st.key!=='season') btns.push(B((isCur?'Open '+st.title+' — do it by hand →':'Open →'),()=>builderGo(st,i,total,sn),isCur?'btn-primary':'btn-outline'));
+    if(st.key==='signups'){ const cnt=h('select',Object.assign({style:'width:auto;'},dis)); [12,24,40,60,100,140].forEach(v=>{ const o=h('option',{value:String(v)},v+' players'); if(v===testGenCount) o.setAttribute('selected','selected'); cnt.appendChild(o); }); cnt.addEventListener('change',()=>{ testGenCount=+cnt.value; }); btns.push(cnt); }
+    if(st.key==='games'&&m!=='pickup'){ const wk=h('select',Object.assign({style:'width:auto;'},dis)); [4,8,12].forEach(v=>{ const o=h('option',{value:String(v)},v+' weeks'); if(v===tsWeeks) o.setAttribute('selected','selected'); wk.appendChild(o); }); wk.addEventListener('change',()=>{ tsWeeks=+wk.value; }); btns.push(wk); }
+    if(st.key==='games'&&m==='pickup'){ const wk=h('select',Object.assign({style:'width:auto;'},dis)); [4,8,12].forEach(v=>{ const o=h('option',{value:String(v)},v+' game days'); if(v===tsWeeks) o.setAttribute('selected','selected'); wk.appendChild(o); }); wk.addEventListener('change',()=>{ tsWeeks=+wk.value; }); btns.push(wk); }
+    const sim=tsSimFor(st.key,m);
+    if(st.key==='teams'&&tsTeamsActive().length>=2) btns.push(h('span',{style:'font-size:11.5px;color:var(--ink-soft);'},'Using your league’s teams'));
+    else if(sim && !(st.done && !['signups','eval'].includes(st.key))) btns.push(B(st.done&&st.key==='signups'?'+ Add more':sim[0],()=>{ if(st.key==='signups'&&!st.done) confirmModal('Add '+testGenCount+' test sign-ups to '+sn.name+'?','Fake players, tagged test, in this test season only. Four get sign-in accounts to approve.',sim[1]); else sim[1](); },'btn-gold'));
+    if(st.key==='draft'&&!st.done) btns.push(B('Start draft only',tsQuickDraft));
+    if(st.key==='eval'&&st.done) btns.push(B('Clear ratings — rate by hand',()=>confirmModal('Clear ratings in '+sn.name+'?','Power, Defense and rank are removed for this test season.',tsClearRatings)));
+    list.appendChild(row(i,st,isCur,btns,false));
+  });
+  // play step (always last)
+  const playSt={key:'play',play:true,title:m==='pickup'?'Build sides & play':'Play the season',sub:(sched.length?played+' of '+(played+unplayed)+' games played':'No games scheduled yet')+(m==='pickup'?' · pool: '+pickupPool(sn.id).length+' players':''),done:false};
+  const nextSe=tsUnplayed()[0];
+  const pb=[B(m==='pickup'?'Open Scorecard — build sides by hand →':'Score next game by hand →',()=>{ S.activeTab='scorecard'; renderShell(); },cur<0?'btn-primary':'btn-outline')];
+  if(unplayed) pb.push(B('Play next game day'+(nextSe?' ('+formatDate(nextSe.date)+')':''),()=>tsPlay(false),'btn-gold'));
+  if(unplayed) pb.push(B('Play whole season',()=>tsPlay(true),'btn-gold'));
+  if(played) pb.push(B('Undo played games',()=>confirmModal('Remove all '+played+' played games?','Deletes every game in '+sn.name+' and marks the schedule unplayed, so you can score games by hand.',tsUndoGames)));
+  list.appendChild(row(steps.length,playSt,cur<0,pb,true));
+  root.appendChild(list);
+  // ---- ready for real? ----
+  root.appendChild(h('div',{class:'card',style:'border:2px solid #1f8a4c;'},[h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:6px;'},[h('h3',{style:'margin:0;flex:1;'},'Ready for real?'),seasonModePill({mode:'real'},true)]),
+    h('p',{style:'font-size:12.5px;margin:0 0 8px;line-height:1.55;'},'When you’ve rehearsed the steps you need, make this season real or clear it. '),
+    h('div',{style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 18px;font-size:13px;'},[
+      h('div',{},'✓ Keep: name, dates, roster type'),h('div',{},'✕ Remove: test sign-ups and ratings'),
+      h('div',{},'✓ Keep: teams and managers'),h('div',{},'✕ Remove: test draft and rosters'),
+      h('div',{},'✓ Keep: game schedule and sign-up window'),h('div',{},'✕ Remove: played test games and test accounts')]),
+    h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;'},[h('button',Object.assign({class:'btn',style:'background:#1f8a4c;color:#fff;border-color:#1f8a4c;',onclick:()=>tsConfirmReal(sn)},busy),'Make real…'),h('button',Object.assign({class:'btn btn-danger',onclick:()=>tsConfirmClear(sn)},busy),'Clear this test season')]),
+    h('p',{style:'font-size:12px;color:var(--ink-soft);margin:8px 0 0;'},'The season then turns green — REAL · LIVE — and only Super Admin can turn a real season back to test.')]));
+  root.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:4px 2px 12px;'},'Chat isn’t part of a season — clear test chat in Admin → Chat → Clear chat.'));
+  tsListCards(root,tests,reals,busy);
+}
+function tsListCards(root,tests,reals,busy){
+  const c=h('div',{class:'card'}); c.appendChild(h('h3',{},['All test seasons ',h('span',{style:'font-size:12px;color:var(--ink-soft);font-weight:600;'},'('+tests.length+')')]));
   const t=h('table',{class:'dataTable',style:'width:100%;font-size:13px;'});
   t.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Season'),h('th',{},'Sign-ups'),h('th',{},'Rated'),h('th',{},'Roster players'),h('th',{},'Games'),h('th',{},'')]));
   tests.forEach(s=>{ const k=tsCounts(s.id); t.appendChild(h('tr',{},[h('td',{style:'text-align:left;font-weight:700;'},[s.name,seasonModePill(s)]),h('td',{},String(k.su)),h('td',{},String(k.ev)),h('td',{},String(k.pl)),h('td',{},String(k.g)),
     h('td',{style:'white-space:nowrap;text-align:right;'},[h('button',Object.assign({class:'btn btn-sm',style:'background:#1f8a4c;color:#fff;border-color:#1f8a4c;',onclick:()=>tsConfirmReal(s)},busy),'Make real…'),' ',h('button',Object.assign({class:'btn btn-danger btn-sm',onclick:()=>tsConfirmClear(s)},busy),'Clear')])])); });
   if(!tests.length) t.appendChild(h('tr',{},h('td',{colspan:'6',style:'text-align:center;color:var(--ink-soft);'},'No test seasons.')));
   c.appendChild(h('div',{style:'overflow:auto;'},t));
-  if(tests.length) c.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;'},[h('button',Object.assign({class:'btn btn-danger btn-sm',onclick:()=>confirmModal('Clear ALL '+tests.length+' test seasons?','Removes '+tests.map(s=>s.name).join(', ')+' and everything in them. Real seasons are not touched. A cloud backup is saved first.',async()=>{ for(const s of tests) await tsWipe(s.id,false); },{danger:true,confirmLabel:'Clear all'})},busy),'🧹 Clear ALL test seasons'),h('span',{style:'font-size:12px;color:var(--ink-soft);flex:1 1 260px;'},'Removes each test season and everything in it: sign-ups, ratings, draft, rosters, schedule, games and test accounts. A cloud backup is saved first. Real seasons are never listed here.')]));
+  if(tests.length) c.appendChild(h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;'},[h('button',Object.assign({class:'btn btn-danger btn-sm',onclick:()=>confirmModal('Clear ALL '+tests.length+' test seasons?','Removes '+tests.map(s=>s.name).join(', ')+' and everything in them. Real seasons are not touched. A cloud backup is saved first.',async()=>{ for(const s of tests) await tsWipe(s.id,false); },{danger:true,confirmLabel:'Clear all'})},busy),'🧹 Clear ALL test seasons'),h('span',{style:'font-size:12px;color:var(--ink-soft);flex:1 1 260px;'},'Removes each test season and everything in it: sign-ups, ratings, draft, rosters, schedule, games, test teams and test accounts. A cloud backup is saved first. Real seasons are never listed here.')]));
   root.appendChild(c);
-  root.appendChild(h('div',{class:'card',style:'border:2px solid #1f8a4c;'},[h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:6px;'},[h('h3',{style:'margin:0;flex:1;'},'Going live: “Make real”'),seasonModePill({mode:'real'},true)]),
-    h('p',{style:'font-size:12.5px;margin:0 0 8px;line-height:1.55;'},'Rehearse on a test season, then make it the real one:'),
-    h('div',{style:'display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:6px 18px;font-size:13px;'},[
-      h('div',{},'✓ Keep: name, dates, roster type'),h('div',{},'✕ Remove: test sign-ups and ratings'),
-      h('div',{},'✓ Keep: teams and managers'),h('div',{},'✕ Remove: test draft and rosters'),
-      h('div',{},'✓ Keep: game schedule and sign-up window'),h('div',{},'✕ Remove: scored test games and test accounts')]),
-    h('p',{style:'font-size:12px;color:var(--ink-soft);margin:8px 0 0;'},'The season then turns green — REAL · LIVE — and only Super Admin can turn a real season back to test.')]));
   root.appendChild(h('div',{class:'card'},[h('h3',{},['Real seasons ',h('span',{style:'font-size:12px;color:var(--ink-soft);font-weight:600;'},'('+reals.length+')')]),
     reals.length?h('div',{},reals.map(s=>h('div',{style:'display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--line);'},[h('div',{style:'flex:1;font-weight:700;'},[s.name,seasonModePill(s)]),
       isSuperAdmin()?h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Turn “'+s.name+'” back to TEST?','Super Admin only. Its data will then be treated as test data and can be cleared.',()=>updateDoc(doc(db,'seasons',s.id),{mode:'test'}).then(()=>toast('Now TEST')))},'Make test'):null]))):h('p',{style:'font-size:13px;margin:0;color:var(--ink-soft);'},'None yet — your league is still in setup. All current seasons are TEST.')]));
-  // fill
-  const f=h('div',{class:'card'}); f.appendChild(h('h3',{},'Fill a test season with fake data'));
-  const sel=h('select',{style:'width:auto;'}); if(!tests.length) sel.appendChild(h('option',{value:''},'No test seasons'));
-  tests.forEach(s=>{ const o=h('option',{value:s.id},s.name); if(s.id===S.currentSeasonId) o.setAttribute('selected','selected'); sel.appendChild(o); });
-  if(tests.length && !curSeasonIsTest()) sel.insertBefore(h('option',{value:'',selected:'selected'},'Pick a test season…'),sel.firstChild);
-  sel.addEventListener('change',()=>{ if(!sel.value) return; S.currentSeasonId=sel.value; S.activeGameId=null; switchSeasonListeners(); renderShell(); });
-  f.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:13px;'},[h('b',{},'Filling:'),sel,curSeasonIsTest()?seasonModePill(currentSeason()):null]));
-  const ok=curSeasonIsTest();
-  f.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;'},ok?'Everything below goes into '+currentSeason().name+' only, in order: sign-ups → ratings → draft → game.':'Pick a TEST season above. Fake data can never go into a real season.'));
-  const dis=(ok&&!tsBusy)?{}:{disabled:'disabled'};
-  const step=(n,title,desc,btns)=>h('div',{style:'display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid var(--line);'},[h('div',{style:'flex:none;width:26px;height:26px;border-radius:50%;background:var(--grass-1);color:#fff;font-weight:800;display:flex;align-items:center;justify-content:center;font-size:13px;'},String(n)),h('div',{style:'flex:1;min-width:0;'},[h('div',{style:'font-weight:800;font-size:14px;'},title),h('div',{style:'font-size:12px;color:var(--ink-soft);margin:2px 0 6px;'},desc),h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;'},btns)])]);
-  const B=(label,fn,cls)=>h('button',Object.assign({class:'btn btn-sm '+(cls||'btn-outline'),onclick:fn},dis),label);
-  const cnt=h('select',Object.assign({style:'width:auto;'},dis)); [12,24,40,60,100,140].forEach(v=>{ const o=h('option',{value:String(v)},v+' players'); if(v===testGenCount) o.setAttribute('selected','selected'); cnt.appendChild(o); }); cnt.addEventListener('change',()=>{ testGenCount=+cnt.value; });
-  const sn=currentSeason()||{name:''};
-  f.appendChild(step(1,'Registration & sign-ups','Fake players with @example.com emails; 4 also get test sign-in accounts to approve.',[cnt,B('+ Add test sign-ups',()=>confirmModal('Add '+testGenCount+' test sign-ups to '+sn.name+'?','Fake players, tagged test, in this test season only.',()=>createTestSignups(testGenCount,false,true)),'btn-gold')]));
-  f.appendChild(step(2,'Player evaluation','Random Power, Defense and last-year rank for every player in this season — or clear them to practise rating by hand.',[B('Fill random ratings',tsFillRatings,'btn-gold'),B('Clear ratings',()=>confirmModal('Clear ratings in '+sn.name+'?','Power, Defense and rank are removed for this test season.',tsClearRatings))]));
-  f.appendChild(step(3,'Draft','Start a live draft with every active team, then let the app finish it.',[B('Quick test draft',tsQuickDraft,'btn-gold'),B('Simulate all picks',()=>confirmModal('Simulate the whole draft?','Auto-picks every remaining round.',simulateTestDraft))]));
-  f.appendChild(step(4,'Game day','Add a test game, then play 3 innings automatically — at-bats, hit locations and runs — so Live Feed, Hit zone and Reports fill in.',[B('+ Test game',tsAddGame),B('Auto-play 3 innings',tsAutoPlay,'btn-gold')]));
-  root.appendChild(f);
-  root.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:4px 2px 12px;'},'Chat isn’t part of a season — clear test chat in Admin → Chat → Clear chat.'));
 }
 
 Router.register('admin', (root)=>{
@@ -8412,7 +8577,7 @@ Router.register('admin', (root)=>{
   const nSign=pendingAccounts().length+newSeasonSignups().length;
   if(adminSub==='setup') adminSub='builder';
   if(adminSub==='signup'){ adminSub='approvals'; regSub='signups'; } // old Sign-ups page now lives under Players
-  const subs=[['builder','Season Builder'],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+((isSuperAdmin()?0:licLeagueTodo())?' ('+licLeagueTodo()+')':'')],['backup','Backup'+(bkOverdue(S.currentLeagueId)?' ⚠':'')],['test','\ud83e\uddea Test']];
+  const subs=[['builder','Season Builder'],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+((isSuperAdmin()?0:licLeagueTodo())?' ('+licLeagueTodo()+')':'')],['backup','Backup'+(bkOverdue(S.currentLeagueId)?' ⚠':'')],['test','\ud83e\uddea Test Mode']];
   const inBuilder=['builder','seasons','teams','signup','players'].includes(adminSub);
   const seg=h('div',{class:'segControl',style:'margin-bottom:14px;'}, subs.map(([id,label])=>h('button',{class:(adminSub===id||(id==='builder'&&inBuilder))?'active':'',onclick:()=>{ adminSub=id; S.builderBack=null; renderShell(); }},label)));
   root.appendChild(seg);
