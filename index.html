@@ -90,6 +90,9 @@ body.docked .appMark{right:212px;}
 #authWrap .authField{width:100%;margin-bottom:10px;}
 #authWrap input{width:100%;padding:13px 14px;border:none;border-radius:var(--radius-md);background:var(--grass-2);border:2px solid var(--grass-3);color:var(--chalk);font-size:15px;outline:none;}
 #authWrap input::placeholder{color:#9fb3a5;}
+.pwWrap{position:relative;}
+.pwWrap input{padding-right:92px !important;}
+.pwEye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:rgba(0,0,0,.18);border:1px solid var(--grass-3);color:var(--chalk);border-radius:9px;padding:6px 10px;font-size:13px;font-weight:700;cursor:pointer;line-height:1;}
 #authWrap select.leaguePick{width:100%;padding:12px 14px;border-radius:var(--radius-md);background:var(--grass-2);border:2px solid var(--gold);color:var(--chalk);font-size:15px;font-weight:600;outline:none;}
 #authWrap .authBtn{width:100%;padding:13px;background:var(--chalk);color:var(--grass-1);border:none;border-radius:var(--radius-md);font-weight:700;font-size:15px;margin-top:6px;box-shadow:0 4px 14px rgba(0,0,0,0.25);}
 #authWrap .authToggle{margin-top:14px;background:none;border:1px solid var(--grass-3);color:var(--chalk);padding:8px 14px;border-radius:var(--radius-md);font-size:12.5px;}
@@ -1978,7 +1981,7 @@ function renderJoinForm(card, lgImg, lgTitle){
   const p1=part(1,'Your login','once');
   p1.appendChild(h('div',{style:'display:flex;gap:6px;'},[h('div',{class:'authField',style:'flex:1;'},inp('first','First name','text',{autocomplete:'given-name'})), h('div',{class:'authField',style:'flex:1;'},inp('last','Last name','text',{autocomplete:'family-name'}))]));
   p1.appendChild(h('div',{class:'authField'},inp('email','Email','email',{autocomplete:'email'})));
-  p1.appendChild(h('div',{class:'authField'},inp('pass','Create a password (6+ characters)','password',{autocomplete:'new-password'})));
+  p1.appendChild(h('div',{class:'authField'},pwEye(inp('pass','Create a password (6+ characters)','password',{autocomplete:'new-password'}))));
   p1.appendChild(h('div',{class:'authField'},inp('phone','Cell phone','tel',{autocomplete:'tel'})));
   p1.appendChild(h('p',{style:'font-size:11.5px;color:#e8e2cf;opacity:.85;margin:0 2px;'},'You’ll sign in with this email and password from now on.'));
   // 2 — yearly registration
@@ -2042,7 +2045,7 @@ function renderAuth(wrap){
   const codeInp = h('input',{type:'text',placeholder:pick?'League code (optional)':'League code',style:'text-transform:uppercase;'});
   if(pick) card.appendChild(pick.field);
   card.appendChild(h('div',{class:'authField'}, emailInp));
-  card.appendChild(h('div',{class:'authField'}, passInp));
+  card.appendChild(h('div',{class:'authField'}, pwEye(passInp)));
   if(signup) card.appendChild(h('div',{class:'authField'}, codeInp));
   const terms = termsAgreeRow();
   if(signup) card.appendChild(terms.row);
@@ -2735,6 +2738,91 @@ async function resolveChallenge(game, id, status, note){
   await updateDoc(gameDoc(game),{challenges:list});
   toast(status==='accepted'?'Challenge accepted — fix the play on the scorecard':(status==='withdrawn'?'Challenge withdrawn':'Challenge rejected'));
 }
+/* ===== Game officials: umpire(s) and scorekeeper name — both optional ===== */
+function gameUmpires(g){ return (g&&Array.isArray(g.umpires))?g.umpires.filter(Boolean):[]; }
+function officialsLine(g){ const u=gameUmpires(g), k=(g&&g.scorekeeperName)||''; const parts=[]; if(u.length) parts.push((u.length>1?'Umpires: ':'Umpire: ')+u.join(', ')); if(k) parts.push('Scorekeeper: '+k); return parts.join(' · '); }
+function canEditOfficials(g){ return isAdmin() || (!g.completed && canScoreGame(g)); }
+// names to pick from, so nobody has to type: people who umpired or kept score before, then this season's rosters
+function officialNamePool(g){
+  const ids=leagueTeamIdSet(); const games=dedupeByMatchup((S.allGamesForFeed||[]).filter(x=>ids.has(x.teamId)));
+  const recentU=[], recentK=[]; games.slice().sort((a,b)=>(b.date||'').localeCompare(a.date||'')).forEach(x=>{ gameUmpires(x).forEach(n=>{ if(!recentU.includes(n)) recentU.push(n); }); if(x.scorekeeperName && !recentK.includes(x.scorekeeperName)) recentK.push(x.scorekeeperName); });
+  const sid=g&&g.seasonId; const roster=[...new Set((S.allPlayersForFeed||[]).filter(p=>ids.has(p.teamId) && (!sid||p.seasonId===sid||!p.seasonId) && p.name).map(p=>p.name.trim()))].sort((a,b)=>rosterLastKey(a).localeCompare(rosterLastKey(b)));
+  return {recentU, recentK, roster};
+}
+function officialsModal(g){
+  const pool=officialNamePool(g); let ump=gameUmpires(g).slice(); let keeper=g.scorekeeperName||'';
+  const kSide=scorekeeperSide(g); const kTeam=[...new Set(((g[kSide]||{}).players||[]).map(p=>(p.name||'').trim()).filter(Boolean))];
+  const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet',style:'max-height:90vh;overflow:auto;'}); overlay.appendChild(sheet);
+  sheet.appendChild(h('div',{class:'modalHandle'})); sheet.appendChild(h('h3',{},'Umpires & scorekeeper'));
+  sheet.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;line-height:1.45;'},(g.away&&g.away.name)+' at '+(g.home&&g.home.name)+' · '+formatDate(g.date)+'. Both are optional — pick from the lists, or choose “Someone else” to type a name.'));
+  const mkSelect=(groups, ph)=>{ const s=h('select',{style:'width:100%;'}); s.appendChild(h('option',{value:''},ph)); groups.forEach(([label,names])=>{ const list=names.filter(Boolean); if(!list.length) return; const og=h('optgroup',{label}); list.forEach(n=>og.appendChild(h('option',{value:n},n))); s.appendChild(og); }); s.appendChild(h('option',{value:'__other'},'Someone else — type a name…')); return s; };
+  const askName=(title,cb)=>{ const box=h('div',{style:'display:flex;gap:6px;margin-top:6px;'}); const i=h('input',{type:'text',placeholder:title,maxlength:'40',style:'flex:1;'}); const ok=h('button',{class:'btn btn-primary btn-sm',onclick:()=>{ const v=i.value.trim(); if(v) cb(v); box.remove(); }},'Add'); box.appendChild(i); box.appendChild(ok); i.addEventListener('keydown',e=>{ if(e.key==='Enter') ok.click(); }); setTimeout(()=>i.focus(),30); return box; };
+  // umpires
+  sheet.appendChild(h('div',{style:'font-size:12.5px;font-weight:700;margin:10px 2px 6px;'},'Umpire(s)'));
+  const chips=h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;'}); sheet.appendChild(chips);
+  const uWrap=h('div',{}); sheet.appendChild(uWrap);
+  const drawU=()=>{ chips.innerHTML=''; if(!ump.length) chips.appendChild(h('span',{style:'font-size:12px;color:var(--ink-soft);'},'None yet'));
+    ump.forEach(n=>chips.appendChild(h('span',{style:'display:inline-flex;align-items:center;gap:6px;background:var(--grass-1);color:#fff;border-radius:14px;padding:5px 6px 5px 11px;font-size:13px;font-weight:700;'},[n,h('button',{type:'button','aria-label':'Remove '+n,style:'background:rgba(255,255,255,.25);border:none;color:#fff;border-radius:50%;width:20px;height:20px;cursor:pointer;line-height:1;',onclick:()=>{ ump=ump.filter(x=>x!==n); drawU(); }},'✕')])));
+    uWrap.innerHTML=''; if(ump.length>=4) return;
+    const sel=mkSelect([['Recent umpires',pool.recentU.filter(n=>!ump.includes(n))],['League players',pool.roster.filter(n=>!ump.includes(n)&&!pool.recentU.includes(n))]], ump.length?'＋ Add another umpire…':'＋ Add an umpire…');
+    sel.addEventListener('change',()=>{ const v=sel.value; if(!v) return; if(v==='__other'){ uWrap.appendChild(askName('Umpire’s name',n=>{ if(!ump.includes(n)) ump.push(n); drawU(); })); sel.value=''; return; } if(!ump.includes(v)) ump.push(v); drawU(); });
+    uWrap.appendChild(sel); };
+  drawU();
+  // scorekeeper
+  sheet.appendChild(h('div',{style:'font-size:12.5px;font-weight:700;margin:14px 2px 6px;'},'Scorekeeper (person)'));
+  const kNow=h('div',{style:'font-size:13px;margin:0 2px 6px;'}); sheet.appendChild(kNow); const kWrap=h('div',{}); sheet.appendChild(kWrap);
+  const drawK=()=>{ kNow.innerHTML=''; kNow.appendChild(keeper?h('span',{},[h('b',{},keeper),' ',h('button',{type:'button',class:'btn btn-outline btn-sm',style:'margin-left:6px;',onclick:()=>{ keeper=''; drawK(); }},'Clear')]):h('span',{style:'color:var(--ink-soft);font-size:12px;'},'Not recorded'));
+    kWrap.innerHTML='';
+    const sel=mkSelect([[((g[kSide]||{}).name||'Scorekeeping team')+' (keeping score)',kTeam],['Recent scorekeepers',pool.recentK.filter(n=>!kTeam.includes(n))],['League players',pool.roster.filter(n=>!kTeam.includes(n)&&!pool.recentK.includes(n))]], keeper?'Change scorekeeper…':'Pick the scorekeeper…');
+    sel.addEventListener('change',()=>{ const v=sel.value; if(!v) return; if(v==='__other'){ kWrap.appendChild(askName('Scorekeeper’s name',n=>{ keeper=n; drawK(); })); sel.value=''; return; } keeper=v; drawK(); });
+    kWrap.appendChild(sel); };
+  drawK();
+  sheet.appendChild(h('div',{style:'display:flex;gap:8px;margin-top:16px;'},[
+    h('button',{class:'btn btn-outline',style:'flex:1;',onclick:()=>overlay.remove()},'Cancel'),
+    h('button',{class:'btn btn-primary',style:'flex:1;',onclick:async()=>{ try{ await updateDoc(gameDoc(g),{umpires:ump.slice(0,4), scorekeeperName:keeper.slice(0,40), officialsSetBy:(S.user&&S.user.email)||null, officialsSetAt:Date.now()}); overlay.remove(); toast('Saved'); }catch(e){ toast('Could not save: '+(e.message||e)); } }},'Save')]));
+  overlay.addEventListener('click',e=>{ if(e.target===overlay) overlay.remove(); }); document.body.appendChild(overlay);
+}
+function officialsRow(g){
+  const line=officialsLine(g); const can=canEditOfficials(g);
+  if(!line && !can) return null;
+  return h('div',{style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);'},[
+    h('span',{style:'font-size:11px;text-transform:uppercase;letter-spacing:0.4px;color:var(--ink-soft);font-weight:700;'},'Officials'),
+    h('span',{style:'font-size:13px;flex:1;min-width:0;'+(line?'':'color:var(--ink-soft);')},line||'Umpire and scorekeeper not entered (optional)'),
+    can?h('button',{class:'btn btn-outline btn-sm',onclick:()=>officialsModal(g)},line?'✎ Change':'＋ Add'):null]);
+}
+// Report → Umpires & Scorekeepers
+let offPerson='';
+function officialsReportCard(){
+  const ids=leagueTeamIdSet(); const sid=S.currentSeasonId;
+  let games=dedupeByMatchup((S.allGamesForFeed||[]).filter(g=>ids.has(g.teamId) && gameInSeason(g,sid))).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Umpires & scorekeepers — '+(currentSeasonName()||'season')));
+  const names=[...new Set(games.flatMap(g=>gameUmpires(g).concat(g.scorekeeperName?[g.scorekeeperName]:[])))].sort((a,b)=>rosterLastKey(a).localeCompare(rosterLastKey(b)));
+  const sel=h('select',{style:'max-width:260px;'}); sel.appendChild(h('option',{value:''},'Everyone')); names.forEach(n=>sel.appendChild(h('option',{value:n},n))); sel.value=names.includes(offPerson)?offPerson:''; sel.addEventListener('change',()=>{ offPerson=sel.value; renderShell(); });
+  const shown=offPerson?games.filter(g=>gameUmpires(g).includes(offPerson)||g.scorekeeperName===offPerson):games;
+  const sch=S.allScheduleForFeed||[]; const fieldOf=g=>g.location||g.field||((g.matchupId&&sch.find(x=>x.matchupId===g.matchupId&&x.location))||{}).location||'';
+  const rows=shown.map(g=>{ const k=scorekeeperSide(g); return { date:g.date, game:(g.away&&g.away.name)+' at '+(g.home&&g.home.name), field:fieldOf(g), ump:gameUmpires(g).join(', '), keeper:g.scorekeeperName||'', team:(g[k]||{}).name||'', score:totalRuns(g,'away')+'–'+totalRuns(g,'home'), status:g.completed?'Final':'Live' }; });
+  const exportX=()=>{ const data=[['Date','Game','Field','Umpire(s)','Scorekeeper','Scorekeeping team','Score (away–home)','Status']].concat(rows.map(r=>[r.date,r.game,r.field,r.ump,r.keeper,r.team,r.score,r.status]));
+    const tally=new Map(); games.forEach(g=>{ gameUmpires(g).forEach(n=>{ const t=tally.get(n)||{u:0,k:0}; t.u++; tally.set(n,t); }); if(g.scorekeeperName){ const t=tally.get(g.scorekeeperName)||{u:0,k:0}; t.k++; tally.set(g.scorekeeperName,t); } });
+    const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(data); ws['!cols']=[12,32,16,30,22,18,14,8].map(w=>({wch:w})); XLSX.utils.book_append_sheet(wb,ws,'Games');
+    XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['Name','Games umpired','Games scored']].concat([...tally].sort((a,b)=>(b[1].u+b[1].k)-(a[1].u+a[1].k)).map(([n,t])=>[n,t.u,t.k]))),'Totals');
+    XLSX.writeFile(wb,'Umpires and scorekeepers - '+(currentSeasonName()||'season')+'.xlsx'); };
+  card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;'},[h('label',{style:'font-size:12.5px;font-weight:700;'},'Person'),sel,h('div',{style:'flex:1;'}),h('button',{class:'btn btn-outline btn-sm',onclick:exportX},'⬇ Export to Excel')]));
+  if(!games.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No games yet this season.')); return card; }
+  // totals strip
+  const tally=new Map(); games.forEach(g=>{ gameUmpires(g).forEach(n=>{ const t=tally.get(n)||{u:0,k:0}; t.u++; tally.set(n,t); }); if(g.scorekeeperName){ const t=tally.get(g.scorekeeperName)||{u:0,k:0}; t.k++; tally.set(g.scorekeeperName,t); } });
+  const missing=games.filter(g=>!gameUmpires(g).length && !g.scorekeeperName).length;
+  card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},games.length+' game'+(games.length===1?'':'s')+' · '+tally.size+' people · '+(missing?missing+' with no officials entered':'every game has officials entered')));
+  const wrap=h('div',{style:'overflow-x:auto;'}); const t=h('table',{class:'dataTable'});
+  const showField=rows.some(r=>r.field);
+  t.appendChild(h('tr',{},['Date','Game'].concat(showField?['Field']:[],['Umpire(s)','Scorekeeper','Score']).map(x=>h('th',{style:'text-align:left;'},x))));
+  rows.forEach(r=>t.appendChild(h('tr',{},[h('td',{style:'white-space:nowrap;'},formatDate(r.date)),h('td',{},r.game),showField?h('td',{},r.field||'—'):null,h('td',{},r.ump||h('span',{style:'color:var(--ink-soft);'},'—')),h('td',{},r.keeper?[r.keeper,h('div',{style:'font-size:11px;color:var(--ink-soft);'},r.team)]:h('span',{style:'color:var(--ink-soft);'},'—')),h('td',{style:'white-space:nowrap;font-family:var(--font-mono);'},r.score+(r.status==='Live'?' · live':''))])));
+  wrap.appendChild(t); card.appendChild(wrap);
+  if(tally.size){ const tt=h('table',{class:'dataTable',style:'margin-top:14px;'}); tt.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Totals'),h('th',{},'Umpired'),h('th',{},'Kept score')]));
+    [...tally].sort((a,b)=>(b[1].u+b[1].k)-(a[1].u+a[1].k)||a[0].localeCompare(b[0])).forEach(([n,v])=>tt.appendChild(h('tr',{},[h('td',{},n),h('td',{style:'text-align:center;'},String(v.u)),h('td',{style:'text-align:center;'},String(v.k))])));
+    card.appendChild(tt); }
+  return card;
+}
+
 function gameIntegrityCard(game, opts){
   opts=opts||{};
   const scorer=canScoreGame(game), chall=canChallengeGame(game);
@@ -2745,6 +2833,7 @@ function gameIntegrityCard(game, opts){
     h('span',{class:'pill-role'},(kSide==='home'?'Home — ':'Away — ')+game[kSide].name),
     isAdmin()&&!game.completed?h('button',{class:'btn btn-outline btn-sm',onclick:async()=>{ const v=await chooseScorekeeperModal(game.home.name,game.away.name,kSide); if(v&&v!==kSide){ await updateDoc(gameDoc(game),{scorekeeperSide:v,scorekeeperSetBy:(S.user&&S.user.email)||null,scorekeeperSetAt:Date.now()}); toast('Scorekeeper changed'); } }},'Change'):null
   ]));
+  { const orow=officialsRow(game); if(orow) card.appendChild(orow); }
   if(!opts.feed && !scorer) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:8px 0 0;line-height:1.5;'},'View only — '+game[kSide].name+' is keeping score for this game. See something wrong? Challenge the play below.'));
   const issues=gameEntryIssues(game);
   if(issues.length){
@@ -3087,7 +3176,7 @@ function openAtBatModal(game, presetPlayer, presetInning, presetSide){
   sheet.appendChild(batterSel);
   sheet.appendChild(h('div',{class:'fieldRow',style:'margin-top:10px;'},[h('label',{},'Result')]));
   const chipWrap=h('div',{class:'resultChipGrid'});
-  const HIDDEN=['E','SF','HBP'];
+  const HIDDEN=leagueErrSacFly()?['HBP']:['E','SF','HBP'];
   Object.keys(RESULTS).forEach(code=>{
     if(HIDDEN.includes(code)) return;
     const chip=h('button',{class:'resultChip '+resultClass(code)},[h('span',{class:'rcCode'},code), h('span',{class:'rcLabel'},RESULTS[code].label)]);
@@ -5122,7 +5211,8 @@ Router.register('report', (root)=>{
       {id:'scoring', label:'Scoring Report', desc:'Runs by season, year, or field'},
       {id:'trend', label:'Batting Average Trend', desc:'AVG over time by week, month, or quarter'},
       {id:'subs', label:'Substitutes Report', desc:'Who subbed for each team, when, and how they hit vs. their own team'},
-      {id:'standings', label:'Standings Report', desc:'League-wide win/loss'}
+      {id:'standings', label:'Standings Report', desc:'League-wide win/loss'},
+      {id:'officials', label:'Umpires & Scorekeepers', desc:'Who umpired and who kept score for every game, with totals'}
     ];
     menu.forEach(m=>card.appendChild(h('div',{class:'gameListRow',style:'cursor:pointer;',onclick:()=>{ reportView=m.id; renderShell(); }},[
       h('div',{},[h('div',{class:'glTeams'},m.label), h('div',{class:'glDate'},m.desc)]),
@@ -5134,6 +5224,7 @@ Router.register('report', (root)=>{
   if(reportView==='batting'){ root.appendChild(battingReportCard(scopeGames(false),'Batting — '+(currentSeasonName()||'season'))); }
   if(reportView==='trend'){ root.appendChild(avgTrendCard(scopeGames(false),'Batting average trend')); root.appendChild(trendingPlayersCard(scopeGames(false))); }
   if(reportView==='subs'){ root.appendChild(subsReportCard(scopeGames(false))); }
+  if(reportView==='officials'){ root.appendChild(officialsReportCard()); }
   if(reportView==='hitzone'){ root.appendChild(hitZoneReportCard()); }
   if(reportView==='scoring'){
     root.appendChild(scoringCompareCard());
@@ -5599,7 +5690,7 @@ Router.register('feed', (root)=>{
   if(!feedCallsPrimed){ (game.atbats||[]).forEach(a=>{ if(!(a.ts && Date.now()-a.ts<FEED_ANNOUNCE_WINDOW_MS)) seenCallIds.add(a.id); }); feedCallsPrimed=true; }
   { const fresh=recent.filter(a=>!seenCallIds.has(a.id)); if(fresh.length){ fresh.forEach(x=>seenCallIds.add(x.id)); if(geezerVoiceOn) geezerToast(fresh.map(a=>plainCall(game,a)).join('  \u00b7  ')); } }
   { const top=h('div',{class:'feedTop'}); top.appendChild(lineScoreCard(game)); const pcc=atBatPlayerCard(game); if(pcc) top.appendChild(pcc); root.appendChild(top); }
-  { const ic=gameIntegrityCard(game,{feed:true}); if(game.scorekeeperSide || gameEntryIssues(game).length || (game.challenges||[]).length || canChallengeGame(game)) root.appendChild(ic); }
+  { const ic=gameIntegrityCard(game,{feed:true}); if(game.scorekeeperSide || officialsLine(game) || gameEntryIssues(game).length || (game.challenges||[]).length || canChallengeGame(game)) root.appendChild(ic); }
   { const last=(game.atbats||[]).slice().sort((a,b)=>(a.ts||0)-(b.ts||0)).pop();
     if(last) root.appendChild(h('div',{class:'card',style:'display:flex;align-items:center;gap:12px;background:var(--grass-1);color:var(--chalk);'},[
       h('img',{src:GEEZER_FACE,alt:'',style:'width:44px;height:44px;border-radius:50%;flex:none;'}),
@@ -6114,6 +6205,11 @@ const HELP_KB = [
   {k:'edit change update my registration fix address phone', q:'How does a player update their registration?', a:'Menu (right side) → 📝 My registration. Their answers are filled in; they change what they need, re-check the agreements and sign again.'},
   {k:'where find my player card more menu right side button nothing happens', q:'Where do I find My player card?', a:'On a phone: tap More ☰ at the top right — 🪪 My player card is under Geezer Weezer. On a computer or a sideways iPad the menu is always open on the right side. Everyone with an approved account sees it (including the Super Admin) and each person only edits their own card. Don’t see it? Close the app completely and reopen it to load the latest version.'},
   {k:'training guide manual brochure how to learn admin manager season start finish', q:'Is there a training guide for admins and managers?', a:'Yes — the Geezer Ball Scorecard Admin & Manager Training Guide walks through a season from setup to season end in plain steps. Ask your league admin for a copy. It is for your league only and may not be shared outside the league without the Software Provider’s approval. To practise hands-on, use Admin → 🧪 Test Mode.'},
+  {k:'license agreement word docx export download sponsor', q:'Can I download an agreement as a Word file?', a:'Yes. Admin → License (or Super Admin → Licenses, or a sponsor’s agreement) → ⬇ Word (.docx) next to Print / save PDF. The Super Admin can also download a draft before sending it. The Word file is a copy for reading or review — the signed version stays in the app with its fingerprint.'},
+  {k:'error sacrifice fly sac fly SF E scorecard setting turn on off', q:'How do I turn on errors and sacrifice flies?', a:'Admin → Settings → Scorecard → “Track errors and sacrifice flies”: slide it to YES. Scorekeepers then see E (reached on error) and SF (sac fly) when recording an at-bat. Slide to NO to hide them again. A sac fly doesn’t count as an at-bat; reaching on an error isn’t a hit.'},
+  {k:'password show hide see typed letters eye sign in', q:'Can I see my password while typing it?', a:'Yes. On the sign-in and join screens, tap 👁 Show inside the password box to see what you typed. Tap 🙈 Hide to cover it again — it also hides by itself after 15 seconds.'},
+  {k:'umpire umpires scorekeeper name officials game who umpired', q:'How do I record the umpires and scorekeeper?', a:'On the Scorecard, in the Official scorekeeper box, tap ＋ Add next to Officials. Pick one or more umpires and the person keeping score from the lists (recent names come first), or choose “Someone else” to type a name. Both are optional. Admins can change them any time, even after the game.'},
+  {k:'umpire scorekeeper report who umpired each game totals', q:'Where can I see who umpired each game?', a:'Report → Umpires & Scorekeepers. It lists every game this season with its umpire(s), scorekeeper, field and score, plus totals for each person. Pick a person to see just their games, or Export to Excel.'},
   {k:'license who can see agreement private', q:'Who can see the league agreement?', a:'Only that league’s admin and the Super Admin. Players and managers can’t see the License tab.'},
   {k:'chat photo picture image post camera', q:'How do I post a photo in League Chat?', a:'Left menu → League Chat → tap the 📷 camera button → pick or take a photo → add a caption if you like → Send. Photos are shrunk automatically. Some leagues hold photos for admin approval first.'},
   {k:'report inappropriate chat message photo remove delete moderate', q:'How do I report or remove a chat message?', a:'Members: tap Report on the message. Admins: tap Delete on any message, “No photos” to stop one member posting photos, or Restrict to stop them posting at all. Reported messages and photos waiting for approval appear in the Chat moderation card on the League Chat page.'},
@@ -6241,6 +6337,7 @@ function renderHelpWidget(){
 let qaOpenItem=null;
 const FAQ_DATA = [
   { category:'Getting started', items:[
+    { q:'Can I see my password while I type it?', a:'Yes — tap 👁 Show inside the password box. Tap 🙈 Hide to cover it again; it also hides by itself after 15 seconds.' },
     { q:'Why do I fill in a registration every year?', a:'Your league asks every player to confirm their details, re-sign the agreements (including how your information is used) and sign by typing their name once a year. It’s separate from choosing seasons. Last year’s answers are filled in where they don’t change — age is always entered fresh.' },
     { q:'Can other leagues see my information?', a:'No. Each league’s data is separate: members of one league cannot read another league’s players, games, chat or sign-ups. Within your league, your name, team, position and statistics are visible to members; your email, phone and age are visible only to your league’s administrators and team managers, and to you.' },
     { q:'Who can see my registration answers?', a:'Only your league’s administrators. Managers and other players never see them. Your name, team and statistics are visible to members of your league, as described in the “Use of my information” agreement.' },
@@ -6272,6 +6369,8 @@ const FAQ_DATA = [
     { q:'How do I change a game’s date, time or field?', a:'Admins: Schedule tab → ✎ Change schedule, edit right in the table (saves as you go), then ✓ Done.' },
   ]},
   { category:'Scorecard', items:[
+    { q:'How do I add the umpires and scorekeeper?', a:'Scorecard → Officials → ＋ Add. Pick the umpire(s) and scorekeeper from the lists, or choose “Someone else” to type a name. Both are optional. See them all in Report → Umpires & Scorekeepers.' },
+    { q:'Where are errors (E) and sacrifice flies (SF)?', a:'They only appear if your league turns them on: Admin → Settings → Scorecard → “Track errors and sacrifice flies” → YES.' },
     { q:'How do I record an at-bat?', a:'Tap “Record at-bat”, or tap an empty grid box for that player and inning. For a ball in play you’ll pick where it landed — that feeds the Hit Zone.' },
     { q:'How do I fix a runner on the wrong base?', a:'Drag them on the Base Diagram to the correct base, or to home plate to score them.' },
     { q:'A runner was tagged or forced out — how do I record it?', a:'Drag the runner onto “Tag / Force Out” (or tap it and pick the runner). It counts the out, shows OUT@base on the grid, and appears in the Live Feed play-by-play.' },
@@ -6544,6 +6643,9 @@ function settingsView(root){
   // ---- Schedule (now managed on the Schedule tab) ----
   if(G) root.appendChild(h('div',{class:'sectiontitle'},'Schedule'));
   if(G) root.appendChild(h('div',{class:'card'},[h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},'Games are added, imported and edited on the Schedule tab (left menu) \u2014 the admin controls sit under the game list.'), h('button',{class:'btn btn-outline btn-sm',onclick:()=>goTab('schedule')},'Open Schedule')]));
+  // ---- Scorecard options ----
+  if(G) root.appendChild(h('div',{class:'sectiontitle'},'Scorecard'));
+  if(G) root.appendChild(scoringOptionsCard());
   // ---- Playoffs ----
   if(G) root.appendChild(h('div',{class:'sectiontitle'},'Playoffs'));
   if(G && !currentPlayoff) root.appendChild(playoffSetupCard(leagueStandings()));
@@ -6577,14 +6679,9 @@ function settingsView(root){
   if(G) root.appendChild(h('div',{class:'sectiontitle'},'Test data'));
   if(G) root.appendChild(h('div',{class:'card'},[h('h3',{},'Test data has moved'),h('p',{style:'font-size:13px;margin:0 0 8px;'},'Fake sign-ups, ratings, test drafts, test games and clearing now live in Admin \u2192 \ud83e\uddea Test Mode.'),h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ adminSub='test'; renderShell(); }},'Open Test Mode')]));
   if(!G && seasonMethod()==='draft' && curSeasonIsTest()){
-  root.appendChild(h('div',{class:'sectiontitle'},'Draft shortcuts'));
-  const dc=h('div',{class:'card'}); dc.appendChild(h('h3',{},'Draft shortcuts & archive'));
-  dc.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Quick draft: adds 140 rated test sign-ups and starts a draft with every active team. Simulate fills every remaining pick. Use Clear test data (Settings \u2192 General \u2192 Test data) to remove it all.'));
-  dc.appendChild(h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;'},[
-    h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Create a quick test draft?','Adds rated test sign-ups and starts a draft with every active team.',createTestDraftData)},'Quick test draft'),
-    h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Simulate the whole draft?','Auto-picks every remaining round so you can review a completed board and rosters.',simulateTestDraft)},'Simulate all picks'),
-    h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Archive this draft?','Saves the draft board, picks and evaluations to history.',archiveDraft)},'Archive draft')
-  ]));
+  const dc=h('div',{class:'card'}); dc.appendChild(h('h3',{},'Archive this test draft'));
+  dc.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Fake sign-ups, test drafts and simulated picks are in Admin → 🧪 Test Mode. Here you can save this draft board to the archive below.'));
+  dc.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Archive this draft?','Saves the draft board, picks and evaluations to history.',archiveDraft)},'Archive draft'));
   root.appendChild(dc);
   }
   const ac=h('div',{class:'card'}); ac.appendChild(h('h3',{},'Draft archives'));
@@ -8223,6 +8320,25 @@ function fillSponsorTokens(txt, a){
     DATE:new Date().toLocaleDateString(undefined,{month:'long',day:'numeric',year:'numeric'})};
   return String(txt||'').replace(/\{\{\s*([A-Z_]+)\s*\}\}/g,(m,k)=>map[k]!==undefined?map[k]:m);
 }
+// "Show" lets people check what they typed; it hides itself again after 15 seconds
+function pwEye(inp){ const btn=h('button',{type:'button',class:'pwEye','aria-label':'Show password'},'👁 Show'); let t=0;
+  const hide=()=>{ inp.type='password'; btn.textContent='👁 Show'; btn.setAttribute('aria-label','Show password'); };
+  btn.addEventListener('click',()=>{ clearTimeout(t); if(inp.type==='password'){ inp.type='text'; btn.textContent='🙈 Hide'; btn.setAttribute('aria-label','Hide password'); t=setTimeout(hide,15000); } else hide(); try{ inp.focus(); }catch(e){} });
+  return h('div',{class:'pwWrap'},[inp,btn]); }
+function leagueErrSacFly(){ const lg=(S.leagues||[]).find(l=>l.id===S.currentLeagueId)||{}; return !!lg.errSacFly; }
+function scoringOptionsCard(){
+  const lg=(S.leagues||[]).find(l=>l.id===S.currentLeagueId); const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Scorecard options'));
+  if(!lg){ card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);'},'Pick a league first.')); return card; }
+  const on=!!lg.errSacFly;
+  const sw=h('button',{type:'button',role:'switch','aria-checked':on?'true':'false','aria-label':'Errors and sacrifice flies',style:'flex:none;display:flex;align-items:center;width:112px;height:40px;border-radius:20px;border:none;cursor:pointer;position:relative;padding:0;background:'+(on?'var(--grass-1)':'#b9b9b0')+';',
+    onclick:async()=>{ try{ await updateDoc(doc(db,'leagues',lg.id),{errSacFly:!on}); toast(!on?'Errors and sac flies now show on the scorecard':'Errors and sac flies hidden from the scorecard'); }catch(e){ toast('Could not save: '+(e.message||e)); } }},[
+    h('span',{style:'position:absolute;'+(on?'left:14px;':'right:14px;')+'color:#fff;font-weight:800;font-size:14px;'},on?'YES':'NO'),
+    h('span',{style:'position:absolute;top:4px;'+(on?'right:4px;':'left:4px;')+'width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);'})]);
+  card.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;'},[
+    h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Track errors and sacrifice flies'),
+      h('div',{style:'font-size:12px;color:var(--ink-soft);line-height:1.45;margin-top:2px;'},on?'On: scorekeepers see E (reached on error) and SF (sac fly) when recording an at-bat. A sac fly doesn’t count as an at-bat; reaching on an error isn’t a hit.':'Off: the scorecard shows only the usual results. Turn on if your league scores errors and sacrifice flies.')]), sw]));
+  return card;
+}
 function loadScriptOnce(src){ return new Promise((res,rej)=>{ if(document.querySelector('script[src="'+src+'"]')) return res(); const s=document.createElement('script'); s.src=src; s.onload=res; s.onerror=()=>rej(new Error('Could not load '+src)); document.head.appendChild(s); }); }
 async function docxToText(file){
   await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js');
@@ -8235,6 +8351,40 @@ async function postAgrNotice(ctx, side, kind, subject, body, auto){
 function addBusinessDays(ts, n){ const d=new Date(ts); let k=0; while(k<n){ d.setDate(d.getDate()+1); const w=d.getDay(); if(w!==0&&w!==6) k++; } return d.getTime(); }
 const LIC_CONFIDENTIAL='This Agreement is the proprietary and confidential information of '+OWNER_NAME+' and shall not be disclosed to any third party without the prior written consent of '+OWNER_NAME+'.';
 function licConfidentialNote(){ return h('div',{style:'display:flex;gap:8px;align-items:flex-start;background:#fbf3e4;border:1px solid #e3c98f;border-left:4px solid #a8493a;border-radius:8px;padding:8px 11px;margin:0 0 10px;font-size:12px;line-height:1.45;color:#3a2a10;'},[h('span',{style:'font-size:14px;'},'🔒'),h('span',{},[h('b',{style:'letter-spacing:.05em;'},'PROPRIETARY & CONFIDENTIAL — '),LIC_CONFIDENTIAL])]); }
+/* Download an agreement as a Word file (.docx). Built in the browser — nothing is uploaded. */
+async function exportAgreementDocx(L, ctx){
+  try{ await loadScriptOnce('https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'); }catch(e){ toast('Could not load the Word maker — check your connection'); return; }
+  const x=t=>String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'');
+  const run=(t,o)=>{ o=o||{}; return '<w:r><w:rPr>'+(o.b?'<w:b/>':'')+(o.i?'<w:i/>':'')+(o.color?'<w:color w:val="'+o.color+'"/>':'')+'<w:sz w:val="'+(o.sz||22)+'"/></w:rPr><w:t xml:space="preserve">'+x(t)+'</w:t></w:r>'; };
+  const para=(runs,o)=>{ o=o||{}; return '<w:p><w:pPr>'+(o.center?'<w:jc w:val="center"/>':'')+'<w:spacing w:after="'+(o.after==null?120:o.after)+'"/>'+(o.border?'<w:pBdr><w:top w:val="single" w:sz="8" w:space="4" w:color="A8493A"/><w:bottom w:val="single" w:sz="8" w:space="4" w:color="A8493A"/></w:pBdr>':'')+'</w:pPr>'+runs+'</w:p>'; };
+  const sg=L.signatures||{}; const body=[];
+  body.push(para(run('PROPRIETARY & CONFIDENTIAL — ',{b:true,sz:18,color:'A8493A'})+run(LIC_CONFIDENTIAL,{sz:18}),{border:true,after:240}));
+  body.push(para(run(L.title||'Agreement',{b:true,sz:32}),{after:240}));
+  String(L.text||'').split(/\r?\n/).forEach(line=>{ const t=line.replace(/\s+$/,'');
+    if(!t){ body.push(para('',{after:0})); return; }
+    const head=/^\d+(\.\d+)?\s+[A-Z]/.test(t) && !/^\d+\.\d+/.test(t) && t.length<90;   // "6 Discretionary League…" section titles
+    body.push(para(run(t,{b:head,sz:head?24:22}),{after:head?80:120})); });
+  const sigBlock=(who,v)=>{ body.push(para(run(who,{b:true}),{after:40}));
+    if(v){ body.push(para(run(v.name||'',{i:true,sz:28}),{after:20})); if(v.title) body.push(para(run(v.title),{after:20}));
+      body.push(para(run('Signed electronically '+new Date(v.at).toLocaleString()+(v.email?' · '+v.email:''),{sz:18,color:'555555'}),{after:200})); }
+    else body.push(para(run('Not signed',{i:true,color:'777777'}),{after:200})); };
+  body.push(para('',{after:240})); sigBlock(OWNER_NAME+' — '+OWNER_PERSON, sg.owner); sigBlock(ctx.partyName, sg[ctx.partyKey]);
+  if(L.textHash||L.executedAt) body.push(para(run('Document fingerprint (SHA-256 of the signed text): '+(L.textHash||'—')+(L.executedAt?' · Executed '+new Date(L.executedAt).toLocaleString():''),{sz:16,color:'555555'})));
+  body.push(para(run('Proprietary & Confidential — '+OWNER_NAME+'. Do not disclose without its prior written consent.',{b:true,sz:16})));
+  if(L.status!=='executed') body.push(para(run('Copy for review — the signed version is kept in Geezer Ball Scorecard.',{i:true,sz:16,color:'777777'})));
+  const docXml='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'+body.join('')
+    +'<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1260" w:right="1260" w:bottom="1260" w:left="1260" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>';
+  const styles='<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Georgia" w:hAnsi="Georgia" w:cs="Georgia"/><w:sz w:val="22"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:line="276" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults></w:styles>';
+  const z=new window.JSZip();
+  z.file('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>');
+  z.file('_rels/.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
+  z.file('word/_rels/document.xml.rels','<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>');
+  z.file('word/document.xml',docXml); z.file('word/styles.xml',styles);
+  const blob=await z.generateAsync({type:'blob',mimeType:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});
+  const nm=((L.title||'Agreement')+' - '+(ctx.partyName||'')).replace(/[\\/:*?"<>|]+/g,'').replace(/\s+/g,' ').trim().slice(0,90)+'.docx';
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=nm; document.body.appendChild(a); a.click(); setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); },1500);
+  toast('Word file downloaded: '+nm);
+}
 function printAgreement(L, ctx){
   const sg=L.signatures||{}; const w=window.open('','_blank'); if(!w){ toast('Allow pop-ups to print'); return; }
   const esc=(t)=>String(t||'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -8377,6 +8527,7 @@ function agreementView(root, ctx, side){
       card.appendChild(ti); card.appendChild(ta); card.appendChild(fi);
       card.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;'},[
         h('button',{class:'btn btn-outline btn-sm',onclick:()=>fi.click()},'⬆ Upload .docx / .txt'),
+        h('button',{class:'btn btn-outline btn-sm',onclick:()=>exportAgreementDocx({title:ti.value,text:ta.value,status:'draft',signatures:{}},ctx)},'⬇ Word (.docx)'),
         h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ const t=ctx.tpl()||{}; ti.value=t.title||ctx.defTitle; ta.value=ctx.fill(t.text||ctx.builtin||''); agrDraftCache[ctx.col+'/'+ctx.id]={title:ti.value,text:ta.value}; toast('Standard agreement loaded'); }},'Reload standard agreement'),
         h('button',{class:'btn btn-outline btn-sm',onclick:async()=>{ if(!ta.value.trim()){ toast('Nothing to save'); return; } await setDoc(doc(db,'appConfig',ctx.tplDoc),Object.assign({title:ti.value.trim(),text:ta.value,updatedAt:Date.now()},ctx.builtinVersion?{builtinVersion:ctx.builtinVersion}:{})); toast('Saved as the standard agreement'); }},ctx.col==='licenses'?'Save as standard for all leagues':'Save as standard for all sponsors'),
         h('span',{style:'flex:1;'}),
@@ -8423,6 +8574,7 @@ function agreementView(root, ctx, side){
     card.appendChild(h('div',{style:'display:flex;gap:12px;flex-wrap:wrap;'},[block(OWNER_NAME+' — '+OWNER_PERSON, sg.owner, side==='owner'), block(ctx.partyName, sg[ctx.partyKey], side===ctx.partyKey)]));
     card.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center;'},[
       h('button',{class:'btn btn-outline btn-sm',onclick:()=>printAgreement(L,ctx)},'🖨 Print / save PDF'),
+      h('button',{class:'btn btn-outline btn-sm',onclick:()=>exportAgreementDocx(L,ctx)},'⬇ Word (.docx)'),
       stt==='executed'?h('span',{style:'font-size:12px;color:var(--grass-1);font-weight:700;'},'Executed '+new Date(L.executedAt).toLocaleString()+' — nobody can change it.'):null,
       (side==='owner' && stt==='ready')?h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Withdraw for edits?','Moves the agreement back to Draft so you can change the text. Only possible before anyone signs.',async()=>{ await updateDoc(doc(db,ctx.col,ctx.id),{status:'draft',updatedAt:Date.now()}); await postAgrNotice(ctx,'owner','Status','Agreement withdrawn for edits','The agreement was moved back to draft. You’ll get a new notice when it’s ready to sign.',true); })},'Withdraw for edits'):null]));
   }
@@ -8496,7 +8648,7 @@ function renderSponsorAuth(card){
   if(S.authMessage) card.appendChild(h('div',{class:'authMsg'}, S.authMessage));
   const emailInp=h('input',{type:'email',placeholder:'Sponsor email',autocomplete:'email',value:S.loginPrefill||''});
   const passInp=h('input',{type:'password',placeholder:'Password',autocomplete:'current-password'});
-  card.appendChild(h('div',{class:'authField'},emailInp)); card.appendChild(h('div',{class:'authField'},passInp));
+  card.appendChild(h('div',{class:'authField'},emailInp)); card.appendChild(h('div',{class:'authField'},pwEye(passInp)));
   card.appendChild(h('button',{class:'authBtn',onclick:()=>doLogin(emailInp.value.trim(),passInp.value)},'Sign In'));
   card.appendChild(h('button',{class:'authBtn',style:'background:transparent;border:1.5px solid var(--gold);color:#f3e7c4;margin-top:8px;',onclick:()=>doSponsorCreate(emailInp.value.trim(),passInp.value)},'First time? Create my sponsor login'));
   card.appendChild(h('p',{style:'font-size:12px;color:#e8e2cf;opacity:.85;margin:8px 2px 0;line-height:1.4;text-align:center;'},'Use the email '+OWNER_NAME+' has on file for your business. You’ll see your sponsor agreement, notices and ad results.'));
@@ -8795,7 +8947,7 @@ function tsSimInnings(home, away, innings){
 }
 async function tsAutoPlay(){ if(!tsGuard()) return;
   const two=tsTwoTeams(); if(!two){ toast('Add at least two teams first'); return; }
-  const H=tsRoster(two[0].id), A=tsRoster(two[1].id); if(H.length<3||A.length<3){ toast('Rosters are empty — run Quick test draft and Simulate all picks first'); return; }
+  const H=tsRoster(two[0].id), A=tsRoster(two[1].id); if(H.length<3||A.length<3){ toast('Rosters are empty — run the draft steps in Test Mode first'); return; }
   const sid=S.currentSeasonId; let sch=(S.allGamesForFeed||[]).length; // ensure a schedule entry
   const snap=await getDocs(collection(db,'teams',two[0].id,'schedule'));
   let se=snap.docs.map(d=>({id:d.id,...d.data()})).find(x=>x.seasonId===sid && x.opponentTeamId===two[1].id && !x.completed);
