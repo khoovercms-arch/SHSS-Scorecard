@@ -8539,13 +8539,21 @@ function agreementView(root, ctx, side){
           confirmModal('Send for signature?',(blanks?'⚠️ '+blanks+' blank'+(blanks===1?'':'s')+' (____) still in the text — they stay blank once locked. ':'')+'The text locks now — nobody can change it. '+ctx.partyName+' gets a notice that it’s ready to sign. Either side can sign first.',async()=>{
             if(ctx.beforeSend){ const err=await ctx.beforeSend(); if(err){ toast(err); return; } }
             const hash=await sha256Hex(txt); delete agrDraftCache[ctx.col+'/'+ctx.id];
-            await setDoc(doc(db,ctx.col,ctx.id),Object.assign({},ctx.noticeMeta,{title:ti.value.trim()||'Agreement',text:txt,textHash:hash,status:'ready',signatures:{},readyAt:Date.now(),updatedAt:Date.now()}));
+            await setDoc(doc(db,ctx.col,ctx.id),Object.assign({},ctx.noticeMeta,{title:ti.value.trim()||'Agreement',text:txt,textHash:hash,status:'ready',signatures:{},builtinVersion:(L&&L.builtinVersion)||null,readyAt:Date.now(),updatedAt:Date.now()}));
             await postAgrNotice(ctx,'owner','Status','Agreement ready for signature',(ti.value.trim()||'The agreement')+' is ready to sign in the app ('+ctx.where+').',true);
             toast('Sent — '+ctx.partyName+' has been notified'); },{confirmLabel:'Send for signature'}); }},'Send for signature →')]));
     } else {
       card.appendChild(h('div',{style:'border:1px dashed var(--line);border-radius:10px;padding:16px;text-align:center;font-size:13px;color:var(--ink-soft);'},OWNER_NAME+' hasn’t sent the agreement yet. You’ll get a notice here when it’s ready to sign.'));
     }
   } else {
+    // sent but not signed yet, and the standard agreement has changed since: one tap pulls it back to draft with the new text
+    if(side==='owner' && stt==='ready' && ctx.builtinVersion && !Object.keys(L.signatures||{}).length && (L.builtinVersion||'')<ctx.builtinVersion && String(L.text||'').trim()!==String(ctx.fill(ctx.builtin)).trim())
+      card.appendChild(h('div',{style:'border:2px solid #3b6ea5;background:#f3f7fc;border-radius:10px;padding:10px 12px;margin:0 0 10px;font-size:12.5px;line-height:1.5;'},[h('b',{},'This was sent with an older agreement. '),'Nobody has signed yet, so you can replace it with the updated standard ('+ctx.builtinVersion+'). It goes back to Draft for you to check, then Send for signature again. Print and Word copies show the text below until you do.',
+        h('button',{class:'btn btn-primary btn-sm',style:'margin-left:4px;',onclick:()=>confirmModal('Replace with the updated agreement?','Moves this agreement back to Draft with the updated standard text filled in for '+ctx.partyName+'. Check it, then Send for signature again.',async()=>{
+          await updateDoc(doc(db,ctx.col,ctx.id),{status:'draft',title:ctx.defTitle,text:ctx.fill(ctx.builtin),textHash:null,signatures:{},builtinVersion:ctx.builtinVersion,updatedAt:Date.now()});
+          delete agrDraftCache[ctx.col+'/'+ctx.id];
+          await postAgrNotice(ctx,'owner','Status','Agreement withdrawn for update','The agreement was moved back to draft to load the updated standard text. You’ll get a new notice when it’s ready to sign.',true);
+          toast('Updated agreement loaded — check it, then Send for signature'); },{confirmLabel:'Replace'})},'Use updated agreement')]));
     card.appendChild(h('div',{style:'max-height:420px;overflow:auto;white-space:pre-wrap;font-family:Georgia,serif;font-size:13px;line-height:1.55;background:#fff;border:1px solid var(--line);border-radius:10px;padding:14px;'},L.text));
     card.appendChild(h('div',{style:'font-size:10.5px;color:var(--ink-soft);margin:6px 0 12px;word-break:break-all;'},'🔒 Text locked'+(L.readyAt?' '+new Date(L.readyAt).toLocaleDateString():'')+' · fingerprint (SHA-256) '+(L.textHash||'')));
     const block=(who, s, mine)=>{ const b=h('div',{style:'flex:1 1 240px;border:1.5px solid '+(s?'var(--grass-1)':'var(--line)')+';border-radius:12px;padding:12px;background:'+(s?'#f1f6ee':'#fff')+';'});
