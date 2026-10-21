@@ -8606,19 +8606,18 @@ function agreementView(root, ctx, side){
   const nc=h('div',{class:boxCls,style:boxSty});
   nc.appendChild(h(ctx.box?'b':'h3',{style:ctx.box?'display:block;font-size:14px;margin-bottom:6px;':''},'Formal notices'));
   nc.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},'The official channel for notices under the agreement. Each notice is stamped with sender, subject and time and can’t be edited or deleted — send a new notice to correct one. A notice takes effect when the other side acknowledges it, or two business days after it was posted, whichever comes first.'));
-  const kindSel=h('select',{style:'width:auto;'}); (ctx.kinds||NOTICE_KINDS).forEach(k=>kindSel.appendChild(h('option',{value:k},k)));
-  const subj=h('input',{type:'text',placeholder:'Subject'}); const body=h('textarea',{rows:'3',placeholder:'Notice text',style:'width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;'});
+  const subj=h('input',{type:'text',placeholder:'Subject — e.g. “Breach – late payment”',maxlength:'120'}); const body=h('textarea',{rows:'3',placeholder:'Notice text',style:'width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;'});
   nc.appendChild(h('details',{style:'margin-bottom:10px;'},[h('summary',{style:'cursor:pointer;font-weight:800;font-size:13px;color:var(--grass-1);'},'＋ Send a formal notice to '+otherName),
-    h('div',{style:'margin-top:8px;display:flex;flex-direction:column;gap:6px;'},[h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[h('span',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;'},'Type'),kindSel]),subj,body,
+    h('div',{style:'margin-top:8px;display:flex;flex-direction:column;gap:6px;'},[subj,body,
       h('button',{class:'btn btn-primary btn-sm',style:'align-self:flex-start;',onclick:()=>{ if(!subj.value.trim()||!body.value.trim()){ toast('Add a subject and the notice text'); return; }
-        confirmModal('Send this formal notice?','It goes to '+otherName+' now and can’t be edited or deleted afterwards.',async()=>{ try{ await postAgrNotice(ctx,side,kindSel.value,subj.value.trim(),body.value.trim(),false); toast('Notice sent'); }catch(e){ toast('Could not send: '+(e.message||e)); } },{confirmLabel:'Send notice'}); }},'Send notice')])]));
+        confirmModal('Send this formal notice?','It goes to '+otherName+' now and can’t be edited or deleted afterwards.',async()=>{ try{ await postAgrNotice(ctx,side,'Notice',subj.value.trim(),body.value.trim(),false); toast('Notice sent'); }catch(e){ toast('Could not send: '+(e.message||e)); } },{confirmLabel:'Send notice'}); }},'Send notice')])]));
   if(!notices.length) nc.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0;'},'No notices yet.'));
   notices.forEach(n=>{ const mineN=n.fromSide===side; const eff=n.ackAt?Math.min(n.ackAt,addBusinessDays(n.at,2)):addBusinessDays(n.at,2);
     nc.appendChild(h('div',{style:'border-top:1px solid var(--line);padding:10px 0;'},[
       h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[
-        h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+(n.auto?'var(--chalk-2)':(n.kind==='Termination'||n.kind==='Breach'||n.kind==='Suspension'?'#fde3df':'#fff3cf'))+';color:var(--ink);'},n.auto?'Status':n.kind),
+        n.auto?h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;background:var(--chalk-2);color:var(--ink);'},'Automatic'):null,
         (!mineN&&!n.ackAt)?NEW_FLAG():null,
-        h('b',{style:'font-size:13.5px;flex:1;min-width:160px;'},n.subject),
+        h('b',{style:'font-size:13.5px;flex:1;min-width:160px;'},(noticeLegacyKind(n)?noticeLegacyKind(n)+' – ':'')+n.subject),
         h('span',{style:'font-size:11px;color:var(--ink-soft);'},(mineN?'Sent':'From '+n.fromName)+' · '+new Date(n.at).toLocaleString())]),
       n.body?h('div',{style:'font-size:12.5px;white-space:pre-wrap;margin:4px 0;'},n.body):null,
       h('div',{style:'font-size:11.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[
@@ -8639,7 +8638,7 @@ function noticeUnread(){
   if(!isAdmin()) return 0; const lid=S.profile&&S.profile.leagueId; if(!lid) return 0;
   return (agrWatch('licenses',lid).notices||[]).filter(n=>n.fromSide!=='league' && !n.ackAt).length;
 }
-function noticeFlagGo(){ if(isSuperAdmin()){ S.activeTab='superadmin'; const lgN=(S.licNoticesAll||[]).filter(n=>n.leagueId&&!n.advertiserId&&n.fromSide!=='owner'&&!n.ackAt).length; if(lgN){ superSub='notices'; noticeFilter='needs'; } else { superSub='ads'; adSub='advertisers'; } } else { S.activeTab='admin'; adminSub='notices'; aNoticeFilter='needs'; } S.drawerOpen=null; renderShell(); }
+function noticeFlagGo(){ if(isSuperAdmin()){ S.activeTab='superadmin'; const lgN=(S.licNoticesAll||[]).filter(n=>n.leagueId&&!n.advertiserId&&n.fromSide!=='owner'&&!n.ackAt).length; if(lgN){ superSub='notices'; noticeFilter='in'; } else { superSub='ads'; adSub='advertisers'; } } else { S.activeTab='admin'; adminSub='notices'; aNoticeFilter='in'; } S.drawerOpen=null; renderShell(); }
 function renderNoticeFlag(){
   const row=document.getElementById('brandRow'); const rb=document.getElementById('rightDrawerBtn'); if(!row||!rb) return;
   let f=document.getElementById('noticeFlag'); const n=noticeUnread();
@@ -8650,96 +8649,124 @@ function renderNoticeFlag(){
   f.textContent=narrow?('🚩 '+n+' notice'+(n===1?'':'s')+' waiting — tap to read'):('🚩 '+n); f.setAttribute('aria-label',n+' notice'+(n===1?'':'s')+' waiting');
 }
 const NEW_FLAG=()=>h('span',{style:'font-size:10.5px;font-weight:900;padding:2px 8px;border-radius:10px;background:#c0392b;color:#fff;letter-spacing:.04em;'},'🚩 NEW');
-let noticeFilter='needs', noticeLeague='', noticeTo=null;
+let noticeFilter='in', noticeLeague='', noticeTo=null;
+/* ===== Notices: Received · Sent · Archived =====
+   No "type" field any more — put it in the subject (e.g. "Breach – late payment"). New notices are stored with kind:'Notice'.
+   Archiving is per side: notices/{id}.archived = {owner:ts, league:ts}. A received notice must be acknowledged before it can be archived. */
+const noticeArchived=(n,side)=>!!(n.archived&&n.archived[side]);
+const noticeChip=(label,on,fn)=>h('button',{type:'button',style:'padding:6px 12px;border-radius:16px;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid '+(on?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:fn},label);
+const noticeLegacyKind=n=>(!n.auto && n.kind && n.kind!=='General' && n.kind!=='Notice')?n.kind:'';
+async function setNoticeArchived(list, side, on, lid){
+  try{ for(const n of list) await updateDoc(doc(db,'licenses',n.leagueId||lid,'notices',n.id),{['archived.'+side]:on?Date.now():null});
+    toast(on?(list.length>1?'Archived ('+list.length+' leagues)':'Archived'):'Moved back out of Archived'); }
+  catch(e){ toast('Could not '+(on?'archive':'restore')+': '+(e.message||e)); }
+}
+async function ackNotice(n, lid){
+  try{ await updateDoc(doc(db,'licenses',n.leagueId||lid,'notices',n.id),{ackAt:Date.now(),ackBy:S.user.uid,ackName:(S.profile&&S.profile.displayName)||S.user.email}); toast('Acknowledged'); }
+  catch(e){ toast('Could not save: '+(e.message||e)); }
+}
+// one notice row. o: {side, lid, who (text for the other party / league name), group:[docs] for a broadcast}
+function noticeItem(n, o){
+  const side=o.side, mine=n.fromSide===side, group=o.group||[n];
+  const eff=n.ackAt?Math.min(n.ackAt,addBusinessDays(n.at,2)):addBusinessDays(n.at,2);
+  const arch=noticeArchived(n,side), waiting=!mine&&!n.ackAt, lk=noticeLegacyKind(n);
+  const meta=(mine?'Sent'+(o.who?' to '+o.who:''):'From '+(o.who||n.fromName)+(n.fromPerson&&n.fromPerson!==o.who?' ('+n.fromPerson+')':''))+' · '+new Date(n.at).toLocaleString();
+  let status;
+  if(group.length>1){ const acked=group.filter(x=>x.ackAt).length;
+    status=h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;align-items:center;'},[h('b',{},acked+' of '+group.length+' acknowledged:'),
+      ...group.map(x=>h('span',{style:'padding:2px 8px;border-radius:10px;font-weight:700;background:'+(x.ackAt?'#dcebd9;color:#1f5a2a;':'#fff3cf;color:#7a5a00;')},(x.ackAt?'✓ ':'⏳ ')+(o.lname?o.lname(x.leagueId):'')))]); }
+  else if(n.ackAt) status=h('span',{style:'color:var(--grass-1);font-weight:700;'},'✓ Acknowledged'+(n.ackName?' by '+n.ackName:'')+' '+new Date(n.ackAt).toLocaleString());
+  else if(mine) status=h('span',{style:'color:#7a5a00;font-weight:700;'},'⏳ Not yet acknowledged');
+  else status=h('button',{class:'btn btn-gold btn-sm',onclick:()=>ackNotice(n,o.lid)},'Acknowledge');
+  const archBtn=(mine||n.ackAt)?h('button',{class:'btn btn-outline btn-sm',onclick:()=>setNoticeArchived(group,side,!arch,o.lid)},arch?'↩ Unarchive':'🗄 Archive'):null;
+  return h('div',{style:'border-top:1px solid var(--line);padding:10px 6px;'+(waiting?'background:#fff8f6;':'')},[
+    h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[
+      waiting?NEW_FLAG():null,
+      o.archTab?h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;background:var(--chalk-2);'},mine?'Sent':'Received'):null,
+      n.auto?h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;background:var(--chalk-2);'},'Automatic'):null,
+      h('b',{style:'font-size:13.5px;flex:1;min-width:160px;'},(lk?lk+' – ':'')+(n.subject||'(no subject)')),
+      h('span',{style:'font-size:11px;color:var(--ink-soft);'},meta)]),
+    n.body?h('div',{style:'font-size:12.5px;white-space:pre-wrap;margin:4px 0;'},n.body):null,
+    h('div',{style:'font-size:11.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[status,
+      n.auto?null:h('span',{style:'color:var(--ink-soft);'},'Effective '+new Date(eff).toLocaleDateString()),
+      h('div',{style:'flex:1;'}), archBtn])]);
+}
+// the three-tab list, shared by Super Admin and league Admin. o: {side, all, filter, setFilter, lid, who(n), lname, groupSent, extra}
+function noticeListCard(title, o){
+  const side=o.side, all=o.all.slice().sort((a,b)=>(b.at||0)-(a.at||0));
+  const inc=all.filter(n=>n.fromSide!==side && !noticeArchived(n,side));
+  const sentAll=all.filter(n=>n.fromSide===side && !n.auto);
+  const groupOf=list=>{ const g=new Map(); list.forEach(n=>{ const k=(o.groupSent&&n.broadcastId)||n.id; if(!g.has(k)) g.set(k,[]); g.get(k).push(n); }); return [...g.values()]; };
+  const sentG=groupOf(sentAll).filter(g=>!g.every(n=>noticeArchived(n,side)));
+  const archived=all.filter(n=>noticeArchived(n,side) && !(n.fromSide===side && n.auto));
+  const archG=[...archived.filter(n=>n.fromSide!==side).map(n=>[n]), ...groupOf(archived.filter(n=>n.fromSide===side))].sort((a,b)=>(b[0].at||0)-(a[0].at||0));
+  const needs=inc.filter(n=>!n.ackAt).length;
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},title));
+  const tabs=[['in',(needs?'🚩 ':'')+'Received ('+inc.length+(needs?' · '+needs+' new':'')+')'],['sent','Sent ('+sentG.length+')'],['archived','Archived ('+archG.length+')']];
+  card.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;'},tabs.map(([id,l])=>noticeChip(l,o.filter===id,()=>o.setFilter(id))).concat(o.extra?[h('div',{style:'flex:1;'}),o.extra]:[])));
+  const empty=t=>card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0;'},t));
+  const sortG=g=>g.slice().sort((a,b)=>(o.lname?o.lname(a.leagueId).localeCompare(o.lname(b.leagueId)):0));
+  if(o.filter==='sent'){ if(!sentG.length) empty('Nothing sent yet.');
+    sentG.forEach(g=>card.appendChild(noticeItem(g[0],{side,lid:o.lid,group:sortG(g),lname:o.lname,who:g.length>1?g.length+' leagues':o.who(g[0])}))); }
+  else if(o.filter==='archived'){ if(!archG.length) empty('Nothing archived. Archive a notice once it’s acknowledged to clear it out of Received or Sent — it stays on record here.');
+    archG.forEach(g=>card.appendChild(noticeItem(g[0],{side,lid:o.lid,group:sortG(g),lname:o.lname,archTab:true,who:g.length>1?g.length+' leagues':o.who(g[0])}))); }
+  else { if(!inc.length) empty('No notices received.');
+    inc.slice().sort((a,b)=>(!a.ackAt?0:1)-(!b.ackAt?0:1)||(b.at||0)-(a.at||0)).forEach(n=>card.appendChild(noticeItem(n,{side,lid:o.lid,who:o.who(n)}))); }
+  return card;
+}
+function noticeComposer(title, help, onSend){
+  const sc=h('div',{class:'card'}); sc.appendChild(h('h3',{},title));
+  if(help) sc.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},help));
+  const subj=h('input',{type:'text',placeholder:'Subject — e.g. “Breach – late payment” or “General – schedule change”',maxlength:'120'});
+  const body=h('textarea',{rows:'3',placeholder:'Notice text',style:'width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;'});
+  const top=h('div',{style:'display:flex;flex-direction:column;gap:6px;'});
+  sc.appendChild(top);
+  sc.appendChild(h('div',{style:'display:flex;flex-direction:column;gap:6px;'},[subj,body,
+    h('button',{class:'btn btn-primary btn-sm',style:'align-self:flex-start;',onclick:()=>{ if(!subj.value.trim()||!body.value.trim()){ toast('Add a subject and the notice text'); return; } onSend(subj.value.trim(), body.value.trim()); }},'Send notice →')]));
+  sc._top=top; return sc;
+}
 function superNoticesView(root){
   licWatchAll(); const leagues=(S.leagues||[]).slice().sort((a,b)=>(a.name||'').localeCompare(b.name||''));
   const lname=id=>((leagues.find(l=>l.id===id)||{}).name)||id;
+  // ---- inbox first ----
+  const lsel=h('select',{style:'width:auto;'}); lsel.appendChild(h('option',{value:''},'All leagues')); leagues.forEach(l=>lsel.appendChild(h('option',{value:l.id},l.name))); lsel.value=noticeLeague; lsel.addEventListener('change',()=>{ noticeLeague=lsel.value; renderShell(); });
+  if(!['in','sent','archived'].includes(noticeFilter)) noticeFilter='in';
+  const all=(S.licNoticesAll||[]).filter(n=>n.leagueId && !n.advertiserId && (!noticeLeague||n.leagueId===noticeLeague));
+  root.appendChild(noticeListCard('Notices',{side:'owner',all,filter:noticeFilter,setFilter:id=>{ noticeFilter=id; renderShell(); },lname,groupSent:true,extra:lsel,who:n=>lname(n.leagueId)}));
   // ---- send to one, several or all leagues ----
   if(noticeTo===null) noticeTo=new Set();
-  const send=h('div',{class:'card'}); send.appendChild(h('h3',{},'Send a notice to leagues'));
-  send.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},'Goes to each chosen league’s Admin → License → Formal notices. The league admin sees a 🚩 flag until they acknowledge it.'));
-  const chipRow=h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px;'});
-  const chip=(label,on,fn)=>h('button',{type:'button',style:'padding:6px 12px;border-radius:16px;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid '+(on?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:fn},label);
-  const drawChips=()=>{ chipRow.innerHTML=''; const all=leagues.length&&leagues.every(l=>noticeTo.has(l.id));
-    chipRow.appendChild(chip((all?'✓ ':'')+'All leagues ('+leagues.length+')',all,()=>{ if(all) noticeTo.clear(); else leagues.forEach(l=>noticeTo.add(l.id)); drawChips(); }));
-    leagues.forEach(l=>{ const on=noticeTo.has(l.id); chipRow.appendChild(chip((on?'✓ ':'')+l.name,on,()=>{ on?noticeTo.delete(l.id):noticeTo.add(l.id); drawChips(); })); }); };
+  const send=noticeComposer('Send a notice to leagues','Goes to each chosen league’s Admin → 🚩 Notices. The league admin sees a 🚩 flag until they acknowledge it. Notices can’t be edited or deleted once sent.',(subject,text)=>{
+    const ids=[...noticeTo].filter(id=>leagues.some(l=>l.id===id)); if(!ids.length){ toast('Pick at least one league'); return; }
+    confirmModal('Send this notice to '+ids.length+' league'+(ids.length===1?'':'s')+'?',(ids.length<=6?ids.map(lname).join(', ')+'. ':'')+'It can’t be edited or deleted afterwards.',async()=>{
+      const bid='b'+Date.now().toString(36); let ok=0;
+      for(const lid of ids){ const c=licCtx(lid); if(!c) continue; try{ await postAgrNotice(Object.assign({},c,{noticeMeta:{leagueId:lid,broadcastId:bid,broadcastCount:ids.length}}),'owner','Notice',subject,text,false); ok++; }catch(e){ console.warn(e); } }
+      noticeTo=new Set(); toast('Notice sent to '+ok+' league'+(ok===1?'':'s')); noticeFilter='sent'; renderShell(); },{confirmLabel:'Send'}); });
+  const chipRow=h('div',{style:'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px;'});
+  const drawChips=()=>{ chipRow.innerHTML=''; const allOn=leagues.length&&leagues.every(l=>noticeTo.has(l.id));
+    chipRow.appendChild(noticeChip((allOn?'✓ ':'')+'All leagues ('+leagues.length+')',allOn,()=>{ if(allOn) noticeTo.clear(); else leagues.forEach(l=>noticeTo.add(l.id)); drawChips(); }));
+    leagues.forEach(l=>{ const on=noticeTo.has(l.id); chipRow.appendChild(noticeChip((on?'✓ ':'')+l.name,on,()=>{ on?noticeTo.delete(l.id):noticeTo.add(l.id); drawChips(); })); }); };
   drawChips();
-  send.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;margin-bottom:4px;'},'To'));
-  send.appendChild(chipRow);
-  const kindSel=h('select',{style:'width:auto;'}); NOTICE_KINDS.forEach(k=>kindSel.appendChild(h('option',{value:k},k)));
-  const subj=h('input',{type:'text',placeholder:'Subject',maxlength:'120'}); const body=h('textarea',{rows:'3',placeholder:'Notice text',style:'width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;'});
-  send.appendChild(h('div',{style:'display:flex;flex-direction:column;gap:6px;'},[h('div',{style:'display:flex;gap:8px;align-items:center;'},[h('span',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;'},'Type'),kindSel]),subj,body,
-    h('button',{class:'btn btn-primary btn-sm',style:'align-self:flex-start;',onclick:()=>{
-      const ids=[...noticeTo].filter(id=>leagues.some(l=>l.id===id)); if(!ids.length){ toast('Pick at least one league'); return; }
-      if(!subj.value.trim()||!body.value.trim()){ toast('Add a subject and the notice text'); return; }
-      confirmModal('Send this notice to '+ids.length+' league'+(ids.length===1?'':'s')+'?',(ids.length<=6?ids.map(lname).join(', ')+'. ':'')+'It can’t be edited or deleted afterwards.',async()=>{
-        const bid='b'+Date.now().toString(36); let ok=0;
-        for(const lid of ids){ const c=licCtx(lid); if(!c) continue; try{ await postAgrNotice(Object.assign({},c,{noticeMeta:{leagueId:lid,broadcastId:bid,broadcastCount:ids.length}}),'owner',kindSel.value,subj.value.trim(),body.value.trim(),false); ok++; }catch(e){ console.warn(e); } }
-        noticeTo=new Set(); toast('Notice sent to '+ok+' league'+(ok===1?'':'s')); noticeFilter='sent'; renderShell(); },{confirmLabel:'Send'}); }},'Send notice →')]));
+  send._top.appendChild(h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;'},'To'));
+  send._top.appendChild(chipRow);
   root.appendChild(send);
-  // ---- inbox ----
-  const all=(S.licNoticesAll||[]).filter(n=>n.leagueId && !n.advertiserId).sort((a,b)=>(b.at||0)-(a.at||0));
-  const inc=all.filter(n=>n.fromSide!=='owner'), needs=inc.filter(n=>!n.ackAt), sent=all.filter(n=>n.fromSide==='owner'&&!n.auto);
-  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Notices from leagues'));
-  const lsel=h('select',{style:'width:auto;'}); lsel.appendChild(h('option',{value:''},'All leagues')); leagues.forEach(l=>lsel.appendChild(h('option',{value:l.id},l.name))); lsel.value=noticeLeague; lsel.addEventListener('change',()=>{ noticeLeague=lsel.value; renderShell(); });
-  const tabs=[['needs','🚩 Needs acknowledgment ('+needs.length+')'],['in','Received ('+inc.length+')'],['sent','Sent ('+new Set(sent.map(n=>n.broadcastId||n.id)).size+')']];
-  card.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:10px;'},tabs.map(([id,l])=>chip(l,noticeFilter===id,()=>{ noticeFilter=id; renderShell(); })).concat([h('div',{style:'flex:1;'}),lsel])));
-  const byL=x=>!noticeLeague||x.leagueId===noticeLeague;
-  const openLic=lid=>h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ superSub='licenses'; superLicLeague=lid; renderShell(); }},'Open license →');
-  if(noticeFilter==='sent'){
-    const groups=new Map(); sent.filter(byL).forEach(n=>{ const k=n.broadcastId||n.id; if(!groups.has(k)) groups.set(k,[]); groups.get(k).push(n); });
-    if(!groups.size) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0;'},'Nothing sent yet.'));
-    groups.forEach(list=>{ const n=list[0]; const acked=list.filter(x=>x.ackAt).length;
-      card.appendChild(h('div',{style:'border-top:1px solid var(--line);padding:10px 0;'},[
-        h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;background:#fff3cf;'},n.kind),h('b',{style:'font-size:13.5px;flex:1;min-width:160px;'},n.subject),h('span',{style:'font-size:11px;color:var(--ink-soft);'},'Sent '+new Date(n.at).toLocaleString())]),
-        h('div',{style:'font-size:12.5px;white-space:pre-wrap;margin:4px 0;'},n.body||''),
-        h('div',{style:'font-size:12px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;'},[h('b',{},'To '+list.length+' league'+(list.length===1?'':'s')+' · '+acked+' acknowledged:'),
-          ...list.sort((a,b)=>lname(a.leagueId).localeCompare(lname(b.leagueId))).map(x=>h('span',{style:'padding:2px 8px;border-radius:10px;font-weight:700;background:'+(x.ackAt?'#dcebd9;color:#1f5a2a;':'#fff3cf;color:#7a5a00;')},(x.ackAt?'✓ ':'⏳ ')+lname(x.leagueId)))])])); });
-  } else {
-    const list=(noticeFilter==='needs'?needs:inc).filter(byL);
-    if(!list.length) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0;'},noticeFilter==='needs'?'Nothing waiting — every notice from the leagues has been acknowledged.':'No notices from leagues yet.'));
-    list.forEach(n=>card.appendChild(h('div',{style:'border-top:1px solid var(--line);padding:10px 0;'+(!n.ackAt?'background:#fff8f6;':'')},[
-      h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[!n.ackAt?NEW_FLAG():null,h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+(n.auto?'var(--chalk-2)':'#fff3cf')+';'},n.auto?'Status':n.kind),h('b',{style:'font-size:13.5px;flex:1;min-width:160px;'},n.subject),h('span',{style:'font-size:11px;color:var(--ink-soft);'},lname(n.leagueId)+' · '+(n.fromPerson||n.fromName||'')+' · '+new Date(n.at).toLocaleString())]),
-      n.body?h('div',{style:'font-size:12.5px;white-space:pre-wrap;margin:4px 0;'},n.body):null,
-      h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11.5px;'},[
-        n.ackAt?h('span',{style:'color:var(--grass-1);font-weight:700;'},'✓ Acknowledged '+new Date(n.ackAt).toLocaleString()):h('button',{class:'btn btn-gold btn-sm',onclick:async()=>{ try{ await updateDoc(doc(db,'licenses',n.leagueId,'notices',n.id),{ackAt:Date.now(),ackBy:S.user.uid,ackName:(S.profile&&S.profile.displayName)||S.user.email}); toast('Acknowledged'); }catch(e){ toast('Could not save: '+(e.message||e)); } }},'Acknowledge'),
-        openLic(n.leagueId)])])));
-  }
-  root.appendChild(card);
 }
 
-// Admin → 🚩 Notices: this league's formal notices with Geezer Ball Scorecard (moved out of the License tab so they don't get buried)
-let aNoticeFilter='needs';
+// Admin → 🚩 Notices: this league's formal notices with Geezer Ball Scorecard.
+// League admin: Received / Sent / Archived from their side. Super Admin viewing a league: that league's notices from the owner's side (what was sent to its admin, what came back).
+let aNoticeFilter='in';
 function leagueNoticeUnread(){ const lid=S.profile&&S.profile.leagueId; if(!lid||isSuperAdmin()) return 0; return (agrWatch('licenses',lid).notices||[]).filter(n=>n.fromSide!=='league'&&!n.ackAt).length; }
 function adminNoticesView(root){
-  if(isSuperAdmin()){ root.appendChild(h('div',{class:'card'},[h('p',{style:'font-size:13px;margin:0 0 8px;'},'As Super Admin, every league’s notices are in Super Admin → 🚩 Notices.'),h('button',{class:'btn btn-primary btn-sm',onclick:()=>{ S.activeTab='superadmin'; superSub='notices'; noticeLeague=S.currentLeagueId||''; renderShell(); }},'Open Super Admin → Notices')])); return; }
-  const lid=S.profile&&S.profile.leagueId; const ctx=licCtx(lid); if(!ctx){ root.appendChild(emptyState('No league','Your account isn’t assigned to a league.','diamond')); return; }
-  const st=agrWatch('licenses',lid); const all=(st.notices||[]).slice().sort((a,b)=>(b.at||0)-(a.at||0));
-  const inc=all.filter(n=>n.fromSide!=='league'), needs=inc.filter(n=>!n.ackAt), sent=all.filter(n=>n.fromSide==='league'&&!n.auto);
-  const chip=(label,on,fn)=>h('button',{type:'button',style:'padding:6px 12px;border-radius:16px;font-size:13px;font-weight:700;cursor:pointer;border:1.5px solid '+(on?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:fn},label);
-  // inbox first — that's what people come here for
-  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Notices from '+OWNER_NAME));
-  card.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;'},[['needs','🚩 Needs acknowledgment ('+needs.length+')'],['in','Received ('+inc.length+')'],['sent','Sent ('+sent.length+')']].map(([id,l])=>chip(l,aNoticeFilter===id,()=>{ aNoticeFilter=id; renderShell(); }))));
-  const list=aNoticeFilter==='needs'?needs:(aNoticeFilter==='in'?inc:sent);
-  if(!list.length) card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0;'},aNoticeFilter==='needs'?'Nothing waiting — you’re all caught up.':(aNoticeFilter==='in'?'No notices received yet.':'You haven’t sent any notices.')));
-  list.forEach(n=>{ const mine=n.fromSide==='league'; const eff=n.ackAt?Math.min(n.ackAt,addBusinessDays(n.at,2)):addBusinessDays(n.at,2);
-    card.appendChild(h('div',{style:'border-top:1px solid var(--line);padding:10px 6px;'+(!mine&&!n.ackAt?'background:#fff8f6;':'')},[
-      h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[(!mine&&!n.ackAt)?NEW_FLAG():null,h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;background:'+(n.auto?'var(--chalk-2)':(n.kind==='Termination'||n.kind==='Breach'||n.kind==='Suspension'?'#fde3df':'#fff3cf'))+';'},n.auto?'Status':n.kind),h('b',{style:'font-size:13.5px;flex:1;min-width:160px;'},n.subject),h('span',{style:'font-size:11px;color:var(--ink-soft);'},(mine?'Sent':'From '+n.fromName)+' · '+new Date(n.at).toLocaleString())]),
-      n.body?h('div',{style:'font-size:12.5px;white-space:pre-wrap;margin:4px 0;'},n.body):null,
-      h('div',{style:'font-size:11.5px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[
-        n.ackAt?h('span',{style:'color:var(--grass-1);font-weight:700;'},'✓ Acknowledged'+(mine?' by '+(n.ackName||OWNER_NAME):'')+' '+new Date(n.ackAt).toLocaleString())
-          :(mine?h('span',{style:'color:#7a5a00;font-weight:700;'},'⏳ Not yet acknowledged'):h('button',{class:'btn btn-gold btn-sm',onclick:async()=>{ try{ await updateDoc(doc(db,'licenses',lid,'notices',n.id),{ackAt:Date.now(),ackBy:S.user.uid,ackName:(S.profile&&S.profile.displayName)||S.user.email}); toast('Acknowledged'); }catch(e){ toast('Could not save: '+(e.message||e)); } }},'Acknowledge')),
-        n.auto?null:h('span',{style:'color:var(--ink-soft);'},'Effective '+new Date(eff).toLocaleDateString())])])); });
-  root.appendChild(card);
-  // send to Geezer Ball Scorecard
-  const sc=h('div',{class:'card'}); sc.appendChild(h('h3',{},'Send a notice to '+OWNER_NAME));
-  sc.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},'The official channel under the League Agreement (Section 13.5). Each notice is stamped with sender, subject and time and can’t be edited or deleted — send a new notice to correct one. It takes effect when '+OWNER_NAME+' acknowledges it, or two business days after it’s sent.'));
-  const kindSel=h('select',{style:'width:auto;'}); NOTICE_KINDS.forEach(k=>kindSel.appendChild(h('option',{value:k},k)));
-  const subj=h('input',{type:'text',placeholder:'Subject',maxlength:'120'}); const body=h('textarea',{rows:'3',placeholder:'Notice text',style:'width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;font-size:13px;'});
-  sc.appendChild(h('div',{style:'display:flex;flex-direction:column;gap:6px;'},[h('div',{style:'display:flex;gap:8px;align-items:center;'},[h('span',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;'},'Type'),kindSel]),subj,body,
-    h('button',{class:'btn btn-primary btn-sm',style:'align-self:flex-start;',onclick:()=>{ if(!subj.value.trim()||!body.value.trim()){ toast('Add a subject and the notice text'); return; }
-      confirmModal('Send this notice?','It goes to '+OWNER_NAME+' now and can’t be edited or deleted afterwards.',async()=>{ try{ await postAgrNotice(ctx,'league',kindSel.value,subj.value.trim(),body.value.trim(),false); toast('Notice sent'); aNoticeFilter='sent'; renderShell(); }catch(e){ toast('Could not send: '+(e.message||e)); } },{confirmLabel:'Send notice'}); }},'Send notice →')]));
-  root.appendChild(sc);
+  const sa=isSuperAdmin(); const side=sa?'owner':'league';
+  const lid=sa?S.currentLeagueId:(S.profile&&S.profile.leagueId); const ctx=licCtx(lid);
+  if(!ctx){ root.appendChild(emptyState(sa?'Pick a league':'No league',sa?'Choose a league to see its notices.':'Your account isn’t assigned to a league.','diamond')); return; }
+  if(!['in','sent','archived'].includes(aNoticeFilter)) aNoticeFilter=sa?'sent':'in';
+  const lgName=ctx.partyName||((S.leagues||[]).find(l=>l.id===lid)||{}).name||'this league';
+  const all=((agrWatch('licenses',lid).notices)||[]).filter(n=>!n.advertiserId);
+  root.appendChild(noticeListCard(sa?'Notices with '+lgName:'Notices with '+OWNER_NAME,{side,all,lid,filter:aNoticeFilter,setFilter:id=>{ aNoticeFilter=id; renderShell(); },who:()=>sa?lgName+' admin':OWNER_NAME}));
+  const to=sa?lgName+' admin':OWNER_NAME;
+  root.appendChild(noticeComposer('Send a notice to '+to,
+    sa?'Goes to this league’s Admin → 🚩 Notices. To send to several leagues at once, use Super Admin → Notices.':'The official channel under the League Agreement (Section 13.5). Each notice is stamped with sender, subject and time and can’t be edited or deleted — send a new notice to correct one. It takes effect when '+OWNER_NAME+' acknowledges it, or two business days after it’s sent.',
+    (subject,text)=>confirmModal('Send this notice?','It goes to '+to+' now and can’t be edited or deleted afterwards.',async()=>{ try{ await postAgrNotice(sa?Object.assign({},ctx,{noticeMeta:Object.assign({},ctx.noticeMeta||{},{leagueId:lid})}):ctx,side,'Notice',subject,text,false); toast('Notice sent'); aNoticeFilter='sent'; renderShell(); }catch(e){ toast('Could not send: '+(e.message||e)); } },{confirmLabel:'Send notice'})));
 }
 
 function superLicensesView(root){
@@ -9311,7 +9338,7 @@ Router.register('admin', (root)=>{
   if(adminSub==='chat'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Chat'),h('p',{},'League Chat settings, photo approvals, reported messages, and restricted members.')])); chatAdminView(root); return; }
   if(adminSub==='backup'){ backupView(root); return; }
   if(adminSub==='test'){ testTabView(root); return; }
-  if(adminSub==='notices'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'🚩 Notices'),h('p',{},'Formal notices between your league and '+OWNER_NAME+'. A red flag at the top of the app means one is waiting.')])); adminNoticesView(root); return; }
+  if(adminSub==='notices'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'🚩 Notices'),h('p',{},isSuperAdmin()?'Notices between '+OWNER_NAME+' and this league’s admin — what you’ve sent them and what they’ve sent you.':'Formal notices between your league and '+OWNER_NAME+'. A red flag at the top of the app means one is waiting.')])); adminNoticesView(root); return; }
   if(adminSub==='license'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'License'),h('p',{},'This league\u2019s agreement with '+OWNER_NAME+'. Sign it here. Formal notices are under Admin \u2192 Notices. Mirrored in Super Admin \u2192 Licenses.')])); licenseView(root, S.currentLeagueId, isSuperAdmin()?'owner':'league'); return; }
   if(adminSub==='approvals'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Players'),h('p',{},'New accounts to approve, who signed up for '+(currentSeasonName()||'this season')+' (the draft pool), yearly registrations, and the registration form.')])); regSubNav(root);
     { const hc=hiddenPlayerCardsCard(); if(hc) root.appendChild(hc); }
