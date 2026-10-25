@@ -869,7 +869,7 @@ async function openRegModal(lg){
 }
 /* "Your seasons": sign up for the season(s) you are playing (formal / informal). Pickup needs no sign-up. */
 let seasonsCardHidden=false;
-function openSignupSeasons(lid){ return (S.allSeasons||S.seasons||[]).filter(x=>x.leagueId===lid && x.status!=='ended' && seasonMethod(x)!=='pickup' && (x.signupOpen||x.signupClose) && seasonWindowOpen(x)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
+function openSignupSeasons(lid){ return (S.allSeasons||S.seasons||[]).filter(x=>x.leagueId===lid && x.status!=='ended' && seasonMethod(x)!=='pickup' && seasonMethod(x)!=='tournament' && (x.signupOpen||x.signupClose) && seasonWindowOpen(x)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
 function yourSeasonsCard(){
   const p=S.profile; if(!p || !S.user || isSuperAdmin() || p.role==='pending' || p.role==='declined' || seasonsCardHidden) return null;
   const lg=regLeagueFor(p); if(!lg) return null;
@@ -1491,7 +1491,7 @@ function statsSeasonChips(){
   const wrap=h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:-4px 0 12px;'});
   wrap.appendChild(h('span',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-right:2px;'},'Stats for'));
   list.forEach(x=>{ const on=x.id===S.currentSeasonId; const m=seasonMethod(x);
-    wrap.appendChild(h('button',{style:'border-radius:14px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '+(on?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ if(on) return; S.currentSeasonId=x.id; S.activeGameId=null; switchSeasonListeners(); renderShell(); }},[x.name, h('span',{style:'font-size:9.5px;font-weight:800;margin-left:5px;opacity:.75;'},m==='pickup'?'PICKUP':(m==='informal'?'INFORMAL':'FORMAL'))])); });
+    wrap.appendChild(h('button',{style:'border-radius:14px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '+(on?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ if(on) return; S.currentSeasonId=x.id; S.activeGameId=null; switchSeasonListeners(); renderShell(); }},[x.name, h('span',{style:'font-size:9.5px;font-weight:800;margin-left:5px;opacity:.75;'},methodShort(m))])); });
   return wrap;
 }
 function leagueSchedule(){
@@ -1507,7 +1507,7 @@ function homeLeagueId(){ const L=(S.leagues||[]); const byName=L.find(l=>/south 
 function untaggedVisibleHere(){ return (S.leagues||[]).length<=1 || S.currentLeagueId===(S.homeLeagueId||homeLeagueId()); }
 function applyLeagueFilter(){
   const lid=S.currentLeagueId, untag=untaggedVisibleHere();
-  if(S.allTeams) S.teams = S.allTeams.filter(t=>!t.pickup && (!lid || t.leagueId===lid || (!t.leagueId && untag)));
+  if(S.allTeams) S.teams = S.allTeams.filter(t=>!t.pickup && (!lid || t.leagueId===lid || (!t.leagueId && untag)) && teamInScope(t));
   if(S.allSeasons) S.seasons = S.allSeasons.filter(x=>!x.archived && (!lid || x.leagueId===lid || (!x.leagueId && untag)));
   if(S.selectedTeamId && !S.teams.some(t=>t.id===S.selectedTeamId) && !isPoolTeamId(S.selectedTeamId)){ S.selectedTeamId=null; }
   if(!S.selectedTeamId){ const nt=myTeamId() && S.teams.some(t=>t.id===myTeamId()) ? myTeamId() : ((S.teams[0]&&S.teams[0].id)||null); if(nt!==S.selectedTeamId){ S.selectedTeamId=nt; switchTeamListeners(); } }
@@ -1534,13 +1534,244 @@ function switchTeamListeners(){
 }
 function cleanupSeasonListeners(){ unsub.season.forEach(fn=>fn()); unsub.season=[]; }
 function switchSeasonListeners(){
-  cleanupSeasonListeners();
+  cleanupSeasonListeners(); rescopeTeams();
   currentPlayoff = null;
   if(!S.currentSeasonId) return;
   unsub.season.push(onSnapshot(doc(db,'draftStates',S.currentSeasonId), snap=>{ S.draft = snap.exists()?snap.data():null; renderShell(); }));
   unsub.season.push(onSnapshot(doc(db,'playoffs',S.currentSeasonId), snap=>{ currentPlayoff = snap.exists()?snap.data():null; renderShell(); }));
   syncPoolTeam();
 }
+/* ===================== TOURNAMENT MODE =====================
+   A fourth season type. Everything else (Roster, Lineup, Scorecard, Live Feed, stats, Record, bracket) works as usual;
+   the tournament-only settings live on Admin → 🏆 Tournament. Tournament teams belong to their tournament season only. */
+function isTourneySeason(sn){ return seasonMethod(sn)==='tournament'; }
+function tourneyCfg(sn){ sn=sn||currentSeason(); return (sn&&sn.tourney)||{}; }
+function seasonById(id){ return (S.allSeasons||S.seasons||[]).find(x=>x.id===id)||null; }
+// which teams belong on screen for the selected season: a tournament shows only its own teams; other seasons never show tournament teams
+function teamInScope(t){ const sn=seasonById(S.currentSeasonId); if(sn && isTourneySeason(sn)) return t.tournamentSeasonId===sn.id; return !t.tournamentSeasonId; }
+function rescopeTeams(){
+  if(!S.allTeams) return; const lid=S.currentLeagueId, untag=untaggedVisibleHere();
+  S.teams=S.allTeams.filter(t=>!t.pickup && (!lid || t.leagueId===lid || (!t.leagueId && untag)) && teamInScope(t));
+  if(S.selectedTeamId && !S.teams.some(t=>t.id===S.selectedTeamId) && !isPoolTeamId(S.selectedTeamId)){ S.selectedTeamId=(S.teams.find(t=>t.id===myTeamId())||S.teams[0]||{}).id||null; switchTeamListeners(); }
+}
+function tourneyTeams(sid){ return (S.allTeams||[]).filter(t=>t.tournamentSeasonId===sid); }
+function tourneyRoster(tid, sid){ return (S.allPlayersForFeed||[]).filter(p=>p.teamId===tid && p.seasonId===sid).sort((a,b)=>(a.order||99)-(b.order||99)); }
+// ---- run limit per half-inning ----
+function runCapFor(game){
+  const sn=seasonById(game&&game.seasonId); if(!sn || !isTourneySeason(sn)) return 0;
+  const c=tourneyCfg(sn); const cap=+c.runLimit||0; if(!cap) return 0;
+  if(c.openLast && (game.inning||1)>=(+c.innings||game.inningsPlanned||7)) return 0;
+  return cap;
+}
+function endHalfInning(game){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
+function tourneyRulesLine(sn){
+  const c=tourneyCfg(sn); const bits=[];
+  if(+c.runLimit) bits.push('Max '+c.runLimit+' runs per inning'+(c.openLast?' (last inning open)':''));
+  if(+c.innings) bits.push(c.innings+' innings');
+  if(+c.timeLimit) bits.push(c.timeLimit+'-min time limit');
+  if(c.mercy) bits.push('Run rule: '+c.mercy);
+  return bits.join(' · ');
+}
+function tourneyRulesBanner(game){
+  const sn=seasonById(game&&game.seasonId); if(!sn||!isTourneySeason(sn)) return null; const line=tourneyRulesLine(sn); if(!line) return null;
+  const cap=runCapFor(game); const side=battingSide(game); const now=(game.score&&game.score[side]&&game.score[side][game.inning])||0;
+  return h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#fff6dc;border:1.5px solid var(--gold);border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;'},[
+    h('b',{},'🏆 Tournament rules'),h('span',{style:'flex:1;min-width:200px;'},line),
+    cap&&!game.completed?h('span',{style:'font-weight:800;background:'+(now>=cap-1?'#fde3df':'#fff')+';border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},'This inning: '+now+' of '+cap+' runs'):null]);
+}
+// ---- pool standings with tournament tiebreakers ----
+function tourneyGames(sid){ const ids=new Set(tourneyTeams(sid).map(t=>t.id)); return dedupeByMatchup((S.allGamesForFeed||[]).filter(g=>g.seasonId===sid && ids.has(g.teamId) && !g.bracketMatchId)); }
+function tourneyStandings(sid){
+  const sn=seasonById(sid); const c=tourneyCfg(sn); const capRD=+c.rdCap||0; const teams=tourneyTeams(sid);
+  const row={}; teams.forEach(t=>row[t.id]={teamId:t.id,name:t.name,pool:t.pool||'',G:0,W:0,L:0,T:0,RF:0,RA:0,RD:0});
+  const h2h={};
+  tourneyGames(sid).filter(g=>g.completed).forEach(g=>{
+    const hs=totalRuns(g,'home'), as=totalRuns(g,'away'); const hid=sideTeamId(g,'home'), aid=sideTeamId(g,'away'); if(!row[hid]||!row[aid]) return;
+    const d=Math.max(-(capRD||999),Math.min(capRD||999,hs-as));
+    [[hid,hs,as,d],[aid,as,hs,-d]].forEach(([id,f,a,dd])=>{ const r=row[id]; r.G++; r.RF+=f; r.RA+=a; r.RD+=dd; if(f>a) r.W++; else if(f<a) r.L++; else r.T++; });
+    const k=(x,y)=>x+'|'+y; h2h[k(hid,aid)]=(h2h[k(hid,aid)]||0)+(hs>as?1:hs<as?-1:0); h2h[k(aid,hid)]=(h2h[k(aid,hid)]||0)+(as>hs?1:as<hs?-1:0);
+  });
+  const pct=r=>r.G?(r.W+r.T*0.5)/r.G:0;
+  const cmp=(a,b)=>(pct(b)-pct(a)) || ((h2h[b.teamId+'|'+a.teamId]||0)-(h2h[a.teamId+'|'+b.teamId]||0)) || (b.RD-a.RD) || (a.RA-b.RA) || (b.RF-a.RF) || a.name.localeCompare(b.name);
+  const pools={}; Object.values(row).forEach(r=>{ (pools[r.pool||'—']=pools[r.pool||'—']||[]).push(r); });
+  Object.values(pools).forEach(list=>list.sort(cmp));
+  return {pools, all:Object.values(row).sort(cmp), pct};
+}
+function tourneySeedOrder(sid){
+  const {pools,all}=tourneyStandings(sid); const keys=Object.keys(pools).sort();
+  if(keys.length<=1) return all.map(r=>r.teamId);
+  const out=[]; const max=Math.max(...keys.map(k=>pools[k].length)); for(let i=0;i<max;i++) keys.forEach(k=>{ if(pools[k][i]) out.push(pools[k][i].teamId); }); return out;
+}
+// ---- pool schedule (round robin inside each pool, spread across fields and time slots) ----
+function roundRobin(ids){ const t=ids.slice(); if(t.length%2) t.push(null); const n=t.length, rounds=[]; for(let r=0;r<n-1;r++){ const games=[]; for(let i=0;i<n/2;i++){ const a=t[i], b=t[n-1-i]; if(a&&b) games.push(r%2?[b,a]:[a,b]); } rounds.push(games); t.splice(1,0,t.pop()); } return rounds; }
+function planPoolGames(sid, o){
+  const teams=tourneyTeams(sid); const pools={}; teams.forEach(t=>{ (pools[t.pool||'—']=pools[t.pool||'—']||[]).push(t.id); });
+  let rounds=[]; Object.values(pools).forEach(ids=>{ roundRobin(ids).forEach((g,i)=>{ (rounds[i]=rounds[i]||[]).push(...g); }); });
+  if(o.perTeam) rounds=rounds.slice(0,o.perTeam);
+  const fields=o.fields.length?o.fields:['Field 1']; const days=o.days.filter(Boolean); if(!days.length) return [];
+  const toMin=s=>{ const [hh,mm]=(s||'09:00').split(':').map(Number); return hh*60+(mm||0); }, toStr=m=>String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0');
+  const slots=[]; days.forEach(d=>{ for(let m=toMin(o.start); m<=toMin(o.last||'18:00'); m+=o.mins) slots.push({date:d,time:toStr(m),used:new Set(),free:fields.slice()}); });
+  const plan=[]; let si=0;
+  rounds.forEach(games=>{ games.forEach(([a,b])=>{ let k=si; while(k<slots.length && (slots[k].used.has(a)||slots[k].used.has(b)||!slots[k].free.length)) k++; if(k>=slots.length) { plan.push({a,b,date:null}); return; }
+      const s=slots[k]; s.used.add(a); s.used.add(b); plan.push({a,b,date:s.date,time:s.time,field:s.free.shift()}); });
+    while(si<slots.length && !slots[si].free.length) si++; });
+  return plan;
+}
+// ---- Admin → 🏆 Tournament ----
+let tExpanded=null, tPlanOpts=null, tAddMode='';
+function tourneyView(root){
+  const sn=currentSeason(); if(!sn||!isTourneySeason(sn)){ root.appendChild(emptyState('Not a tournament','Pick a tournament season, or create one in Season Builder → ＋ Create season → Tournament.','diamond')); return; }
+  const sid=sn.id, c=tourneyCfg(sn); const teams=tourneyTeams(sid).sort((a,b)=>(a.pool||'').localeCompare(b.pool||'')||(a.name||'').localeCompare(b.name||''));
+  const save=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['tourney.'+k]=patch[k]); await updateDoc(doc(db,'seasons',sid),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
+  const sel=(val,opts,fn)=>{ const s=h('select',{style:'width:auto;'}); opts.forEach(([v,l])=>s.appendChild(h('option',{value:String(v)},l))); s.value=String(val==null?'':val); s.addEventListener('change',()=>fn(s.value)); return s; };
+  const row=(label,ctl,help)=>h('div',{style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:7px 0;border-bottom:1px solid var(--line);'},[h('div',{style:'flex:1;min-width:180px;'},[h('div',{style:'font-weight:700;font-size:13.5px;'},label),help?h('div',{style:'font-size:11.5px;color:var(--ink-soft);'},help):null]),ctl]);
+  // champion banner
+  if(c.champion) root.appendChild(h('div',{class:'card',style:'background:linear-gradient(160deg,#1f5130,#163b23);color:#f3efe2;text-align:center;'},[h('div',{style:'font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:var(--gold);font-weight:800;'},'🏆 Champion'),h('div',{style:'font-family:var(--font-display);font-size:28px;font-weight:800;'},c.champion),c.runnerUp?h('div',{style:'font-size:13px;opacity:.85;'},'Runner-up: '+c.runnerUp):null]));
+  // 1 — rules
+  const rc=h('div',{class:'card'}); rc.appendChild(h('h3',{},'1 · Rules'));
+  rc.appendChild(row('Format',sel(c.format||'pools',[['pools','Pool play, then bracket'],['bracket','Bracket only']],v=>save({format:v}))));
+  rc.appendChild(row('Run limit per inning',sel(c.runLimit||0,[[0,'No limit']].concat([3,4,5,6,7,8,10].map(n=>[n,n+' runs'])),v=>save({runLimit:+v})),'When a team reaches it, its half-inning ends automatically on the Scorecard.'));
+  if(+c.runLimit){ const cb=h('input',{type:'checkbox',style:'width:auto;'}); cb.checked=!!c.openLast; cb.addEventListener('change',()=>save({openLast:cb.checked})); rc.appendChild(row('Last inning open (no limit)',cb)); }
+  rc.appendChild(row('Innings per game',sel(c.innings||7,[5,6,7,8,9].map(n=>[n,n+' innings']),v=>save({innings:+v}))));
+  rc.appendChild(row('Time limit',sel(c.timeLimit||0,[[0,'None']].concat([45,50,55,60,65,70,75,90].map(n=>[n,n+' minutes'])),v=>save({timeLimit:+v})),'Shown on the Scorecard as a reminder.'));
+  { const i=h('input',{type:'text',placeholder:'e.g. 15 runs after 4 innings (optional)',value:c.mercy||'',maxlength:'60',style:'width:260px;'}); i.addEventListener('change',()=>save({mercy:i.value.trim()})); rc.appendChild(row('Run rule (mercy)',i)); }
+  rc.appendChild(row('Tiebreaker: run differential cap',sel(c.rdCap||0,[[0,'No cap']].concat([5,7,10].map(n=>[n,'±'+n+' per game'])),v=>save({rdCap:+v})),'Ties in pool standings: win %, head-to-head, run differential, fewest runs allowed.'));
+  root.appendChild(rc);
+  // 2 — teams
+  const tc=h('div',{class:'card'}); tc.appendChild(h('h3',{},'2 · Teams ('+teams.length+')'));
+  const started=id=>tourneyGames(sid).some(g=>sideTeamId(g,'home')===id||sideTeamId(g,'away')===id);
+  if(!teams.length) tc.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},'No teams yet. Copy a league team, or make a new one and pick its players.'));
+  const pools=(c.format||'pools')==='pools';
+  teams.forEach(t=>{ const ros=tourneyRoster(t.id,sid); const open=tExpanded===t.id;
+    const head=h('div',{style:'display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 0;border-top:1px solid var(--line);'},[
+      h('b',{style:'flex:1;min-width:140px;font-size:14px;'},t.name), h('span',{style:'font-size:12px;color:var(--ink-soft);'},ros.length+' player'+(ros.length===1?'':'s')+(ros.some(p=>p.isGuest)?' · '+ros.filter(p=>p.isGuest).length+' guest':'')),
+      pools?sel(t.pool||'',[['','No pool'],['A','Pool A'],['B','Pool B'],['C','Pool C'],['D','Pool D']],v=>updateDoc(doc(db,'teams',t.id),{pool:v||null})):null,
+      h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ tExpanded=open?null:t.id; renderShell(); }},open?'Close':'Roster'),
+      started(t.id)?null:h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>confirmModal('Remove '+t.name+'?','Removes the team and its tournament roster.',async()=>{ for(const p of ros){ try{ await deleteDoc(doc(db,'teams',t.id,'players',p.id)); }catch(e){} } await deleteDoc(doc(db,'teams',t.id)); },{danger:true,confirmLabel:'Remove'})},'Remove')]);
+    tc.appendChild(head);
+    if(open) tc.appendChild(tourneyRosterEditor(t, sid, ros, started(t.id)));
+  });
+  // add a team
+  const add=h('div',{style:'border-top:1px solid var(--line);padding-top:10px;margin-top:4px;'});
+  const leagueTeams=(S.allTeams||[]).filter(t=>!t.pickup && !t.tournamentSeasonId && t.leagueId===S.currentLeagueId && t.active!==false);
+  add.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;'},[
+    h('button',{class:'btn btn-'+(tAddMode==='copy'?'primary':'outline')+' btn-sm',onclick:()=>{ tAddMode=tAddMode==='copy'?'':'copy'; renderShell(); }},'＋ Copy a league team'),
+    h('button',{class:'btn btn-'+(tAddMode==='new'?'primary':'outline')+' btn-sm',onclick:()=>{ tAddMode=tAddMode==='new'?'':'new'; renderShell(); }},'＋ New team (league players or outside team)')]));
+  if(tAddMode==='copy'){
+    const s=h('select',{style:'width:auto;'}); s.appendChild(h('option',{value:''},'Pick a team…')); leagueTeams.forEach(t=>s.appendChild(h('option',{value:t.id},t.name)));
+    add.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;'},[s,h('button',{class:'btn btn-primary btn-sm',onclick:async()=>{ const src=leagueTeams.find(t=>t.id===s.value); if(!src){ toast('Pick a team'); return; }
+      // latest roster of that team (most recent season it has players in)
+      const all=(S.allPlayersForFeed||[]).filter(p=>p.teamId===src.id && p.seasonId!==sid); const bySeason={}; all.forEach(p=>{ (bySeason[p.seasonId||'_']=bySeason[p.seasonId||'_']||[]).push(p); });
+      const latest=Object.keys(bySeason).sort((a,b)=>((seasonById(b)||{}).createdAt||0)-((seasonById(a)||{}).createdAt||0))[0]; const ros=(bySeason[latest]||[]).sort((a,b)=>(a.order||99)-(b.order||99));
+      const ref=await addDoc(collection(db,'teams'),{name:src.name,leagueId:S.currentLeagueId||null,active:true,tournamentSeasonId:sid,copiedFromTeamId:src.id,pool:null,createdAt:Date.now()});
+      let n=0; for(const p of ros){ if(!p.name) continue; n++; await addDoc(collection(db,'teams',ref.id,'players'),{name:p.name,number:p.number||null,position:p.position||'',order:n,isSub:false,subTeamName:'',seasonId:sid,email:p.email||null,signupId:p.signupId||null}); }
+      tAddMode=''; tExpanded=ref.id; toast(src.name+' added with '+n+' players'); renderShell(); }},'Add team')]));
+  }
+  if(tAddMode==='new'){
+    const nm=h('input',{type:'text',placeholder:'Team name (e.g. Mon Valley All-Stars)',maxlength:'40',style:'width:280px;'});
+    add.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px;'},[nm,h('button',{class:'btn btn-primary btn-sm',onclick:async()=>{ const n=nm.value.trim(); if(!n){ toast('Enter a team name'); return; }
+      const ref=await addDoc(collection(db,'teams'),{name:n,leagueId:S.currentLeagueId||null,active:true,tournamentSeasonId:sid,pool:null,createdAt:Date.now()}); tAddMode=''; tExpanded=ref.id; toast(n+' added — now pick its players'); renderShell(); }},'Add team')]));
+  }
+  tc.appendChild(add); root.appendChild(tc);
+  // 3 — pool schedule
+  if(pools){ const gc=h('div',{class:'card'}); gc.appendChild(h('h3',{},'3 · Pool schedule'));
+    const games=tourneyGames(sid); const sched=allLeagueSchedule().filter(g=>g.seasonId===sid);
+    gc.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},sched.length?sched.length+' game'+(sched.length===1?'':'s')+' scheduled — see the Schedule page to change times or fields.':'Every team plays every other team in its pool. Pick the days, times and fields and the app lays out the games.'));
+    const o=tPlanOpts||(tPlanOpts={days:[sn.startDate||todayISO(),''],start:'09:00',last:'17:00',mins:75,fields:'Field 1, Field 2',perTeam:0});
+    const d1=h('input',{type:'date',value:o.days[0]||''}), d2=h('input',{type:'date',value:o.days[1]||''}), st=h('input',{type:'time',value:o.start}), la=h('input',{type:'time',value:o.last});
+    const mi=sel(o.mins,[[60,'60 min apart'],[75,'75 min apart'],[90,'90 min apart'],[105,'105 min apart']],v=>{ o.mins=+v; }); const fi=h('input',{type:'text',value:o.fields,style:'width:220px;'});
+    const pt=sel(o.perTeam,[[0,'Full round robin'],[2,'2 games each'],[3,'3 games each'],[4,'4 games each']],v=>{ o.perTeam=+v; });
+    const sync=()=>{ o.days=[d1.value,d2.value]; o.start=st.value; o.last=la.value; o.fields=fi.value; };
+    [d1,d2,st,la,fi].forEach(x=>x.addEventListener('change',sync));
+    const lab=(t,el)=>h('label',{style:'display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:700;color:var(--ink-soft);'},[t,el]);
+    gc.appendChild(h('div',{style:'display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;'},[lab('Day 1',d1),lab('Day 2 (optional)',d2),lab('First game',st),lab('Last start',la),lab('Spacing',mi),lab('Fields (comma between)',fi),lab('Games',pt)]));
+    const prev=h('div',{style:'margin-top:10px;'});
+    gc.appendChild(h('div',{style:'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;'},[
+      h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ sync(); const plan=planPoolGames(sid,{days:o.days,start:o.start,last:o.last,mins:o.mins,fields:o.fields.split(',').map(x=>x.trim()).filter(Boolean),perTeam:o.perTeam}); prev.innerHTML='';
+        if(!plan.length){ prev.appendChild(h('p',{style:'font-size:12.5px;color:var(--leather-2);'},teams.length<2?'Add at least two teams first.':'Pick at least one day.')); return; }
+        const nm=id=>(teams.find(t=>t.id===id)||{}).name||'?'; const miss=plan.filter(p=>!p.date).length;
+        const tb=h('table',{class:'dataTable'}); tb.appendChild(h('tr',{},['Day','Time','Field','Game'].map(x=>h('th',{style:'text-align:left;'},x))));
+        plan.forEach(p=>tb.appendChild(h('tr',{},[h('td',{},p.date?formatDate(p.date):'—'),h('td',{},p.time||'—'),h('td',{},p.field||'—'),h('td',{},nm(p.b)+' at '+nm(p.a))])));
+        prev.appendChild(h('div',{class:'gridScroll'},tb));
+        if(miss) prev.appendChild(h('p',{style:'font-size:12.5px;color:var(--leather-2);font-weight:700;'},miss+' game'+(miss===1?' doesn’t':'s don’t')+' fit — add a field, a day, or a later last start.'));
+        prev.appendChild(h('button',{class:'btn btn-primary btn-sm',style:'margin-top:8px;',onclick:()=>confirmModal('Create '+plan.filter(p=>p.date).length+' pool games?','They go on the Schedule. You can change any time or field there.',async()=>{ let n=0; for(const p of plan.filter(x=>x.date)){ await createScheduledMatchup(p.a,p.b,p.date,p.time,p.field); n++; } prev.innerHTML=''; toast(n+' pool games scheduled'); },{confirmLabel:'Create games'})},'Create these games'));
+      }},'Preview schedule'),
+      h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.activeTab='schedule'; renderShell(); }},'Open Schedule')]));
+    gc.appendChild(prev); root.appendChild(gc);
+    // 4 — pool standings
+    const {pools:ps,pct}=tourneyStandings(sid); const sc=h('div',{class:'card'}); sc.appendChild(h('h3',{},'4 · Pool standings'));
+    Object.keys(ps).sort().forEach(k=>{ sc.appendChild(h('div',{class:'sectiontitle'},k==='—'?'No pool':'Pool '+k));
+      const tb=h('table',{class:'dataTable'}); tb.appendChild(h('tr',{},['#','Team','G','W','L','T','Pct','RF','RA','RD'].map((x,i)=>h('th',{style:i===1?'text-align:left;':''},x))));
+      ps[k].forEach((r,i)=>tb.appendChild(h('tr',{},[h('td',{},String(i+1)),h('td',{style:'text-align:left;font-weight:700;'},r.name),...[r.G,r.W,r.L,r.T].map(v=>h('td',{},String(v))),h('td',{},r.G?pct(r).toFixed(3).replace(/^0/,''):'—'),h('td',{},String(r.RF)),h('td',{},String(r.RA)),h('td',{},(r.RD>0?'+':'')+r.RD)])));
+      sc.appendChild(h('div',{class:'gridScroll'},tb)); });
+    sc.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);margin:6px 0 0;'},'Order: win % → head-to-head → run differential'+(+c.rdCap?' (capped ±'+c.rdCap+' a game)':'')+' → fewest runs allowed.'));
+    root.appendChild(sc);
+  }
+  // 5 — bracket
+  const bc=h('div',{class:'card'}); bc.appendChild(h('h3',{},(pools?'5':'3')+' · Bracket'));
+  if(currentPlayoff){
+    bc.appendChild(h('p',{style:'font-size:13px;margin:0 0 8px;'},currentPlayoff.champion?'Bracket complete — champion: '+teamNameById(currentPlayoff.champion)+'.':(currentPlayoff.type==='double'?'Double':'Single')+' elimination in progress. Enter bracket scores on the Record tab.'));
+    bc.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'},[h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.activeTab='record'; renderShell(); }},'Open bracket (Record) →'),
+      currentPlayoff.champion&&!c.champion?h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ const p=currentPlayoff; const fin=(p.bracketReset&&p.bracketReset.winnerId)?p.bracketReset:(p.grandFinal&&p.grandFinal.winnerId?p.grandFinal:((p.wbRounds||[]).slice(-1)[0]||[])[0]); const ru=fin?(fin.teamA===p.champion?fin.teamB:fin.teamA):null;
+        save({champion:teamNameById(p.champion),championTeamId:p.champion,runnerUp:ru?teamNameById(ru):'',runnerUpTeamId:ru||null,finishedAt:Date.now()}).then(()=>toast('🏆 Tournament finished — saved to history')); }},'🏆 Finish tournament'):null]));
+  } else {
+    const order=tourneySeedOrder(sid); const advSel=sel(c.advance||0,[[0,'All teams']].concat([2,4,6,8].filter(n=>n<order.length).map(n=>[n,'Top '+n])),v=>save({advance:+v}));
+    const typ=sel(c.bracket||'single',[['single','Single elimination'],['double','Double elimination']],v=>save({bracket:v}));
+    bc.appendChild(row('Bracket type',typ)); bc.appendChild(row('Teams that advance',advSel,pools?'Seeds come from pool standings: pool winners first, then second places, and so on.':'Seeds follow the order teams are listed above.'));
+    const seeds=(c.advance?order.slice(0,c.advance):order);
+    if(seeds.length) bc.appendChild(h('div',{style:'font-size:12.5px;margin:8px 0;'},[h('b',{},'Seeds: '),seeds.map((id,i)=>(i+1)+'. '+((teams.find(t=>t.id===id)||{}).name||'?')).join(' · ')]));
+    bc.appendChild(h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ if(seeds.length<2){ toast('Need at least two teams'); return; }
+      confirmModal('Start the bracket?','Seeds '+seeds.length+' teams into a '+((c.bracket||'single')==='double'?'double':'single')+'-elimination bracket. Scores are entered on the Record tab.',async()=>{ let p={type:c.bracket||'single',seeding:'tournament',teamOrder:seeds,wbRounds:[buildInitialWBRound(seeds)],lbRounds:[],lbQueue:[],wbChampion:null,lbChampion:null,grandFinal:null,bracketReset:null,champion:null,status:'active'}; p=advancePlayoffs(p); await savePlayoff(p); toast('Bracket created'); },{confirmLabel:'Start bracket'}); }},'Start bracket →'));
+  }
+  root.appendChild(bc);
+}
+function tourneyRosterEditor(t, sid, ros, locked){
+  const box=h('div',{style:'background:#fbfaf5;border:1px solid var(--line);border-radius:10px;padding:10px;margin:0 0 10px;'});
+  if(locked) box.appendChild(h('p',{style:'font-size:12px;color:#7a5a00;margin:0 0 6px;'},'This team has played, so you can add players but not remove them.'));
+  ros.forEach(p=>box.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px dashed var(--line);font-size:13px;'},[h('span',{style:'flex:1;'},[p.name,p.isGuest?h('span',{class:'pill-gold',style:'margin-left:6px;'},'guest'):null]),
+    locked?null:h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 8px;',onclick:()=>deleteDoc(doc(db,'teams',t.id,'players',p.id))},'✕')])));
+  // pick from league players (no typing), or add a guest by name
+  const have=new Set(ros.map(p=>(p.email||'').toLowerCase()||p.name.toLowerCase()));
+  const pool=new Map(); (S.allPlayersForFeed||[]).forEach(p=>{ const tm=(S.allTeams||[]).find(x=>x.id===p.teamId); if(!p.name||!tm||tm.leagueId!==S.currentLeagueId||p.isGuest) return; const k=(p.email||'').toLowerCase()||p.name.toLowerCase(); if(!have.has(k) && !pool.has(k)) pool.set(k,{name:p.name,email:p.email||null,signupId:p.signupId||null}); });
+  const list=[...pool.values()].sort((a,b)=>rosterLastKey(a.name).localeCompare(rosterLastKey(b.name)));
+  const s=h('select',{style:'width:auto;max-width:260px;'}); s.appendChild(h('option',{value:''},'＋ Add a league player…')); list.forEach((p,i)=>s.appendChild(h('option',{value:String(i)},p.name)));
+  const addP=async(o)=>{ await addDoc(collection(db,'teams',t.id,'players'),Object.assign({number:null,position:'',order:ros.length+1,isSub:false,subTeamName:'',seasonId:sid},o)); };
+  s.addEventListener('change',async()=>{ const p=list[+s.value]; if(!p) return; await addP({name:p.name,email:p.email,signupId:p.signupId}); toast(p.name+' added'); });
+  const g=h('input',{type:'text',placeholder:'Guest name (outside player)',maxlength:'40',style:'width:200px;'}); const ge=h('input',{type:'email',placeholder:'Email (optional)',style:'width:190px;'});
+  box.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:8px;'},[s]));
+  box.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;'},[g,ge,h('button',{class:'btn btn-outline btn-sm',onclick:async()=>{ const n=g.value.trim(); if(!n){ toast('Enter the guest’s name'); return; } await addP({name:n,email:(ge.value.trim().toLowerCase()||null),isGuest:true}); toast(n+' added as a guest'); }},'Add guest')]));
+  return box;
+}
+// ---- Report → Tournament history (all tournaments, separate from league stats) ----
+let thTourney='';
+function tourneyHistoryCard(){
+  const ts=(S.seasons||[]).filter(isTourneySeason).sort((a,b)=>((b.tourney||{}).finishedAt||b.createdAt||0)-((a.tourney||{}).finishedAt||a.createdAt||0));
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Tournament history'));
+  if(!ts.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No tournaments yet.')); return card; }
+  // champions
+  const ch=h('table',{class:'dataTable'}); ch.appendChild(h('tr',{},['Tournament','Dates','Champion','Runner-up'].map(x=>h('th',{style:'text-align:left;'},x))));
+  ts.forEach(x=>{ const c=x.tourney||{}; ch.appendChild(h('tr',{},[h('td',{style:'font-weight:700;'},x.name),h('td',{},seasonDateRange(x)||'—'),h('td',{},c.champion?'🏆 '+c.champion:'In progress'),h('td',{},c.runnerUp||'—')])); });
+  card.appendChild(h('div',{class:'sectiontitle'},'Hall of champions')); card.appendChild(h('div',{class:'gridScroll'},ch));
+  // player totals across tournaments, matched by email (or name for guests)
+  const sel=h('select',{style:'width:auto;'}); sel.appendChild(h('option',{value:''},'All tournaments')); ts.forEach(x=>sel.appendChild(h('option',{value:x.id},x.name))); sel.value=thTourney; sel.addEventListener('change',()=>{ thTourney=sel.value; renderShell(); });
+  card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;margin:14px 0 6px;'},[h('div',{class:'sectiontitle',style:'margin:0;flex:1;'},'Player tournament records'),sel]));
+  const ids=new Set((thTourney?[thTourney]:ts.map(x=>x.id)));
+  const champTeams=new Set(ts.map(x=>(x.tourney||{}).championTeamId).filter(Boolean));
+  const ros=(S.allPlayersForFeed||[]).filter(p=>ids.has(p.seasonId)); const keyOf=p=>(p.email||'').toLowerCase()||('name:'+String(p.name||'').trim().toLowerCase());
+  const byKey={}; ros.forEach(p=>{ const k=keyOf(p); const r=byKey[k]=byKey[k]||{name:p.name,guest:!!p.isGuest,pids:new Set(),tourneys:new Set(),titles:0}; r.pids.add(p.id); r.tourneys.add(p.seasonId); if(champTeams.has(p.teamId)) r.titles++; });
+  const games=dedupeByMatchup((S.allGamesForFeed||[]).filter(g=>ids.has(g.seasonId)&&g.completed));
+  const rows=Object.values(byKey).map(r=>{ const lines=[]; let G=0; games.forEach(g=>{ const pid=(g.atbats||[]).find(a=>r.pids.has(a.playerId)); if(!pid) return; G++; r.pids.forEach(id=>{ if((g.atbats||[]).some(a=>a.playerId===id)) lines.push(computeBattingLine(g,id)); }); });
+    const L=aggregateLines(lines); return Object.assign(r,{G,L}); }).filter(r=>r.G>0).sort((a,b)=>b.L.H-a.L.H||b.L.AVG-a.L.AVG);
+  if(!rows.length){ card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);'},'No completed tournament games yet.')); return card; }
+  const tb=h('table',{class:'dataTable'}); tb.appendChild(h('tr',{},['Player','Tourn.','G','AB','H','HR','RBI','R','AVG','Titles'].map((x,i)=>h('th',{style:i===0?'text-align:left;':''},x))));
+  rows.forEach(r=>tb.appendChild(h('tr',{},[h('td',{style:'text-align:left;font-weight:700;'},[r.name,r.guest?h('span',{class:'pill-gold',style:'margin-left:6px;'},'guest'):null]),h('td',{},String(r.tourneys.size)),h('td',{},String(r.G)),h('td',{},String(r.L.AB)),h('td',{},String(r.L.H)),h('td',{},String(r.L.hr||0)),h('td',{},String(r.L.RBI)),h('td',{},String(r.L.R||0)),h('td',{},fmt3(r.L.AVG)),h('td',{},r.titles?'🏆 '+r.titles:'—')])));
+  card.appendChild(h('div',{class:'gridScroll'},tb));
+  card.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin-top:10px;',onclick:()=>{ const data=[['Player','Guest','Tournaments','G','AB','H','HR','RBI','R','AVG','Titles']].concat(rows.map(r=>[r.name,r.guest?'yes':'',r.tourneys.size,r.G,r.L.AB,r.L.H,r.L.hr||0,r.L.RBI,r.L.R||0,+(r.L.AVG||0).toFixed(3),r.titles]));
+    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(data),'Players'); XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet([['Tournament','Dates','Champion','Runner-up']].concat(ts.map(x=>[x.name,seasonDateRange(x)||'',(x.tourney||{}).champion||'',(x.tourney||{}).runnerUp||'']))),'Champions');
+    XLSX.writeFile(wb,'Tournament history.xlsx'); }},'⬇ Export to Excel'));
+  return card;
+}
+
 function draftStateRef(){ return doc(db,'draftStates', S.currentSeasonId); }
 function seasonPlayers(){ return S.players.filter(p=>!S.currentSeasonId || p.seasonId===S.currentSeasonId || !p.seasonId); }
 function seasonGames(){ return S.games.filter(g=>!S.currentSeasonId || g.seasonId===S.currentSeasonId || !g.seasonId); }
@@ -1551,8 +1782,10 @@ function currentSeasonName(){ const s=S.seasons.find(s=>s.id===S.currentSeasonId
 const ROSTER_METHODS={
   draft:{label:'Formal draft',short:'FORMAL DRAFT',desc:'Everyone signs up → managers rate players in Player Eval → Draft Board → rosters published.'},
   informal:{label:'Informal (managers pick)',short:'INFORMAL',desc:'Everyone signs up → managers pick players for their own team (Player Eval optional) → admin approves rosters.'},
-  pickup:{label:'Pickup',short:'PICKUP',desc:'Everyone signs up → no rosters. Teams are made at each game by the scorekeeper. Stats still count.'}
+  pickup:{label:'Pickup',short:'PICKUP',desc:'Everyone signs up → no rosters. Teams are made at each game by the scorekeeper. Stats still count.'},
+  tournament:{label:'Tournament',short:'TOURNAMENT',desc:'Admin enters the teams (league players and outside guests) → pool play and/or a bracket → champion. Run limits and other rules on Admin → 🏆 Tournament. Stats kept separate.'}
 };
+function methodShort(m){ return (ROSTER_METHODS[m]||ROSTER_METHODS.draft).short.replace(' DRAFT',''); }
 function currentSeason(){ return S.seasons.find(x=>x.id===S.currentSeasonId)||null; }
 function seasonMethod(sn){ sn=sn||currentSeason(); const m=sn&&sn.rosterMethod; return ROSTER_METHODS[m]?m:'draft'; }
 function isPickupSeason(){ return seasonMethod()==='pickup'; }
@@ -1780,7 +2013,7 @@ function renderShell(){
     {id:'qa', label:'Q&A'}, {id:'terms', label:'Terms'}
   ].filter(Boolean);
   const rightDrawerTabs = [];
-  if(isAdmin() || isManager()){ const m=seasonMethod(); if(m!=='pickup') rightDrawerTabs.push({id:'eval', label:'Player Eval'+(m==='informal'?' (optional)':'')}); if(m==='draft') rightDrawerTabs.push({id:'draft', label:'Draft Board'}); if(m==='informal') rightDrawerTabs.push({id:'draft', label:'Pick Players'}); }
+  if(isAdmin() || isManager()){ const m=seasonMethod(); if(m!=='pickup' && m!=='tournament') rightDrawerTabs.push({id:'eval', label:'Player Eval'+(m==='informal'?' (optional)':'')}); if(m==='draft') rightDrawerTabs.push({id:'draft', label:'Draft Board'}); if(m==='informal') rightDrawerTabs.push({id:'draft', label:'Pick Players'}); }
   if(isPickupSeason() && (S.activeTab==='record' || S.activeTab==='eval')) S.activeTab='roster';
   if(isAdmin()) rightDrawerTabs.push({id:'admin', label:'Admin'+(!isSuperAdmin()&&leagueNoticeUnread()?' 🚩 '+leagueNoticeUnread():'')+(adminAlertCount()?' \ud83d\udd14 '+adminAlertCount():'')});
   if(isSuperAdmin()) rightDrawerTabs.push({id:'superadmin', label:'Super Admin'+(noticeUnread()?' 🚩 '+noticeUnread():'')});
@@ -2465,13 +2698,18 @@ function outsForResult(result){ const r=RESULTS[result]; return (r.out?1:0)+(r.o
 
 async function recordAtBat(game, playerId, result, zone){
   const side = battingSide(game);
-  const scoredIds = applyResult(game, result, playerId);
+  let scoredIds = applyResult(game, result, playerId);
+  // tournament run limit: runs past the cap don't count and the half-inning ends
+  const cap=runCapFor(game); let capped=false;
+  if(cap){ const before=(game.score[side][game.inning]||0); if(before+scoredIds.length>=cap){ scoredIds=scoredIds.slice(0,Math.max(0,cap-before)); capped=true; } }
   const rbi = (result==='E') ? 0 : scoredIds.length;
   const atbat = { id:uid(), side, playerId, inning:game.inning, half:game.half, result, zone:zone||null, scoredPlayerIds:scoredIds.slice(), runsScored:scoredIds.length, rbi, extraOutsAtHome:0, ts:Date.now() };
+  if(capped) atbat.runLimitEnd=true;
   game.atbats.push(atbat);
   game.score[side][game.inning] = (game.score[side][game.inning]||0) + scoredIds.length;
   game.outs += outsForResult(result);
-  if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top'){ game.half='bottom'; } else { game.half='top'; game.inning+=1; } }
+  if(capped){ endHalfInning(game); toast('Run limit reached ('+cap+') — side retired'); }
+  else if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top'){ game.half='bottom'; } else { game.half='top'; game.inning+=1; } }
   await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning });
 }
 
@@ -2484,7 +2722,8 @@ function recomputeGameStateFromAtBats(game){
     const scoredCount = ab.scoredPlayerIds ? ab.scoredPlayerIds.length : (ab.runsScored||0);
     game.score[ab.side][ab.inning] = (game.score[ab.side][ab.inning]||0) + scoredCount;
     game.outs += outsForResult(ab.result) + (ab.extraOutsAtHome||0);
-    if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
+    if(ab.runLimitEnd) endHalfInning(game);
+    else if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
   });
   (game.manualScores||[]).forEach(ms=>{ game.score[ms.side][ms.inning]=(game.score[ms.side][ms.inning]||0)+1; });
 }
@@ -2550,6 +2789,8 @@ async function moveRunner(game, originBase, target, playerId){
     game.score[side][game.inning]=(game.score[side][game.inning]||0)+1;
     if(!game.manualScores) game.manualScores=[];
     game.manualScores.push({id:uid(),playerId,side,inning:game.inning});
+    const cap=runCapFor(game);
+    if(cap && (game.score[side][game.inning]||0)>=cap){ endHalfInning(game); toast('Run limit reached ('+cap+') — side retired'); await saveGame(game,{base:game.base,score:game.score,manualScores:game.manualScores,outs:game.outs,half:game.half,inning:game.inning}); return; }
     toast('Runner sent home — run scored');
     await saveGame(game,{base:game.base,score:game.score,manualScores:game.manualScores});
   } else {
@@ -2656,7 +2897,7 @@ async function findOrCreateGameFromSchedule(sched){
     scorekeeperSide:keeperSide, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[],
     home:{ name:homeName, coach:'', players: isHome?myRoster:oppRoster },
     away:{ name:awayName, coach:'', players: isHome?oppRoster:myRoster },
-    inningsPlanned:9, atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''
+    inningsPlanned:isTourneySeason()?(+tourneyCfg().innings||7):9, atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''
   });
   S.activeGameId = ref.id; renderShell();
   playBallSplash();
@@ -2891,6 +3132,7 @@ Router.register('scorecard', (root)=>{
   let canEdit = canEditTeam();
   const game = currentGame();
 
+  if(game){ const tb=tourneyRulesBanner(game); if(tb) setTimeout(()=>{ const ph=root.querySelector('.pageHead'); if(ph&&ph.parentNode===root) root.insertBefore(tb, ph.nextSibling); },0); }
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Scorecard'), h('p',{}, game ? (formatDate(game.date)+'  ·  '+game.away.name+' at '+game.home.name) : 'Pick a scheduled game to start scoring.')]));
 
   if(!game){
@@ -3717,7 +3959,7 @@ Router.register('history', (root)=>{
   S.activeTab='report'; reportView='batting'; setTimeout(renderShell,0);
 });
 function aggregateLines(lines){
-  const t={AB:0,H:0,R:0,RBI:0,TB:0,BB:0,HBP:0,SF:0};
+  const t={AB:0,H:0,R:0,RBI:0,TB:0,BB:0,HBP:0,SF:0,hr:0};
   lines.forEach(l=>{ for(const k in t) t[k]+=l[k]||0; });
   const AVG=t.AB>0?t.H/t.AB:0; const OBP=(t.AB+t.BB+t.HBP+t.SF)>0?(t.H+t.BB+t.HBP)/(t.AB+t.BB+t.HBP+t.SF):0; const SLG=t.AB>0?t.TB/t.AB:0;
   return {...t,AVG,OBP,SLG};
@@ -5217,6 +5459,7 @@ Router.register('report', (root)=>{
       {id:'trend', label:'Batting Average Trend', desc:'AVG over time by week, month, or quarter'},
       {id:'subs', label:'Substitutes Report', desc:'Who subbed for each team, when, and how they hit vs. their own team'},
       {id:'standings', label:'Standings Report', desc:'League-wide win/loss'},
+      {id:'tourneys', label:'🏆 Tournament History', desc:'Champions by year and each player’s totals across every tournament'},
       {id:'officials', label:'Umpires & Scorekeepers', desc:'Who umpired and who kept score for every game, with totals'}
     ];
     menu.forEach(m=>card.appendChild(h('div',{class:'gameListRow',style:'cursor:pointer;',onclick:()=>{ reportView=m.id; renderShell(); }},[
@@ -5230,6 +5473,7 @@ Router.register('report', (root)=>{
   if(reportView==='trend'){ root.appendChild(avgTrendCard(scopeGames(false),'Batting average trend')); root.appendChild(trendingPlayersCard(scopeGames(false))); }
   if(reportView==='subs'){ root.appendChild(subsReportCard(scopeGames(false))); }
   if(reportView==='officials'){ root.appendChild(officialsReportCard()); }
+  if(reportView==='tourneys'){ root.appendChild(tourneyHistoryCard()); }
   if(reportView==='hitzone'){ root.appendChild(hitZoneReportCard()); }
   if(reportView==='scoring'){
     root.appendChild(scoringCompareCard());
@@ -6217,6 +6461,9 @@ const HELP_KB = [
   {k:'umpire scorekeeper report who umpired each game totals', q:'Where can I see who umpired each game?', a:'Report → Umpires & Scorekeepers. It lists every game this season with its umpire(s), scorekeeper, field and score, plus totals for each person. Pick a person to see just their games, or Export to Excel.'},
   {k:'license agreement advertiser league name id legal name entity address fill', q:'Where do the league’s name and ID in the League Agreement come from?', a:'They fill in automatically for each league: League ID and league name from the league itself, and legal name, entity type and mailing address from Admin → Settings → League contact (used in the License agreement). Fill those in, then in Super Admin → Licenses open the league’s draft and tap Use updated agreement or Reload standard agreement.'},
   {k:'notice notices inbox flag red send league admin super admin all leagues acknowledge where receive', q:'Where do notices show up, and how do I send one?', a:'A red 🚩 flag appears at the top of the app whenever a notice is waiting for you — tap it. League admins: notices are on Admin → 🚩 Notices, where you can also send one to Geezer Ball Scorecard. Super Admin: Super Admin → 🚩 Notices lists every league’s notices (Needs acknowledgment, Received, Sent) and lets you send one notice to one, several or all leagues. Waiting notices are marked 🚩 NEW until acknowledged.'},
+  {k:'tournament mode create pools bracket teams guests run limit champion', q:'How do I run a tournament?', a:'Admin → Season Builder → ＋ Create season → 🏆 Tournament. Then Admin → 🏆 Tournament: 1 Rules (run limit per inning, open last inning, innings, time limit, run rule, tiebreakers), 2 Teams (copy a league team, or make a new team from league players and outside guests, and put teams in pools), 3 Pool schedule (pick days, times and fields — the app lays out the games), 4 Pool standings, 5 Bracket (seeded from pool standings), then 🏆 Finish tournament. Scoring, Lineup, Live Feed and stats work like any season.'},
+  {k:'run limit cap per inning runs maximum tournament open inning', q:'How does the run limit work?', a:'In a tournament with a run limit (Admin → 🏆 Tournament → Rules), the Scorecard shows “This inning: 3 of 5 runs”. When a team reaches the limit, runs past it don’t count and the half-inning ends automatically. With “Last inning open”, the final inning has no limit.'},
+  {k:'tournament history stats champions player record separate', q:'Where are tournament stats kept?', a:'Separately from league seasons — pick the season with the TOURNAMENT tag on Report, Batting or Hit Zone. Report → 🏆 Tournament History shows every champion and runner-up, and each player’s totals across all tournaments (matched by email, or by name for guests), with Export to Excel.'},
   {k:'license who can see agreement private', q:'Who can see the league agreement?', a:'Only that league’s admin and the Super Admin. Players and managers can’t see the License tab.'},
   {k:'chat photo picture image post camera', q:'How do I post a photo in League Chat?', a:'Left menu → League Chat → tap the 📷 camera button → pick or take a photo → add a caption if you like → Send. Photos are shrunk automatically. Some leagues hold photos for admin approval first.'},
   {k:'report inappropriate chat message photo remove delete moderate', q:'How do I report or remove a chat message?', a:'Members: tap Report on the message. Admins: tap Delete on any message, “No photos” to stop one member posting photos, or Restrict to stop them posting at all. Reported messages and photos waiting for approval appear in the Chat moderation card on the League Chat page.'},
@@ -6396,6 +6643,7 @@ const FAQ_DATA = [
         { q:'Why doesn’t a team’s record match what I expected?', a:'Every completed game credits both teams — a win for one, a loss for the other — and each matchup counts once. Check the Record tab’s game-by-game log for that team.' }
   ]},
   { category:'Playoffs', items:[
+    { q:'Does the app handle tournaments?', a:'Yes — a Tournament is its own season type, set up by your league admin. Teams can include outside players as guests, games can have a run limit per inning, and tournament stats are kept separate. See Report → 🏆 Tournament History for champions and career tournament stats.' },
     { q:'How do playoffs start?', a:'Admin → Settings → Playoffs: choose single or double elimination and seed by standings or manual order. Until then the Record tab shows a bracket preview with placeholder team numbers.' },
     { q:'How do results get entered?', a:'On the Record tab, the admin enters each matchup’s score; winners advance automatically.' }
   ]},
@@ -7933,15 +8181,15 @@ function seasonCreateForm(onCancel){
     h('div',{style:'flex:1 1 100%;font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;'},['Season sign-ups ',h('span',{style:'font-weight:500;text-transform:none;letter-spacing:0;'},'(optional \u2014 when players can sign up for this season)')]),
     h('div',{style:'width:168px;'},[lab('Open'),so]), h('div',{style:'width:168px;'},[lab('Close'),sc])]);
   const seg=h('div',{class:'scSeg'}); const hint=h('div',{style:'font-size:12px;color:var(--ink-soft);margin:8px 2px 0;'});
-  const labels={draft:'Formal draft',informal:'Informal (managers pick)',pickup:'Pickup'};
-  const draw=()=>{ sur.style.display=method==='pickup'?'none':'flex'; seg.innerHTML=''; Object.keys(labels).forEach(k=>{ seg.appendChild(h('button',{type:'button',class:k===method?'on':'',onclick:()=>{ method=k; draw(); }},labels[k])); }); hint.innerHTML=''; hint.appendChild(h('div',{},ROSTER_METHODS[method].label+': '+ROSTER_METHODS[method].desc)); };
+  const labels={draft:'Formal draft',informal:'Informal (managers pick)',pickup:'Pickup',tournament:'🏆 Tournament'};
+  const draw=()=>{ sur.style.display=(method==='pickup'||method==='tournament')?'none':'flex'; seg.innerHTML=''; Object.keys(labels).forEach(k=>{ seg.appendChild(h('button',{type:'button',class:k===method?'on':'',onclick:()=>{ method=k; draw(); }},labels[k])); }); hint.innerHTML=''; hint.appendChild(h('div',{},ROSTER_METHODS[method].label+': '+ROSTER_METHODS[method].desc)); };
   draw();
   const go=h('button',{class:'btn btn-primary',style:'white-space:nowrap;',onclick:async()=>{
     const n=name.value.trim(); if(!n){ toast('Enter a season name'); name.focus(); return; }
     if(st.value && en.value && en.value<st.value){ toast('End date is before start date'); return; }
     if(method!=='pickup' && so.value && sc.value && sc.value<so.value){ toast('Sign-up close is before it opens'); return; }
     go.disabled=true; go.textContent='Creating…';
-    try{ await createSeasonNamed(n, method, st.value||null, en.value||null, Object.assign({mode:seasonCreateMode}, method==='pickup'?{}:{signupOpen:so.value||null, signupClose:sc.value||null})); seasonCreateMode='real'; seasonsCreateOpen=false; if(onCancel) onCancel(true); adminSub='builder'; S.activeTab='admin'; S.builderBack=null; S.scrollToBuilder=true; renderShell(); }
+    try{ await createSeasonNamed(n, method, st.value||null, en.value||null, Object.assign({mode:seasonCreateMode}, method==='pickup'?{}:(method==='tournament'?{tourney:{format:'pools',innings:7,bracket:'single'}}:{signupOpen:so.value||null, signupClose:sc.value||null}))); seasonCreateMode='real'; seasonsCreateOpen=false; if(onCancel) onCancel(true); adminSub='builder'; S.activeTab='admin'; S.builderBack=null; S.scrollToBuilder=true; renderShell(); }
     catch(e){ go.disabled=false; go.textContent='Create'; toast('Could not create: '+(e.message||e)); }
   }},'Create');
   { const mseg=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'}); const mdraw=()=>{ mseg.innerHTML=''; [['real','\u25cf REAL \u00b7 LIVE','#1f8a4c','#fff','Counts in stats, records and reports.'],['test','\ud83e\uddea TEST','#f3d27a','#5a4300','Test seasons are made in Admin \u2192 Test Mode (tap to go there)']].forEach(([k,l,bg,fg,d])=>mseg.appendChild(h('button',{type:'button',onclick:()=>{ if(k==='test'){ tsNewForm={name:name.value.trim(),method:method}; seasonsCreateOpen=false; S.activeTab='admin'; adminSub='test'; renderShell(); window.scrollTo(0,0); return; } seasonCreateMode=k; mdraw(); },style:'flex:1 1 200px;text-align:left;border-radius:12px;padding:10px 12px;cursor:pointer;border:2px solid '+(seasonCreateMode===k?bg:'var(--line)')+';background:'+(seasonCreateMode===k?bg:'#fff')+';color:'+(seasonCreateMode===k?fg:'var(--ink)')+';'},[h('div',{style:'font-weight:800;font-size:15px;'},l),h('div',{style:'font-size:11.5px;opacity:.85;'},d)]))); }; mdraw();
@@ -8021,7 +8269,7 @@ function seasonsTableCard(){
   const live=all.filter(s=>!s.archived).sort(order); const arch=all.filter(s=>s.archived).sort(order);
   const tbl=h('table',{class:'seasonsTbl'});
   tbl.appendChild(h('tr',{},[h('th',{},'Season'),h('th',{class:'stDate'},'Start'),h('th',{class:'stDate'},'End'),h('th',{},'Type'),h('th',{},'Status'),h('th',{style:'text-align:right;'},'Admin')]));
-  const typeTag=(m)=>h('span',{style:'font-size:11px;font-weight:800;letter-spacing:.04em;border:1px solid var(--line);border-radius:6px;padding:2px 7px;background:#fff;white-space:nowrap;'},m==='pickup'?'PICKUP':(m==='informal'?'INFORMAL':'FORMAL'));
+  const typeTag=(m)=>h('span',{style:'font-size:11px;font-weight:800;letter-spacing:.04em;border:1px solid var(--line);border-radius:6px;padding:2px 7px;background:#fff;white-space:nowrap;'},methodShort(m));
   const row=(s)=>{
     const m=seasonMethod(s), st=seasonStatus(s), d=seasonDates(s), cur=s.id===S.currentSeasonId && !s.archived;
     if(seasonsEditId===s.id){
@@ -8090,6 +8338,15 @@ function builderSteps(sn){
   const win=(sn.signupOpen||sn.signupClose)?('Window '+(sn.signupOpen?formatDate(sn.signupOpen):'now')+' – '+(sn.signupClose?formatDate(sn.signupClose):'open')+' · '+(seasonWindowOpen(sn)?'open':'closed')):'Always open (no dates set)';
   const steps=[];
   steps.push({key:'season',title:'Season created',sub:sn.name+(seasonDateRange(sn)?' · '+seasonDateRange(sn):'')+' · '+ROSTER_METHODS[m].label+(seasonStatus(sn)==='ended'?' · ended':(seasonStatus(sn)==='upcoming'?' · upcoming':'')),done:true,go:{tab:'admin',sub:'builder',top:true},help:'See every season in this league in one table. Change names, dates, type or status; archive or delete seasons.'});
+  if(m==='tournament'){
+    const tt=tourneyTeams(sn.id); const c=tourneyCfg(sn); const go={tab:'admin',sub:'tourney'};
+    steps.push({key:'tteams',title:'Tournament teams',who:'ADMIN',sub:plural(tt.length,'team')+' · '+plural(tt.reduce((n,t)=>n+tourneyRoster(t.id,sn.id).length,0),'player'),done:tt.length>=2,go,help:'Copy league teams or build new ones, and add outside players as guests — Admin → 🏆 Tournament.'});
+    steps.push({key:'trules',title:'Rules',who:'ADMIN',sub:tourneyRulesLine(sn)||'Run limit, innings, time limit — all optional',done:true,go});
+    if((c.format||'pools')==='pools') steps.push({key:'tpool',title:'Pool play',who:'ADMIN',sub:games.length?plural(games.length,'game')+' scheduled':'Lay out the pool games',done:games.length>0,go});
+    steps.push({key:'tbracket',title:'Bracket',who:'ADMIN',sub:currentPlayoff?(currentPlayoff.champion?'Complete':'In progress'):'Seed from pool standings and start',done:!!currentPlayoff,go});
+    steps.push({key:'tchamp',title:'Champion',who:'ADMIN',sub:c.champion?'🏆 '+c.champion:'Finish the tournament to save it to history',done:!!c.champion,go});
+    return steps;
+  }
   if(m==='pickup'){
     const upcoming=games.filter(g=>(g.date||'')>=todayISO()).sort((a,b)=>(a.date||'').localeCompare(b.date||''))[0];
     steps.push({key:'games',title:'Game days',who:'ADMIN',sub:games.length?plural(games.length,'game')+' scheduled':'Add dates, times and fields',done:games.length>0,go:{tab:'schedule',sched:true},help:'Add each game day (date, time, field). Use Repeat weekly to add a whole season at once. No teams needed.'});
@@ -9330,7 +9587,7 @@ Router.register('admin', (root)=>{
   if(adminSub==='setup') adminSub='builder';
   if(adminSub==='signup'){ adminSub='approvals'; regSub='signups'; } // old Sign-ups page now lives under Players
   const aNt=leagueNoticeUnread(); const licSig=(isSuperAdmin()?0:Math.max(0,licLeagueTodo()-(agrWatch('licenses',(S.profile&&S.profile.leagueId)||'_').notices||[]).filter(n=>n.fromSide!=='league'&&!n.ackAt).length));
-  const subs=[['builder','Season Builder'],['notices',(aNt?'🚩 ':'')+'Notices'+(aNt?' ('+aNt+')':'')],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+(licSig?' ('+licSig+')':'')],['backup','Backup'+(bkOverdue(S.currentLeagueId)?' ⚠':'')],['test','\ud83e\uddea Test Mode']];
+  const subs=[['builder','Season Builder']].concat(isTourneySeason()?[['tourney','🏆 Tournament']]:[]).concat([['notices',(aNt?'🚩 ':'')+'Notices'+(aNt?' ('+aNt+')':'')],['approvals','Players'+(nSign?' ('+nSign+')':'')],['settings','Settings'],['chat','Chat'+(nChat?' ('+nChat+')':'')],['rules','League Rules'],['license','License'+(licSig?' ('+licSig+')':'')],['backup','Backup'+(bkOverdue(S.currentLeagueId)?' ⚠':'')],['test','\ud83e\uddea Test Mode']]);
   const inBuilder=['builder','seasons','teams','signup','players'].includes(adminSub);
   const seg=h('div',{class:'segControl',style:'margin-bottom:14px;'}, subs.map(([id,label])=>h('button',{class:(adminSub===id||(id==='builder'&&inBuilder))?'active':'',onclick:()=>{ adminSub=id; S.builderBack=null; renderShell(); }},label)));
   root.appendChild(seg);
@@ -9338,6 +9595,7 @@ Router.register('admin', (root)=>{
   if(adminSub==='chat'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Chat'),h('p',{},'League Chat settings, photo approvals, reported messages, and restricted members.')])); chatAdminView(root); return; }
   if(adminSub==='backup'){ backupView(root); return; }
   if(adminSub==='test'){ testTabView(root); return; }
+  if(adminSub==='tourney'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'🏆 Tournament — '+(currentSeasonName()||'')),h('p',{},'Everything tournament-only lives here: rules, teams and guests, pool schedule, standings and the bracket. Scoring, Live Feed and stats work as in any season.')])); tourneyView(root); return; }
   if(adminSub==='notices'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'🚩 Notices'),h('p',{},isSuperAdmin()?'Notices between '+OWNER_NAME+' and this league’s admin — what you’ve sent them and what they’ve sent you.':'Formal notices between your league and '+OWNER_NAME+'. A red flag at the top of the app means one is waiting.')])); adminNoticesView(root); return; }
   if(adminSub==='license'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'License'),h('p',{},'This league\u2019s agreement with '+OWNER_NAME+'. Sign it here. Formal notices are under Admin \u2192 Notices. Mirrored in Super Admin \u2192 Licenses.')])); licenseView(root, S.currentLeagueId, isSuperAdmin()?'owner':'league'); return; }
   if(adminSub==='approvals'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Players'),h('p',{},'New accounts to approve, who signed up for '+(currentSeasonName()||'this season')+' (the draft pool), yearly registrations, and the registration form.')])); regSubNav(root);
@@ -9356,7 +9614,7 @@ Router.register('admin', (root)=>{
       root.appendChild(h('div',{style:'background:linear-gradient(135deg,var(--grass-1),var(--grass-2));color:#fff;border-radius:14px;padding:14px 16px;margin-bottom:12px;box-shadow:0 3px 12px rgba(30,42,34,.18);border-left:6px solid var(--gold);'},[
         h('div',{style:'font-size:11px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;color:var(--gold-2);margin-bottom:6px;'},'\ud83d\udccb Season sign-ups'),
         h('div',{style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;'},[ssel,
-          sn?h('span',{style:pillS+'background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.4);'},m==='pickup'?'PICKUP':(m==='informal'?'INFORMAL':'FORMAL')):null,
+          sn?h('span',{style:pillS+'background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.4);'},methodShort(m)):null,
           sn&&m!=='pickup'?h('span',{style:pillS+'background:#fff;color:var(--grass-1);'},nUp+' signed up'):null,
           sn?h('span',{style:pillS+(open?'background:var(--gold);color:#1e1a10;':'background:rgba(0,0,0,.25);color:#f3efe2;')},winTxt):null]),
         h('div',{style:'font-size:12.5px;color:#e8e2cf;margin-top:8px;line-height:1.4;'}, m==='pickup'?'Pickup seasons need no sign-up \u2014 every registered member is in the pool.':(m==='informal'?'This list is the pool managers pick from. Switch seasons with the menu above.':'This list is the pool for Player Eval and the draft. Switch seasons with the menu above.'))])); { const w=signupWindowCard(); if(w) root.appendChild(w); } signupAdminView(root); }
