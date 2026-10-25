@@ -6464,6 +6464,7 @@ const HELP_KB = [
   {k:'tournament mode create pools bracket teams guests run limit champion', q:'How do I run a tournament?', a:'Admin → Season Builder → ＋ Create season → 🏆 Tournament. Then Admin → 🏆 Tournament: 1 Rules (run limit per inning, open last inning, innings, time limit, run rule, tiebreakers), 2 Teams (copy a league team, or make a new team from league players and outside guests, and put teams in pools), 3 Pool schedule (pick days, times and fields — the app lays out the games), 4 Pool standings, 5 Bracket (seeded from pool standings), then 🏆 Finish tournament. Scoring, Lineup, Live Feed and stats work like any season.'},
   {k:'run limit cap per inning runs maximum tournament open inning', q:'How does the run limit work?', a:'In a tournament with a run limit (Admin → 🏆 Tournament → Rules), the Scorecard shows “This inning: 3 of 5 runs”. When a team reaches the limit, runs past it don’t count and the half-inning ends automatically. With “Last inning open”, the final inning has no limit.'},
   {k:'tournament history stats champions player record separate', q:'Where are tournament stats kept?', a:'Separately from league seasons — pick the season with the TOURNAMENT tag on Report, Batting or Hit Zone. Report → 🏆 Tournament History shows every champion and runner-up, and each player’s totals across all tournaments (matched by email, or by name for guests), with Export to Excel.'},
+  {k:'test mode tournament practice simulate pool bracket', q:'Can I practise a tournament in Test Mode?', a:'Yes. Admin → 🧪 Test Mode → ＋ New test season → 🏆 Tournament. Each step (teams, rules, pool schedule, bracket, champion) can be done by hand or simulated — the app adds six fake teams in two pools (one is an outside team of guests), sets a 5-run limit, plays the pool games and bracket, and crowns a champion. Clear removes it all, or Make real keeps the rules, teams and schedule.'},
   {k:'license who can see agreement private', q:'Who can see the league agreement?', a:'Only that league’s admin and the Super Admin. Players and managers can’t see the License tab.'},
   {k:'chat photo picture image post camera', q:'How do I post a photo in League Chat?', a:'Left menu → League Chat → tap the 📷 camera button → pick or take a photo → add a caption if you like → Send. Photos are shrunk automatically. Some leagues hold photos for admin approval first.'},
   {k:'report inappropriate chat message photo remove delete moderate', q:'How do I report or remove a chat message?', a:'Members: tap Report on the message. Admins: tap Delete on any message, “No photos” to stop one member posting photos, or Restrict to stop them posting at all. Reported messages and photos waiting for approval appear in the Chat moderation card on the League Chat page.'},
@@ -9304,7 +9305,11 @@ async function tsWipe(sid, makeReal){
     const lid=S.currentLeagueId; if(lid){ try{ await bkSaveCloud(lid,bkBundle(lid,await bkCollect(lid),'before test clear')); }catch(e){ console.warn(e); } }
     const c=await tsCollect(sid); const P=[];
     c.signups.forEach(id=>P.push(deleteDoc(doc(db,'signups',id))));
-    c.players.forEach(([t,id])=>P.push(deleteDoc(doc(db,'teams',t,'players',id))));
+    const isT=seasonMethod(sn)==='tournament'; const testP=new Set((S.allPlayersForFeed||[]).filter(x=>x.isTest).map(x=>x.id));
+    c.players.forEach(([t,id])=>{ if(makeReal && isT && !testP.has(id)) return; P.push(deleteDoc(doc(db,'teams',t,'players',id))); });
+    P.push(deleteDoc(doc(db,'playoffs',sid)));
+    if(isT && !makeReal) tourneyTeams(sid).filter(t=>!t.isTest).forEach(t=>P.push(deleteDoc(doc(db,'teams',t.id))));
+    if(isT && makeReal) P.push(updateDoc(doc(db,'seasons',sid),{'tourney.champion':null,'tourney.championTeamId':null,'tourney.runnerUp':null,'tourney.runnerUpTeamId':null,'tourney.finishedAt':null}));
     c.games.forEach(([t,id])=>P.push(deleteDoc(doc(db,'teams',t,'games',id))));
     c.schedule.forEach(([t,id])=>P.push(makeReal?updateDoc(doc(db,'teams',t,'schedule',id),{completed:false}):deleteDoc(doc(db,'teams',t,'schedule',id))));
     c.draft.forEach(id=>P.push(deleteDoc(doc(db,'draftStates',id))));
@@ -9339,7 +9344,7 @@ function tsRoster(tid){ return (S.allPlayersForFeed||[]).filter(p=>p.teamId===ti
 function tsTwoTeams(){ const ts=S.teams.filter(t=>t.active!==false).map(t=>({t,n:tsRoster(t.id).length})).sort((a,b)=>b.n-a.n); return ts.length>=2?[ts[0].t,ts[1].t]:null; }
 async function tsAddGame(){ if(!tsGuard()) return; const two=tsTwoTeams(); if(!two){ toast('Add at least two teams first'); return; }
   await createScheduledMatchup(two[0].id,two[1].id,new Date().toISOString().slice(0,10),'10:00','Test field'); toast('Test game added: '+two[1].name+' at '+two[0].name); }
-function tsSimInnings(home, away, innings){
+function tsSimInnings(home, away, innings, capFn){
   const RES=[['1B',30],['2B',8],['3B',2],['HR',3],['GO',22],['FO',20],['SO',5],['BB',6],['E',2],['SF',1],['FC',1]]; const tot=RES.reduce((a,b)=>a+b[1],0);
   const pick=()=>{ let r=Math.random()*tot; for(const [k,w] of RES){ if((r-=w)<0) return k; } return 'GO'; };
   const HITZ=['SOF1','SOF2','SOF3','SOF4','DOF1','DOF2','DOF3','DOF4','IF2','IF4'], OUTZ=['IF1','IF2','IF3','IF4','IF5','SOF1','SOF2','SOF3','SOF4','DOF2','DOF3'];
@@ -9357,8 +9362,11 @@ function tsSimInnings(home, away, innings){
       else if(r==='FC'){ outs++; b[0]=p.id; }
       else if(r==='SF'){ outs++; if(outs<3 && b[2]){ scored.push(b[2]); b[2]=null; } }
       else outs++;
+      let capEnd=false; const cap=capFn?capFn(inn):0;
+      if(cap && runs+scored.length>=cap){ scored.splice(Math.max(0,cap-runs)); capEnd=true; }
       runs+=scored.length;
-      ab.push({id:uid(),side,playerId:p.id,inning:inn,half,result:r,zone:(r==='SO'||r==='BB')?null:(['GO','FO','SF','FC'].includes(r)?z(OUTZ):z(HITZ)),scoredPlayerIds:scored,runsScored:scored.length,rbi:r==='E'?0:scored.length,ts:ts+=20000});
+      ab.push({id:uid(),side,playerId:p.id,inning:inn,half,result:r,runLimitEnd:capEnd||undefined,zone:(r==='SO'||r==='BB')?null:(['GO','FO','SF','FC'].includes(r)?z(OUTZ):z(HITZ)),scoredPlayerIds:scored,runsScored:scored.length,rbi:r==='E'?0:scored.length,ts:ts+=20000});
+      if(capEnd) break;
     }
     score[side][String(inn)]=runs; } }
   return {ab,score};
@@ -9375,6 +9383,43 @@ async function tsAutoPlay(){ if(!tsGuard()) return;
   await addDoc(collection(db,'teams',two[0].id,'games'),{matchupId:se.matchupId,homeAway:'home',opponent:two[1].name,opponentTeamId:two[1].id,seasonId:sid,date:se.date,home:{name:two[0].name,players:H},away:{name:two[1].name,players:A},atbats:g.ab,score:g.score,base:{},outs:0,inning:4,half:'top',completed:false,inningsPlanned:7,manualScores:[],scorekeeperSide:'home',challenges:[],isTest:true,updatedAt:Date.now()});
   toast('Played 3 innings: '+two[1].name+' '+Object.values(g.score.away).reduce((a,b)=>a+b,0)+', '+two[0].name+' '+Object.values(g.score.home).reduce((a,b)=>a+b,0)+' — see Live Feed');
 }
+/* ---- Test Mode: tournament rehearsal (fake teams incl. a guest team, sample rules, pool games, bracket, champion) ---- */
+async function tsTourneyTeams(){ if(!tsGuard()) return; const sid=S.currentSeasonId; if(tourneyTeams(sid).length>=2){ toast('Teams already in place'); return; }
+  const names=['Steel City Seniors','North Hills Vets','South Park 60s','Pittsburgh Legends','Ohio Valley 65s','Mon Valley Guests']; const pool=testNamePool().slice().sort(()=>Math.random()-0.5); let k=0;
+  const pos=['P','C','1B','2B','SS','3B','RV','LF','LCF','RCF','RF'];
+  for(let i=0;i<names.length;i++){ const guest=i===names.length-1;
+    const ref=await addDoc(collection(db,'teams'),{name:names[i],leagueId:S.currentLeagueId||null,active:true,tournamentSeasonId:sid,pool:i%2?'B':'A',isTest:true,testSeasonId:sid,createdAt:Date.now()});
+    const P=[]; for(let j=0;j<11;j++){ const nm=pool[k++%pool.length]; P.push(addDoc(collection(db,'teams',ref.id,'players'),{name:nm,number:String(10+j),position:pos[j],order:j+1,isSub:false,subTeamName:'',seasonId:sid,email:null,isTest:true,isGuest:guest})); }
+    await Promise.all(P); }
+  await tsWait(()=>tourneyTeams(sid).length>=6 && tourneyTeams(sid).every(t=>tourneyRoster(t.id,sid).length>=11),8000);
+  toast('Added 6 test teams in two pools (one is an outside team of guests)'); }
+async function tsTourneyRules(){ if(!tsGuard()) return; const sid=S.currentSeasonId;
+  await updateDoc(doc(db,'seasons',sid),{'tourney.format':'pools','tourney.runLimit':5,'tourney.openLast':true,'tourney.innings':7,'tourney.timeLimit':60,'tourney.rdCap':7,'tourney.bracket':'single'});
+  await tsWait(()=>+tourneyCfg().runLimit===5); toast('Sample rules: 5-run limit (last inning open), 7 innings, 60-minute limit'); }
+async function tsTourneyPool(){ if(!tsGuard()) return; const sid=S.currentSeasonId; if(tourneyTeams(sid).length<2){ toast('Add teams first'); return; }
+  const plan=planPoolGames(sid,{days:[tsISO(tsNextSaturday())],start:'09:00',last:'18:00',mins:75,fields:['Field 1','Field 2'],perTeam:0}).filter(p=>p.date);
+  const before=allLeagueSchedule().filter(g=>g.seasonId===sid).length;
+  for(const p of plan) await createScheduledMatchup(p.a,p.b,p.date,p.time,p.field);
+  await tsWait(()=>allLeagueSchedule().filter(g=>g.seasonId===sid).length>=before+plan.length,8000); toast('Scheduled '+plan.length+' pool games'); }
+// fill in every bracket game that has two teams, round by round, until there is a champion
+function tsPlayBracket(p){
+  const all=x=>[].concat(...(x.wbRounds||[]),...(x.lbRounds||[]),x.grandFinal?[x.grandFinal]:[],x.bracketReset?[x.bracketReset]:[]);
+  for(let guard=0; guard<40 && !p.champion; guard++){ const open=all(p).filter(m=>m && m.teamA && m.teamB && !m.winnerId); if(!open.length) break;
+    open.forEach(m=>{ let a=3+Math.floor(Math.random()*12), b=3+Math.floor(Math.random()*12); if(a===b) a++; m.scoreA=a; m.scoreB=b; m.winnerId=a>b?m.teamA:m.teamB; }); p=advancePlayoffs(p); }
+  return p; }
+async function tsTourneyBracket(){ if(!tsGuard()) return; const sid=S.currentSeasonId; const c=tourneyCfg();
+  if(!currentPlayoff && tsUnplayed().length){ const b=tsBusy; tsBusy=''; await tsPlay(true); tsBusy=b; await tsWait(()=>!tsUnplayed().length,8000); }
+  let p=currentPlayoff?JSON.parse(JSON.stringify(currentPlayoff)):null;
+  if(!p){ const order=tourneySeedOrder(sid); const seeds=c.advance?order.slice(0,c.advance):order; if(seeds.length<2){ toast('Add teams first'); return; }
+    p={type:c.bracket||'single',seeding:'tournament',teamOrder:seeds,wbRounds:[buildInitialWBRound(seeds)],lbRounds:[],lbQueue:[],wbChampion:null,lbChampion:null,grandFinal:null,bracketReset:null,champion:null,status:'active'}; p=advancePlayoffs(p); }
+  p=tsPlayBracket(p); await savePlayoff(p); await tsWait(()=>currentPlayoff&&currentPlayoff.champion,6000);
+  toast(p.champion?'Bracket played — champion: '+teamNameById(p.champion):'Bracket started'); }
+async function tsTourneyFinish(){ if(!tsGuard()) return; const p=currentPlayoff; if(!p||!p.champion){ await tsTourneyBracket(); }
+  const q=currentPlayoff; if(!q||!q.champion){ toast('Play the bracket first'); return; }
+  const fin=(q.bracketReset&&q.bracketReset.winnerId)?q.bracketReset:(q.grandFinal&&q.grandFinal.winnerId?q.grandFinal:((q.wbRounds||[]).slice(-1)[0]||[])[0]); const ru=fin?(fin.teamA===q.champion?fin.teamB:fin.teamA):null;
+  await updateDoc(doc(db,'seasons',S.currentSeasonId),{'tourney.champion':teamNameById(q.champion),'tourney.championTeamId':q.champion,'tourney.runnerUp':ru?teamNameById(ru):'','tourney.runnerUpTeamId':ru||null,'tourney.finishedAt':Date.now()});
+  await tsWait(()=>!!tourneyCfg().champion); toast('🏆 '+teamNameById(q.champion)+' wins — see Report → 🏆 Tournament History'); }
+
 /* ===== Test Mode: rehearse every Season Builder step, by hand or simulated ===== */
 let tsWeeks=8, tsProgress='';
 function tsSay(m){ tsProgress=m; renderShell(); }
@@ -9429,7 +9474,8 @@ function tsUnplayed(){ const sid=S.currentSeasonId; return (S.allScheduleForFeed
 async function tsPlayOne(se){ const sid=S.currentSeasonId; let H,A,ownerId,homeName,awayName,extra={};
   if(se.pickup){ const pool=pickupPool(sid).sort(()=>Math.random()-0.5); if(pool.length<6){ toast('Pool is too small — simulate sign-ups first'); return false; } const half=Math.ceil(Math.min(pool.length,22)/2); const mk=(l)=>l.map((p,i)=>({id:p.id,name:p.name,number:'',position:p.pos||'',order:i+1,isSub:false,subTeamName:''})); H=mk(pool.slice(0,half)); A=mk(pool.slice(half,half*2)); ownerId=se.teamId; homeName=se.homeName||'Home'; awayName=se.awayName||'Away'; extra={pickup:true,opponentTeamId:null,location:se.location||''}; }
   else { const home=S.teams.find(t=>t.id===se.teamId), away=S.teams.find(t=>t.id===se.opponentTeamId); if(!home||!away) return false; H=tsRoster(home.id); A=tsRoster(away.id); if(H.length<3||A.length<3) return false; ownerId=home.id; homeName=home.name; awayName=away.name; extra={opponentTeamId:away.id,location:se.location||''}; }
-  let g=tsSimInnings(H,A,7); const tot=s=>Object.values(s).reduce((a,b)=>a+b,0); let inn=7; if(tot(g.score.home)===tot(g.score.away)){ g=tsSimInnings(H,A,8); inn=8; }
+  const tc=isTourneySeason()?tourneyCfg():null; const nInn=tc?(+tc.innings||7):7; const capFn=tc&&+tc.runLimit?(i=>(tc.openLast&&i>=nInn)?0:+tc.runLimit):null;
+  let g=tsSimInnings(H,A,nInn,capFn); const tot=s=>Object.values(s).reduce((a,b)=>a+b,0); let inn=nInn; if(tot(g.score.home)===tot(g.score.away)){ g=tsSimInnings(H,A,nInn+1,capFn); inn=nInn+1; }
   await addDoc(collection(db,'teams',ownerId,'games'),Object.assign({matchupId:se.matchupId||null,homeAway:'home',opponent:awayName,seasonId:sid,date:se.date||todayISO(),time:se.time||'',home:{name:homeName,coach:'',players:H},away:{name:awayName,coach:'',players:A},atbats:g.ab,score:g.score,base:{},outs:3,inning:inn,half:'bottom',completed:true,completedAt:Date.now(),inningsPlanned:7,manualScores:[],scorekeeperSide:'home',challenges:[],isTest:true,updatedAt:Date.now()},extra));
   try{ await updateDoc(doc(db,'teams',se.teamId,'schedule',se.id),{completed:true}); if(se.linkedScheduleId&&se.opponentTeamId) await updateDoc(doc(db,'teams',se.opponentTeamId,'schedule',se.linkedScheduleId),{completed:true}); }catch(e){}
   return true; }
@@ -9443,10 +9489,15 @@ async function tsUndoGames(){ if(!tsGuard()) return; const sid=S.currentSeasonId
   for(let i=0;i<P.length;i+=40) await Promise.all(P.slice(i,i+40)); S.activeGameId=null; tsBusy=''; renderShell(); toast('Removed '+games.length+' games — the schedule is back to unplayed'); }
 /* one simulate action per Season Builder step key */
 function tsSimFor(key, m){
-  const map={ teams:['Add 4 test teams',tsAddTeams], signups:['Simulate sign-ups',tsSimSignups], eval:['Simulate ratings',tsFillRatings], draft:['Simulate draft',tsSimDraft], final:['Simulate approval',tsFinalize], roster:['Publish rosters',tsFinalize], pick:['Simulate manager picks',tsSimPicks], approve:['Simulate approval',tsApprove], games:[m==='pickup'?'Simulate game days':'Simulate schedule',tsGenSchedule], lineups:['Simulate lineups',tsSaveLineups] };
+  const map={ tteams:['Add 6 test teams (one of guests)',tsTourneyTeams], trules:['Use sample rules',tsTourneyRules], tpool:['Simulate pool schedule',tsTourneyPool], tbracket:['Simulate bracket',tsTourneyBracket], tchamp:['Finish tournament',tsTourneyFinish], teams:['Add 4 test teams',tsAddTeams], signups:['Simulate sign-ups',tsSimSignups], eval:['Simulate ratings',tsFillRatings], draft:['Simulate draft',tsSimDraft], final:['Simulate approval',tsFinalize], roster:['Publish rosters',tsFinalize], pick:['Simulate manager picks',tsSimPicks], approve:['Simulate approval',tsApprove], games:[m==='pickup'?'Simulate game days':'Simulate schedule',tsGenSchedule], lineups:['Simulate lineups',tsSaveLineups] };
   return map[key]||null; }
 function tsCoach(key, m){
   const C={ season:'Season created — change its name, dates or type with ✎ Change in the Season Builder table.',
+    tteams:'Learn it: Admin → 🏆 Tournament → Teams — copy a league team, or make a new team, pick league players and add outside players as guests, then put teams in pools. Or let the app add six test teams in two pools (one is all guests).',
+    trules:'Learn it: Admin → 🏆 Tournament → Rules — run limit per inning, last inning open, innings, time limit, run rule, tiebreaker cap. Or let the app set sample rules (5-run limit).',
+    tpool:'Learn it: Admin → 🏆 Tournament → Pool schedule — pick days, times and fields, Preview, then Create. Or let the app lay out the pool games.',
+    tbracket:'Learn it: after pool play, Admin → 🏆 Tournament → Bracket → Start bracket, then enter each bracket score on the Record tab. Or let the app seed and play the bracket.',
+    tchamp:'Learn it: when the bracket has a champion, tap 🏆 Finish tournament — it goes into Report → 🏆 Tournament History. Or let the app finish it.',
     teams:'Learn it: Season Builder → Teams & managers — type each team name, then the manager’s name and email. Or let the app add four test teams with fake managers.',
     signups:'Learn it: players use “New here? Join the league” on the sign-in screen; members tap Register. You approve accounts in Admin → Players. Or let the app add fake sign-ups (4 get accounts to approve).',
     players:'Learn it: Season Builder → Player list — check Returning / New so last season’s stats follow the right player, and confirm any Maybe. Test seasons reuse names, so you will see returning players here.',
@@ -9464,6 +9515,14 @@ async function tsRunAll(){ if(!tsGuard()||tsBusy) return; const sn=currentSeason
   const need=(k)=>{ const st=builderSteps(currentSeason()).find(x=>x.key===k); return st && !st.done; };
   try{
     tsBusy='Running all steps…'; renderShell();
+    if(m==='tournament'){
+      if(tourneyTeams(sn.id).length<2){ tsBusy='Teams…'; renderShell(); await tsTourneyTeams(); }
+      if(!+tourneyCfg().runLimit){ tsBusy='Rules…'; renderShell(); await tsTourneyRules(); }
+      if(need('tpool')){ tsBusy='Pool schedule…'; renderShell(); await tsTourneyPool(); }
+      tsBusy=''; await tsPlay(true); await tsWait(()=>!tsUnplayed().length,10000);
+      tsBusy='Bracket…'; renderShell(); await tsTourneyBracket(); await tsTourneyFinish();
+      tsBusy=''; renderShell(); return;
+    }
     if(m!=='pickup'){
       if(tsTeamsActive().length<2){ tsBusy='Step 2 of 10 — adding teams…'; renderShell(); await tsAddTeams(); }
       if(need('signups')){ tsBusy='Step 3 — sign-ups…'; renderShell(); await tsSimSignups(); }
@@ -9496,7 +9555,7 @@ function testTabView(root){
   f.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;margin-bottom:6px;'},[h('div',{style:'flex:1;min-width:0;'},sel),curSeasonIsTest()&&!tsNewForm?seasonModePill(currentSeason(),true):null]));
   if(tsNewForm){ const nf=tsNewForm; const d=new Date(); const sug='Test – '+d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
     const nm=h('input',{type:'text',value:nf.name||sug,placeholder:sug,style:big+'font-size:19px;padding:14px 12px;'}); nm.addEventListener('input',()=>{ nf.name=nm.value; });
-    const types=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'}); [['draft','Formal draft'],['informal','Informal (managers pick)'],['pickup','Pickup']].forEach(([k,l])=>types.appendChild(h('button',{type:'button',onclick:()=>{ nf.method=k; nf.name=nm.value; renderShell(); },style:'flex:1 1 150px;padding:12px;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;border:2px solid '+(nf.method===k?'var(--grass-1)':'var(--line)')+';background:'+(nf.method===k?'var(--grass-1)':'#fff')+';color:'+(nf.method===k?'#fff':'var(--ink)')+';'},l)));
+    const types=h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'}); [['draft','Formal draft'],['informal','Informal (managers pick)'],['pickup','Pickup'],['tournament','🏆 Tournament']].forEach(([k,l])=>types.appendChild(h('button',{type:'button',onclick:()=>{ nf.method=k; nf.name=nm.value; renderShell(); },style:'flex:1 1 150px;padding:12px;border-radius:10px;font-weight:800;font-size:14px;cursor:pointer;border:2px solid '+(nf.method===k?'var(--grass-1)':'var(--line)')+';background:'+(nf.method===k?'var(--grass-1)':'#fff')+';color:'+(nf.method===k?'#fff':'var(--ink)')+';'},l)));
     const go=h('button',{class:'btn btn-gold',style:'font-size:16px;padding:12px 20px;',onclick:async()=>{ const n=(nm.value||'').trim()||sug; go.disabled=true; go.textContent='Creating…'; try{ await createSeasonNamed(n, nf.method||'draft', null, null, {mode:'test'}); tsNewForm=null; S.activeTab='admin'; adminSub='test'; renderShell(); }catch(e){ go.disabled=false; go.textContent='Create test season'; toast('Could not create: '+(e.message||e)); } }},'Create test season');
     f.appendChild(h('div',{style:'border:2px solid #f3d27a;background:#fff9e8;border-radius:12px;padding:12px 14px;margin-top:6px;'},[
       h('div',{style:'display:flex;align-items:center;gap:8px;margin-bottom:8px;'},[h('b',{style:'font-size:15px;flex:1;'},'New test season'),seasonModePill({mode:'test'},true)]),
@@ -9539,13 +9598,13 @@ function testTabView(root){
     if(st.key==='games'&&m==='pickup'){ const wk=h('select',Object.assign({style:'width:auto;'},dis)); [4,8,12].forEach(v=>{ const o=h('option',{value:String(v)},v+' game days'); if(v===tsWeeks) o.setAttribute('selected','selected'); wk.appendChild(o); }); wk.addEventListener('change',()=>{ tsWeeks=+wk.value; }); btns.push(wk); }
     const sim=tsSimFor(st.key,m);
     if(st.key==='teams'&&tsTeamsActive().length>=2) btns.push(h('span',{style:'font-size:11.5px;color:var(--ink-soft);'},'Using your league’s teams'));
-    else if(sim && !(st.done && !['signups','eval'].includes(st.key))) btns.push(B(st.done&&st.key==='signups'?'+ Add more':sim[0],()=>{ if(st.key==='signups'&&!st.done) confirmModal('Add '+testGenCount+' test sign-ups to '+sn.name+'?','Fake players, tagged test, in this test season only. Four get sign-in accounts to approve.',sim[1]); else sim[1](); },'btn-gold'));
+    else if(sim && !(st.done && !['signups','eval','trules'].includes(st.key))) btns.push(B(st.done&&st.key==='signups'?'+ Add more':sim[0],()=>{ if(st.key==='signups'&&!st.done) confirmModal('Add '+testGenCount+' test sign-ups to '+sn.name+'?','Fake players, tagged test, in this test season only. Four get sign-in accounts to approve.',sim[1]); else sim[1](); },'btn-gold'));
     if(st.key==='draft'&&!st.done) btns.push(B('Start draft only',tsQuickDraft));
     if(st.key==='eval'&&st.done) btns.push(B('Clear ratings — rate by hand',()=>confirmModal('Clear ratings in '+sn.name+'?','Power, Defense and rank are removed for this test season.',tsClearRatings)));
     list.appendChild(row(i,st,isCur,btns,false));
   });
   // play step (always last)
-  const playSt={key:'play',play:true,title:m==='pickup'?'Build sides & play':'Play the season',sub:(sched.length?played+' of '+(played+unplayed)+' games played':'No games scheduled yet')+(m==='pickup'?' · pool: '+pickupPool(sn.id).length+' players':''),done:false};
+  const playSt={key:'play',play:true,title:m==='pickup'?'Build sides & play':(m==='tournament'?'Play pool games':'Play the season'),sub:(sched.length?played+' of '+(played+unplayed)+' games played':'No games scheduled yet')+(m==='pickup'?' · pool: '+pickupPool(sn.id).length+' players':''),done:false};
   const nextSe=tsUnplayed()[0];
   const pb=[B(m==='pickup'?'Open Scorecard — build sides by hand →':'Score next game by hand →',()=>{ S.activeTab='scorecard'; renderShell(); },cur<0?'btn-primary':'btn-outline')];
   if(unplayed) pb.push(B('Play next game day'+(nextSe?' ('+formatDate(nextSe.date)+')':''),()=>tsPlay(false),'btn-gold'));
