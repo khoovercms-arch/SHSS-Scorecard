@@ -486,6 +486,28 @@ table.zoneTable{margin-bottom:14px;width:100%;} table.zoneTable td,table.zoneTab
 .chartGridLine{stroke:var(--line);stroke-width:1;} .chartAxisLbl{font-family:var(--font-mono);font-size:7.5px;fill:var(--ink-soft);}
 .chartCaption{font-size:11.5px;color:var(--ink-soft);margin:0 0 8px;}
 .appCredit{text-align:center;font-size:11px;color:var(--ink-soft);font-style:italic;margin:18px 0 8px;}
+.sgRib{display:flex;align-items:center;background:#24332a;padding:10px 12px;overflow-x:auto;}
+.sgSt{display:flex;align-items:center;gap:6px;color:#9fb0a4;font-size:12px;font-weight:800;white-space:nowrap;}
+.sgD{width:22px;height:22px;border-radius:50%;border:2px solid #5f7466;display:flex;align-items:center;justify-content:center;font-size:11px;flex:none;}
+.sgSt.done{color:#cfe3d4}.sgSt.done .sgD{background:#3f8a55;border-color:#3f8a55;color:#fff}
+.sgSt.cur{color:#fff}.sgSt.cur .sgD{background:#d9a53a;border-color:#d9a53a;color:#24332a}
+.sgLn{flex:1;height:2px;background:#5f7466;margin:0 6px;min-width:8px}.sgLn.done{background:#3f8a55}
+.sgCols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.sgKeep{flex:1;border:2px solid var(--line);border-radius:12px;padding:12px;text-align:center;background:#fff;cursor:pointer;color:var(--ink)}
+.sgKeep.on{border-color:var(--grass-1);background:#e7efe7}
+@media (max-width:560px){ .sgSt:not(.cur) .sgT{display:none} .sgCols{grid-template-columns:1fr} }
+.drHandle{display:inline-block;color:#9aa39c;margin-right:5px;cursor:grab;touch-action:none;user-select:none;padding:2px 3px;font-size:14px;}
+.drGhost{position:fixed;z-index:9999;pointer-events:none;background:#fff;color:var(--ink);border:2px solid #6b3fa0;border-radius:10px;padding:6px 10px;font-weight:800;font-size:13px;box-shadow:0 8px 18px rgba(0,0,0,.35);transform:rotate(-3deg);white-space:nowrap;}
+.drWrap{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap;}
+.drWrap > .gridScroll{flex:1 1 360px;min-width:0;}
+.drTable{flex:0 1 300px;min-width:230px;border:1px solid var(--line);border-radius:12px;background:#fff;padding:10px 12px;font-size:13px;}
+.drTableHead{font-size:10.5px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-soft);margin-bottom:6px;}
+.drRow{display:flex;justify-content:space-between;padding:5px 6px;margin:0 -6px;border-bottom:1px solid #f0ead9;cursor:pointer;border-radius:6px;}
+.drRow.open{background:#f3ecfb;font-weight:800;}
+.drDetail{width:100%;border-collapse:collapse;font-size:12px;margin:4px 0 6px;}
+.drDetail th{text-align:left;font-size:10.5px;color:var(--ink-soft);padding:3px 2px;}
+.drDetail td{padding:3px 2px;border-top:1px solid #f0ead9;}
+.drTableHint{font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.4;}
 </style>
 </head>
 <body>
@@ -1557,28 +1579,120 @@ function rescopeTeams(){
 function tourneyTeams(sid){ return (S.allTeams||[]).filter(t=>t.tournamentSeasonId===sid); }
 function tourneyRoster(tid, sid){ return (S.allPlayersForFeed||[]).filter(p=>p.teamId===tid && p.seasonId===sid).sort((a,b)=>(a.order||99)-(b.order||99)); }
 // ---- run limit per half-inning ----
-function runCapFor(game){
-  const sn=seasonById(game&&game.seasonId); if(!sn || !isTourneySeason(sn)) return 0;
-  const c=tourneyCfg(sn); const cap=+c.runLimit||0; if(!cap) return 0;
-  if(c.openLast && (game.inning||1)>=(+c.innings||game.inningsPlanned||7)) return 0;
-  return cap;
-}
 function endHalfInning(game){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
-function tourneyRulesLine(sn){
-  const c=tourneyCfg(sn); const bits=[];
-  if(+c.runLimit) bits.push('Max '+c.runLimit+' runs per inning'+(c.openLast?' (last inning open)':''));
-  if(+c.innings) bits.push(c.innings+' innings');
+// ---- tournament rules: run limits with open innings, and run rules (mercy), each by game length ----
+function tLimits(c){ c=c||{}; if(Array.isArray(c.limits)) return c.limits; if(+c.runLimit){ const n=+c.innings||7; return [{len:0,runs:+c.runLimit,open:c.openLast?[n]:[],openExtra:!!c.openLast}]; } return []; }
+function tMercy(c){ c=c||{}; return Array.isArray(c.mercyRules)?c.mercyRules:[]; }
+function seasonRulesOn(sn){ return !!(sn && !isTourneySeason(sn) && ['draft','informal'].includes(seasonMethod(sn)) && sn.seasonRules && sn.seasonRules.on); }
+function rulesCfg(sn){ if(!sn) return null; if(isTourneySeason(sn)) return tourneyCfg(sn); return seasonRulesOn(sn)?sn.seasonRules:null; }
+function gameLen(game){ const c=rulesCfg(seasonById(game.seasonId))||{}; return +game.inningsPlanned || +c.innings || 7; }
+function ruleFor(list, len){ return list.find(r=>+r.len===len) || list.find(r=>!+r.len) || null; }
+function limitRowFor(game){ const c=rulesCfg(seasonById(game&&game.seasonId)); if(!c) return null; return ruleFor(tLimits(c), gameLen(game)); }
+function inningOpen(row, inning, len){ if(inning>len) return !!row.openExtra; return (row.open||[]).map(Number).includes(+inning); }
+function runCapFor(game){
+  const row=limitRowFor(game); if(!row||!+row.runs) return 0;
+  if(game.capKeep && game.capKeep===game.inning+game.half) return 0;
+  return inningOpen(row, game.inning||1, gameLen(game)) ? 0 : +row.runs;
+}
+function mercyRulesFor(game){ const c=rulesCfg(seasonById(game&&game.seasonId)); if(!c) return []; const len=gameLen(game); const all=tMercy(c); const exact=all.filter(r=>+r.len===len); return (exact.length?exact:all.filter(r=>!+r.len)).slice().sort((a,b)=>a.after-b.after); }
+function ordinal(n){ n=+n; const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
+function limitText(row, len){ if(!row||!+row.runs) return ''; const open=(row.open||[]).map(Number).filter(i=>i<=len).sort((a,b)=>a-b); const parts=open.map(ordinal); if(row.openExtra) parts.push('extras');
+  return 'Max '+row.runs+' runs per inning'+(parts.length?' ('+parts.join(', ').replace(/, ([^,]*)$/,' & $1')+' open)':''); }
+function mercyText(list){ return list.length?'Run rule: '+list.map(r=>r.lead+' after '+r.after).join(', '):''; }
+function tourneyRulesLine(sn, game){
+  const c=rulesCfg(sn)||{}; const len=game?gameLen(game):(+c.innings||7); const bits=[];
+  const row=ruleFor(tLimits(c),len); if(row&&+row.runs) bits.push(limitText(row,len));
+  bits.push(len+' innings');
   if(+c.timeLimit) bits.push(c.timeLimit+'-min time limit');
-  if(c.mercy) bits.push('Run rule: '+c.mercy);
+  const m=game?mercyRulesFor(game):tMercy(c).filter(r=>!+r.len||+r.len===len); if(m.length) bits.push(mercyText(m)); else if(c.mercy) bits.push('Run rule: '+c.mercy);
   return bits.join(' · ');
 }
 function tourneyRulesBanner(game){
-  const sn=seasonById(game&&game.seasonId); if(!sn||!isTourneySeason(sn)) return null; const line=tourneyRulesLine(sn); if(!line) return null;
-  const cap=runCapFor(game); const side=battingSide(game); const now=(game.score&&game.score[side]&&game.score[side][game.inning])||0;
-  return h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#fff6dc;border:1.5px solid var(--gold);border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;'},[
-    h('b',{},'🏆 Tournament rules'),h('span',{style:'flex:1;min-width:200px;'},line),
-    cap&&!game.completed?h('span',{style:'font-weight:800;background:'+(now>=cap-1?'#fde3df':'#fff')+';border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},'This inning: '+now+' of '+cap+' runs'):null]);
+  const sn=seasonById(game&&game.seasonId); if(!rulesCfg(sn)) return null; const T=isTourneySeason(sn); const line=tourneyRulesLine(sn, game); if(!line) return null;
+  const row=limitRowFor(game); const side=battingSide(game); const now=(game.score&&game.score[side]&&game.score[side][game.inning])||0; const cap=runCapFor(game);
+  const hl=(game.half==='top'?'Top ':'Bot ')+game.inning;
+  let pill=null;
+  if(!game.completed && row && +row.runs){
+    if(!cap) pill=h('span',{style:'font-weight:800;background:#fde3df;border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},hl+' · OPEN inning — no limit');
+    else if(now>=cap) pill=h('span',{style:'font-weight:800;background:#fde3df;border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},'🚩 '+hl+' · '+now+' of '+cap+' — limit reached');
+    else if(now>=cap-1) pill=h('span',{style:'font-weight:800;background:#ffe9b8;border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},'⚠ '+hl+' · '+now+' of '+cap+' — one run from the limit');
+    else pill=h('span',{style:'font-weight:800;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},hl+' · this inning: '+now+' of '+cap);
+  }
+  return h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:'+(T?'#fff6dc;border:1.5px solid var(--gold)':'#eef3ee;border:1.5px solid #8fb39a')+';border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;'},[h('b',{},T?'🏆 Tournament rules':'📋 Season rules'),h('span',{style:'flex:1;min-width:200px;'},line),pill]);
 }
+// ---- alerts ----
+function ruleAlert(color, icon, title, big, body, okLabel, onOk, keepLabel, onKeep){
+  const ov=h('div',{class:'modalOverlay'}); const box=h('div',{class:'modalSheet',style:'padding:0;overflow:hidden;max-width:460px;'});
+  box.appendChild(h('div',{style:'background:'+color+';color:#fff;padding:14px 18px;font-weight:900;font-size:19px;'},icon+' '+title));
+  const b=h('div',{style:'padding:14px 18px 18px;font-size:14.5px;line-height:1.5;'},[h('div',{style:'font-family:var(--font-display);font-size:21px;font-weight:800;margin:0 0 8px;'},big),body]);
+  const done=fn=>async()=>{ ov.remove(); try{ await fn(); }catch(e){ toast('Could not save: '+(e.message||e)); } };
+  b.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;'},[h('button',{class:'btn btn-primary',onclick:done(onOk)},okLabel),h('button',{class:'btn btn-outline',onclick:done(onKeep)},keepLabel)]));
+  box.appendChild(b); ov.appendChild(box); document.body.appendChild(ov);
+}
+function runLimitAlert(game, side, cap){
+  const team=(game[side]||{}).name||'This team', other=(game[side==='away'?'home':'away']||{}).name||'the other team';
+  const half=game.half, inn=game.inning; const nextHalf=half==='top'?'bottom of the '+ordinal(inn):'top of the '+ordinal(inn+1);
+  ruleAlert('#c0392b','🚩','Run limit reached', team+' — '+cap+' runs in the '+(half==='top'?'top':'bottom')+' of the '+ordinal(inn),
+    h('div',{},['The '+cap+'-run limit is reached, so ',h('b',{},'the side is retired'),'. Runners left on base don’t score. ',h('b',{},other),' bats next ('+nextHalf+').',
+      h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin-top:8px;'},'Keep playing lets this half-inning continue (for example, if the umpire rules otherwise). Mistakes can be fixed on the Scorecard.')]),
+    'OK — next half-inning', async()=>{ const last=(game.atbats||[]).slice(-1)[0]; if(last && last.side===side && last.inning===inn) last.runLimitEnd=true; else { game.runnerOuts=(game.runnerOuts||[]); }
+      endHalfInning(game); await saveGame(game,{atbats:game.atbats,outs:game.outs,base:game.base,half:game.half,inning:game.inning,capKeep:null}); toast('🚩 Run limit — '+team+'’s half-inning is over ('+cap+' runs)'); setTimeout(()=>mercyCheck(game),400); },
+    'Keep playing', async()=>{ await saveGame(game,{capKeep:inn+half}); toast('Run limit set aside for this half-inning'); });
+}
+function mercyCheck(game){
+  if(!game || game.completed) return; const rules=mercyRulesFor(game); if(!rules.length) return;
+  const a=totalRuns(game,'away'), hm=totalRuns(game,'home'); const doneFull=game.inning-1; const topDone=game.half==='bottom'?game.inning:game.inning-1;
+  let hit=null;
+  const fresh=!(game.atbats||[]).some(x=>x.inning===game.inning && x.half===game.half);   // a half-inning has just ended
+  rules.slice().sort((x,y)=>(+y.after)-(+x.after)).forEach(r=>{ if(hit) return; const lead=+r.lead, after=+r.after;
+    if(a-hm>=lead && game.half==='top' && fresh && doneFull>=after) hit=r;               // visitors ahead once the full inning is complete
+    else if(hm-a>=lead && (game.half==='bottom' ? topDone>=after : (fresh && doneFull>=after))) hit=r; // home ahead after the visitors batted (or walks it off)
+  });
+  if(!hit) return; const key=game.inning+game.half+':'+a+'-'+hm; if(game.mercyKeep===key) return;
+  const leadTeam=a>hm?(game.away||{}).name:(game.home||{}).name; const sc=Math.max(a,hm)+'–'+Math.min(a,hm);
+  const afterN=(game.half==='bottom' && hm>a)?topDone:doneFull;
+  ruleAlert('#1f5130','🏁','Run rule reached', leadTeam+' leads '+sc+' after '+afterN,
+    h('div',{},['The '+hit.lead+'-run rule after '+hit.after+' innings applies. ',h('span',{style:'color:var(--ink-soft);'},'The umpire has the final say.')]),
+    'End game — Final '+a+'–'+hm, async()=>{ await saveGame(game,{completed:true,completedAt:Date.now(),endedByRunRule:{lead:hit.lead,after:hit.after}}); toast('🏁 Game over by run rule'); },
+    'Keep playing', async()=>{ await saveGame(game,{mercyKeep:key}); });
+}
+// ---- Rules editor (Admin → 🏆 Tournament → 1 · Rules) ----
+function tourneyRulesEditor(c, save){
+  const wrap=h('div',{}); const defLen=+c.innings||7;
+  const lenOpts=[[0,'All']].concat([5,6,7,8,9].map(n=>[n,String(n)]));
+  const sel=(val,opts,fn,st)=>{ const s=h('select',{style:'width:auto;'+(st||'')}); opts.forEach(([v,l])=>s.appendChild(h('option',{value:String(v)},l))); s.value=String(val); s.addEventListener('change',()=>fn(s.value)); return s; };
+  const lab=t=>h('span',{style:'font-size:11px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft);'},t);
+  // run limits
+  const limits=tLimits(c).map(r=>Object.assign({},r,{open:(r.open||[]).slice()})); const putL=()=>save({limits, runLimit:null, openLast:null});
+  wrap.appendChild(h('div',{style:'font-weight:800;font-size:14.5px;margin:6px 0 2px;'},'Run limit per inning'));
+  wrap.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 8px;'},'The most runs a team can score in a half-inning. Tap the innings that have no limit (open innings). Add a row for each game length if they differ.'));
+  limits.forEach((r,i)=>{ const len=+r.len||defLen;
+    const chips=h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;'});
+    for(let k=1;k<=len;k++){ const on=r.open.map(Number).includes(k); chips.appendChild(h('button',{type:'button',style:'min-width:38px;padding:6px 0;border-radius:10px;font-weight:800;cursor:pointer;border:1.5px solid '+(on?'#c27b1c;background:#c27b1c;color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ r.open=on?r.open.filter(x=>+x!==k):r.open.concat([k]); putL(); }},String(k))); }
+    chips.appendChild(h('button',{type:'button',style:'padding:6px 10px;border-radius:10px;font-weight:800;cursor:pointer;border:1.5px solid '+(r.openExtra?'#c27b1c;background:#c27b1c;color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ r.openExtra=!r.openExtra; putL(); }},'Extra innings'));
+    wrap.appendChild(h('div',{style:'border:1px solid var(--line);border-radius:12px;padding:10px;margin-bottom:8px;background:#fff;'},[
+      h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;'},[lab('No. of Innings'),sel(r.len||0,lenOpts,v=>{ r.len=+v; putL(); }),lab('Max runs'),sel(+r.runs===0?0:(r.runs||5),[[0,'No limit']].concat([3,4,5,6,7,8,10].map(n=>[n,n+' runs'])),v=>{ r.runs=+v; putL(); }),h('div',{style:'flex:1;'}),
+        h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>{ limits.splice(i,1); putL(); }},'✕')]),
+      ...(+r.runs?[h('div',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;margin-top:8px;'},'Tap innings with no limit'), chips,
+      h('div',{style:'display:flex;gap:10px;margin-top:6px;font-size:12px;'},[h('a',{href:'#',onclick:e=>{ e.preventDefault(); r.open=[len]; r.openExtra=true; putL(); }},'Last inning open'),h('a',{href:'#',onclick:e=>{ e.preventDefault(); r.open=[]; r.openExtra=false; putL(); }},'No open innings')])]:[h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin-top:8px;'},'No run limit per inning — teams score as many runs as they get.')])])); });
+  wrap.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'border-style:dashed;',onclick:()=>{ limits.push({len:limits.length?(defLen===7?9:7):0,runs:5,open:[defLen],openExtra:true}); putL(); }},'＋ Add a run limit'));
+  // run rules
+  const mr=tMercy(c).map(r=>Object.assign({},r)); const putM=()=>save({mercyRules:mr, mercy:null});
+  wrap.appendChild(h('div',{style:'font-weight:800;font-size:14.5px;margin:16px 0 2px;'},'Run rule (mercy)'));
+  wrap.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 8px;'},'The game can end early when a team is ahead by at least that many runs once that inning is complete. Add one row per rule.'));
+  if(mr.length){ const t=h('table',{class:'dataTable'}); t.appendChild(h('tr',{},['No. of Innings','Ahead by','After inning',''].map(x=>h('th',{style:'text-align:left;'},x))));
+    mr.forEach((r,i)=>t.appendChild(h('tr',{},[h('td',{},sel(r.len||0,lenOpts,v=>{ r.len=+v; putM(); })),h('td',{},sel(r.lead||10,[5,6,7,8,10,12,15,20].map(n=>[n,n+' runs']),v=>{ r.lead=+v; putM(); })),h('td',{},sel(r.after||5,[2,3,4,5,6,7,8].map(n=>[n,ordinal(n)]),v=>{ r.after=+v; putM(); })),
+      h('td',{},h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>{ mr.splice(i,1); putM(); }},'✕'))]))); wrap.appendChild(h('div',{class:'gridScroll'},t)); }
+  else if(c.mercy) wrap.appendChild(h('p',{style:'font-size:12px;color:#7a5a00;margin:0 0 6px;'},'Old typed rule: “'+c.mercy+'” — add rows below to replace it.'));
+  wrap.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'border-style:dashed;margin-top:6px;',onclick:()=>{ const last=mr[mr.length-1]; mr.push(last?{len:last.len||0,lead:Math.max(5,(+last.lead||15)-5),after:Math.min(8,(+last.after||3)+2)}:{len:0,lead:15,after:3}); putM(); }},'＋ Add a run rule'));
+  // how it reads
+  const lens=[...new Set([].concat(limits.map(r=>+r.len||0),mr.map(r=>+r.len||0)))].sort((a,b)=>a-b);
+  if(lens.length){ const lines=lens.map(L=>{ const lenN=L||defLen; const row=limits.find(r=>(+r.len||0)===L); const ms=mr.filter(r=>(+r.len||0)===L).sort((a,b)=>a.after-b.after);
+      const who=L?L+' innings':'All games'; const parts=[]; if(row) parts.push(+row.runs?limitText(row,lenN).replace('Max ',''):'no run limit per inning'); if(ms.length) parts.push('end early if a team leads by '+ms.map(r=>r.lead+' after '+r.after).join(', or ')); return h('div',{},[h('b',{style:'color:var(--grass-1);'},who+': '),parts.join('; ')+'.']); });
+    wrap.appendChild(h('div',{style:'background:#eef3ee;border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.6;margin-top:12px;'},[h('b',{style:'color:var(--grass-1);'},'How it reads:')].concat(lines))); }
+  return wrap;
+}
+
 // ---- pool standings with tournament tiebreakers ----
 function tourneyGames(sid){ const ids=new Set(tourneyTeams(sid).map(t=>t.id)); return dedupeByMatchup((S.allGamesForFeed||[]).filter(g=>g.seasonId===sid && ids.has(g.teamId) && !g.bracketMatchId)); }
 function tourneyStandings(sid){
@@ -1630,11 +1744,9 @@ function tourneyView(root){
   // 1 — rules
   const rc=h('div',{class:'card'}); rc.appendChild(h('h3',{},'1 · Rules'));
   rc.appendChild(row('Format',sel(c.format||'pools',[['pools','Pool play, then bracket'],['bracket','Bracket only']],v=>save({format:v}))));
-  rc.appendChild(row('Run limit per inning',sel(c.runLimit||0,[[0,'No limit']].concat([3,4,5,6,7,8,10].map(n=>[n,n+' runs'])),v=>save({runLimit:+v})),'When a team reaches it, its half-inning ends automatically on the Scorecard.'));
-  if(+c.runLimit){ const cb=h('input',{type:'checkbox',style:'width:auto;'}); cb.checked=!!c.openLast; cb.addEventListener('change',()=>save({openLast:cb.checked})); rc.appendChild(row('Last inning open (no limit)',cb)); }
   rc.appendChild(row('Innings per game',sel(c.innings||7,[5,6,7,8,9].map(n=>[n,n+' innings']),v=>save({innings:+v}))));
   rc.appendChild(row('Time limit',sel(c.timeLimit||0,[[0,'None']].concat([45,50,55,60,65,70,75,90].map(n=>[n,n+' minutes'])),v=>save({timeLimit:+v})),'Shown on the Scorecard as a reminder.'));
-  { const i=h('input',{type:'text',placeholder:'e.g. 15 runs after 4 innings (optional)',value:c.mercy||'',maxlength:'60',style:'width:260px;'}); i.addEventListener('change',()=>save({mercy:i.value.trim()})); rc.appendChild(row('Run rule (mercy)',i)); }
+  rc.appendChild(tourneyRulesEditor(c, save));
   rc.appendChild(row('Tiebreaker: run differential cap',sel(c.rdCap||0,[[0,'No cap']].concat([5,7,10].map(n=>[n,'±'+n+' per game'])),v=>save({rdCap:+v})),'Ties in pool standings: win %, head-to-head, run differential, fewest runs allowed.'));
   root.appendChild(rc);
   // 2 — teams
@@ -1829,7 +1941,7 @@ function syncPoolTeam(){
   else if(isPoolTeamId(S.selectedTeamId)){ S.selectedTeamId=null; const nt=myTeamId() && S.teams.some(t=>t.id===myTeamId()) ? myTeamId() : ((S.teams[0]&&S.teams[0].id)||null); S.selectedTeamId=nt; switchTeamListeners(); }
 }
 function gameRef(id){ return doc(db,'teams',S.selectedTeamId,'games',id); }
-async function saveGame(game, patch){ await updateDoc(gameRef(game.id), patch); }
+async function saveGame(game, patch){ if(game && game.__pregame){ for(const side of ['home','away']) if(patch[side]) await savePregameSide(game, side, patch[side]); renderShell(); return; } await updateDoc(gameRef(game.id), patch); }
 
 
 /* ===================== SHELL / ROUTER ===================== */
@@ -2500,13 +2612,31 @@ Router.register('lineup', (root)=>{
   const gameCard=h('div',{class:'card'}); gameCard.appendChild(h('h3',{},'Select Game'));
   const gsel=h('select',{}); gsel.appendChild(h('option',{value:''},'— None —'));
   const lineupGames = isAdmin() ? leagueGames() : seasonGames();
-  lineupGames.forEach(g=>{ const o=h('option',{value:g.id},(g.away.name+' at '+g.home.name)+' — '+formatDate(g.date)); if(g.id===S.activeGameId) o.setAttribute('selected','selected'); gsel.appendChild(o); });
-  gsel.addEventListener('change', ()=>{ const g=lineupGames.find(x=>x.id===gsel.value); if(g) useGame(g); else { S.activeGameId=null; renderShell(); } });
+  { const cg=currentGame(); if(cg && !lineupGames.some(x=>x.id===cg.id)) lineupGames.unshift(cg); }   // the open game is always in the list
+  if(pgSelected && (S.allGamesForFeed||[]).some(g=>g.matchupId===pgSelected)) pgSelected=null;   // that game has started
+  const upcoming=upcomingSchedForLineup();
+  loadPregameLineups().then(ch=>{ if(ch && S.activeTab==='lineup') renderShell(); });
+  const live=lineupGames.filter(g=>!g.completed), done=lineupGames.filter(g=>g.completed);
+  const grp=(label,items)=>{ if(!items.length) return; const og=h('optgroup',{label}); items.forEach(o=>og.appendChild(o)); gsel.appendChild(og); };
+  const gOpt=g=>{ const o=h('option',{value:g.id},(g.away.name+' at '+g.home.name)+' — '+formatDate(g.date)); if(g.id===S.activeGameId) o.setAttribute('selected','selected'); return o; };
+  grp('In progress', live.map(gOpt));
+  grp('Upcoming — set the lineup ahead', upcoming.map(sc=>{ const sd=schedSides(sc); const mine=isAdmin()?null:myTeamId();
+    const st=mine ? (pgLineup(sc.matchupId,mine)?' · ✓ your lineup set':' · not set') : (' · '+[sd.away,sd.home].filter(t=>t.id&&pgLineup(sc.matchupId,t.id)).length+' of 2 lineups set');
+    const o=h('option',{value:'pg:'+sc.matchupId},formatDate(sc.date)+(sc.time?' · '+fmtSchedTime(sc.time):'')+' — '+sd.away.name+' at '+sd.home.name+st); if(!S.activeGameId && pgSelected===sc.matchupId) o.setAttribute('selected','selected'); return o; }));
+  grp('Played', done.map(gOpt));
+  gsel.addEventListener('change', ()=>{ const v=gsel.value;
+    if(v.startsWith('pg:')){ const sc=upcoming.find(x=>x.matchupId===v.slice(3)); if(sc) openPregame(sc); return; }
+    pgSelected=null; const g=lineupGames.find(x=>x.id===v); if(g) useGame(g); else { S.activeGameId=null; renderShell(); } });
   gameCard.appendChild(gsel);
   root.appendChild(gameCard);
 
   const game = currentGame();
-  if(!game){ root.appendChild(emptyState('No game selected','Select an existing game above, or start one from the Scorecard tab.','diamond')); return; }
+  if(!game && pgSelected && pgGames[pgSelected]){ const pg=pgGames[pgSelected];
+    root.appendChild(pregameLineupNote(pg));
+    root.appendChild(lineupTeamPanel(pg,'away',canEditPregameSide(pg,'away')));
+    root.appendChild(lineupTeamPanel(pg,'home',canEditPregameSide(pg,'home')));
+    return; }
+  if(!game){ root.appendChild(emptyState('No game selected','Pick a game above — upcoming games can have their lineups set ahead of time.','diamond')); return; }
 
   const splitWrap = h('div',{});
   splitWrap.appendChild(lineupTeamPanel(game,'home',canEdit));
@@ -2544,7 +2674,7 @@ function lineupTeamPanel(game, side, canEdit){
     panel.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin:6px 6px 0 0;',onclick:()=>addGuestModal(addToSide)},'+ Add guest'));
     const last=S.allGamesForFeed.filter(g=>g.pickup && g.seasonId===S.currentSeasonId && g.id!==game.id && (g[side].players||[]).some(p=>p.name)).sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
     if(last) panel.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin:6px 0 10px;',onclick:()=>confirmModal('Copy '+(side==='home'?'Home':'Away')+' from the last game?','Replaces this side\u2019s lineup with the one from '+formatDate(last.date)+'.',async()=>{ await saveGame(game,{[side]:{...team,name:last[side].name||team.name,players:last[side].players}}); toast('Lineup copied'); renderShell(); })},'Same as last game ('+formatDate(last.date)+')'));
-  } else if(canEdit){
+  } else if(canEdit && !game.__pregame){
     const isCustom = !S.teams.some(t=>t.name===team.name);
     const teamSel=h('select',{});
     teamSel.appendChild(h('option',{value:''},'Select league team…'));
@@ -2698,19 +2828,21 @@ function outsForResult(result){ const r=RESULTS[result]; return (r.out?1:0)+(r.o
 
 async function recordAtBat(game, playerId, result, zone){
   const side = battingSide(game);
+  const drBefore=['first','second','third'].map(k=>drActive(game,game.base[k])).filter(Boolean);
   let scoredIds = applyResult(game, result, playerId);
   // tournament run limit: runs past the cap don't count and the half-inning ends
   const cap=runCapFor(game); let capped=false;
   if(cap){ const before=(game.score[side][game.inning]||0); if(before+scoredIds.length>=cap){ scoredIds=scoredIds.slice(0,Math.max(0,cap-before)); capped=true; } }
   const rbi = (result==='E') ? 0 : scoredIds.length;
   const atbat = { id:uid(), side, playerId, inning:game.inning, half:game.half, result, zone:zone||null, scoredPlayerIds:scoredIds.slice(), runsScored:scoredIds.length, rbi, extraOutsAtHome:0, ts:Date.now() };
-  if(capped) atbat.runLimitEnd=true;
   game.atbats.push(atbat);
   game.score[side][game.inning] = (game.score[side][game.inning]||0) + scoredIds.length;
   game.outs += outsForResult(result);
-  if(capped){ endHalfInning(game); toast('Run limit reached ('+cap+') — side retired'); }
-  else if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top'){ game.half='bottom'; } else { game.half='top'; game.inning+=1; } }
+  const askLimit = capped && game.outs<3;
+  if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top'){ game.half='bottom'; } else { game.half='top'; game.inning+=1; } }
   await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning });
+  { const drS=drBefore.filter(e=>scoredIds.includes(e.forId)); if(drS.length) setTimeout(()=>toast(drS.map(e=>'🏃 '+playerInitialLast(e.runnerName)+' (DR) scores — run credited to '+playerInitialLast(e.forName)).join(' · ')),900); }
+  if(askLimit) runLimitAlert(game, side, cap); else mercyCheck(game);
 }
 
 function recomputeGameStateFromAtBats(game){
@@ -2788,11 +2920,11 @@ async function moveRunner(game, originBase, target, playerId){
     const side=battingSide(game);
     game.score[side][game.inning]=(game.score[side][game.inning]||0)+1;
     if(!game.manualScores) game.manualScores=[];
-    game.manualScores.push({id:uid(),playerId,side,inning:game.inning});
+    game.manualScores.push({id:uid(),playerId,side,inning:game.inning,ts:Date.now()});
     const cap=runCapFor(game);
-    if(cap && (game.score[side][game.inning]||0)>=cap){ endHalfInning(game); toast('Run limit reached ('+cap+') — side retired'); await saveGame(game,{base:game.base,score:game.score,manualScores:game.manualScores,outs:game.outs,half:game.half,inning:game.inning}); return; }
     toast('Runner sent home — run scored');
     await saveGame(game,{base:game.base,score:game.score,manualScores:game.manualScores});
+    if(cap && (game.score[side][game.inning]||0)>=cap) runLimitAlert(game, side, cap); else mercyCheck(game);
   } else {
     if(game.base[target]){ toast('That base is already occupied'); return; }
     game.base[target]=playerId; game.base[originBase]=null;
@@ -2861,46 +2993,136 @@ function playBallSplash(){
   document.body.appendChild(el);
   setTimeout(()=>{ el.classList.add('out'); setTimeout(()=>el.remove(),750); },1900);
 }
+/* ===================== PRE-GAME LINEUPS & START-GAME FLOW =====================
+   Managers set their own team's lineup for an upcoming game on the Lineup tab (stored in savedLineups/pg_<matchup>_<team>).
+   On the Scorecard, starting a game walks through: ① Select game ② Lineups ③ Confirmed ④ Start game ⑤ Play Ball!
+   Nothing is created until Start game. */
+let pgLoadAt=0, pgSelected=null; const pgGames={};
+function pgKey(matchupId, teamId){ return 'pg_'+matchupId+'_'+teamId; }
+function loadPregameLineups(force){
+  if(!force && Date.now()-pgLoadAt<15000) return Promise.resolve(false); pgLoadAt=Date.now();
+  return getDocs(collection(db,'savedLineups')).then(sn=>{ const m={}; sn.docs.forEach(d=>{ if(d.id.startsWith('pg_')) m[d.id]=d.data(); }); S.pgLineups=m; return true; }).catch(()=>false);
+}
+function pgLineup(matchupId, teamId){ return ((S.pgLineups||{})[pgKey(matchupId,teamId)])||null; }
+function teamNameAny(id){ return ((S.allTeams||[]).find(t=>t.id===id)||S.teams.find(t=>t.id===id)||{}).name || ''; }
+function schedSides(sched){
+  const own=sched.teamId||S.selectedTeamId, opp=sched.opponentTeamId||null; const ownName=teamNameAny(own)||'Home';
+  return sched.homeAway==='away' ? {home:{id:opp,name:sched.opponent||'Home'},away:{id:own,name:ownName}} : {home:{id:own,name:ownName},away:{id:opp,name:sched.opponent||'Away'}};
+}
+function schedWhen(s){ return formatDate(s.date)+(s.time?' · '+fmtSchedTime(s.time):'')+(s.location?' · '+s.location:''); }
+function fmtSchedTime(t){ const m=/^(\d{1,2}):(\d{2})$/.exec(t||''); if(!m) return t||''; let hh=+m[1]; const ap=hh>=12?'PM':'AM'; hh=hh%12||12; return hh+':'+m[2]+' '+ap; }
+function upcomingSchedForLineup(){
+  const list=(isAdmin()?leagueSchedule():seasonSchedule()).filter(s=>!s.completed && !s.pickup && s.matchupId && (s.date||'')>=(()=>{ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })() && !(S.allGamesForFeed||[]).some(g=>g.matchupId===s.matchupId));
+  return list.sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')));
+}
+async function sideLineupPlayers(matchupId, teamId){
+  const pg=teamId?pgLineup(matchupId,teamId):null;
+  if(pg && Array.isArray(pg.players)) return {players:pg.players.map(p=>({...p})), fromManager:true};
+  return {players:await fetchTeamRosterFormatted(teamId||null), fromManager:false};
+}
+function canEditPregameSide(game, side){ if(isAdmin()) return true; const tid=sideTeamId(game, side); return !!(isManager() && tid && myTeamId()===tid); }
+async function openPregame(sched){
+  await loadPregameLineups(true); const sd=schedSides(sched);
+  const H=await sideLineupPlayers(sched.matchupId, sd.home.id), A=await sideLineupPlayers(sched.matchupId, sd.away.id);
+  pgGames[sched.matchupId]={__pregame:true, id:'pg:'+sched.matchupId, matchupId:sched.matchupId, seasonId:sched.seasonId||S.currentSeasonId, date:sched.date, time:sched.time||'', location:sched.location||'',
+    teamId:sd.home.id, homeAway:'home', opponentTeamId:sd.away.id, home:{name:sd.home.name, coach:'', players:H.players}, away:{name:sd.away.name, coach:'', players:A.players}, atbats:[], pgSet:{home:H.fromManager, away:A.fromManager}};
+  pgSelected=sched.matchupId; S.activeGameId=null; renderShell();
+}
+async function savePregameSide(game, side, team){
+  const tid=sideTeamId(game, side); if(!tid){ toast('That team isn’t in the league — set this lineup when the game starts'); return; }
+  const data={pregame:true, matchupId:game.matchupId, teamId:tid, seasonId:game.seasonId||null, name:team.name||'', coach:team.coach||'', players:(team.players||[]).map(p=>({...p})), setBy:(S.user&&S.user.email)||null, setByName:(S.profile&&S.profile.displayName)||'', setAt:Date.now()};
+  await setDoc(doc(db,'savedLineups',pgKey(game.matchupId,tid)),data);
+  S.pgLineups=S.pgLineups||{}; S.pgLineups[pgKey(game.matchupId,tid)]=data; game[side]={...team}; game.pgSet[side]=true; toast('Lineup saved for this game');
+}
+function pregameLineupNote(game){
+  const st=side=>game.pgSet[side]?h('span',{style:'font-size:11px;font-weight:800;border-radius:8px;padding:2px 7px;background:#dff0e3;color:var(--grass-1);'},'✓ '+game[side].name+' lineup set'):h('span',{style:'font-size:11px;font-weight:800;border-radius:8px;padding:2px 7px;background:#fff3cf;color:#7a5a00;'},game[side].name+': from roster');
+  return h('div',{class:'card',style:'background:#eef3ee;'},[
+    h('div',{style:'font-weight:800;font-size:14px;margin-bottom:4px;'},game.away.name+' at '+game.home.name+' — '+schedWhen(game)),
+    h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;'},[st('away'),st('home')]),
+    h('div',{style:'font-size:12.5px;color:var(--ink-soft);line-height:1.45;'},'Set the batting order, positions and subs ahead of time. Each change saves for this game and is used automatically when the scorekeeper starts it on the Scorecard. '+(isAdmin()?'As an admin you can edit both teams.':'You can edit your own team.'))]);
+}
+// ---- the ribbon ----
+function startRibbon(step){
+  const names=['Select game','Lineups','Confirmed','Start game','Play Ball!']; const r=h('div',{class:'sgRib'});
+  names.forEach((n,i)=>{ const k=i+1; const cls=k<step?' done':(k===step?' cur':''); if(i) r.appendChild(h('div',{class:'sgLn'+(k<=step?' done':'')})); r.appendChild(h('div',{class:'sgSt'+cls},[h('span',{class:'sgD'},k<step?'✓':String(k)),h('span',{class:'sgT'},n)])); });
+  return r;
+}
+async function startGameWizard(sched){
+  const pickup=!!sched.pickup;
+  const ov=h('div',{class:'modalOverlay'}); const box=h('div',{class:'modalSheet',style:'padding:0;overflow:hidden;max-width:660px;'}); ov.appendChild(box); document.body.appendChild(ov);
+  const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  box.appendChild(startRibbon(2)); box.appendChild(h('div',{style:'padding:18px;color:var(--ink-soft);'},'Loading lineups…'));
+  let sd, L={}, keeper=null;
+  if(pickup){ sd={home:{id:null,name:sched.homeName||'Home'},away:{id:null,name:sched.awayName||'Away'}}; L.home={players:[],fromManager:false}; L.away={players:[],fromManager:false}; }
+  else { await loadPregameLineups(true); sd=schedSides(sched); L.home=await sideLineupPlayers(sched.matchupId, sd.home.id); L.away=await sideLineupPlayers(sched.matchupId, sd.away.id); }
+  const named=side=>(L[side].players||[]).filter(p=>p.name&&p.name.trim()).sort((a,b)=>(a.order||99)-(b.order||99));
+  const head=()=>h('div',{style:'margin-bottom:8px;'},[h('div',{style:'font-family:var(--font-display);font-size:20px;font-weight:800;'},sd.away.name+' at '+sd.home.name),h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},schedWhen(sched))]);
+  const tag=(txt,ok)=>h('span',{style:'font-size:10.5px;font-weight:800;border-radius:8px;padding:2px 7px;background:'+(ok?'#dff0e3;color:var(--grass-1)':'#fff3cf;color:#7a5a00')+';'},txt);
+  function draw(step){
+    box.innerHTML=''; box.appendChild(startRibbon(step)); const b=h('div',{style:'padding:14px 16px 16px;'}); box.appendChild(b); b.appendChild(head());
+    if(step===2){
+      b.appendChild(h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin:-2px 0 10px;'},pickup?'Build Home and Away from today’s players.':'Check both lineups before you start.'));
+      const cols=h('div',{class:'sgCols'}); const missing=[];
+      ['away','home'].forEach(side=>{
+        const list=named(side); if(!list.length) missing.push(sd[side].name);
+        const col=h('div',{}); col.appendChild(h('div',{style:'display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-weight:900;font-size:14px;margin-bottom:4px;'},[(side==='home'?'HOME · ':'AWAY · ')+sd[side].name, pickup?null:(L[side].fromManager?tag('✓ Set by manager',true):tag('From roster',false))]));
+        list.forEach((p,i)=>col.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--line);font-size:13.5px;'},[
+          h('span',{style:'width:21px;height:21px;border-radius:50%;background:var(--ink);color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex:none;'},String(i+1)),
+          h('span',{style:'flex:1;'},p.name+(p.isSub?' (sub)':'')), p.position?h('span',{style:'font-size:11.5px;font-weight:800;color:var(--ink-soft);border:1px solid var(--line);border-radius:6px;padding:1px 6px;'},p.position):null,
+          pickup?h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 8px;',onclick:()=>{ L[side].players=L[side].players.filter(x=>x.id!==p.id); draw(2); }},'✕'):null])));
+        if(!list.length) col.appendChild(h('div',{style:'background:#fde3df;border-radius:8px;padding:7px 9px;font-size:12px;color:#7a2a20;margin-top:4px;'},pickup?'No players yet — add them below.':'⚠ '+sd[side].name+' has no players yet — add them on the Lineup tab, or in Admin.'));
+        else col.appendChild(h('div',{style:'font-size:11.5px;color:var(--ink-soft);margin-top:4px;'},list.length+' players'));
+        if(pickup){
+          const taken=new Set(named('home').concat(named('away')).map(p=>p.id)); const pool=pickupPool().filter(x=>!taken.has(x.id));
+          const s=h('select',{style:'margin-top:6px;'}); s.appendChild(h('option',{value:''},'＋ Add a player ('+pool.length+' available)…')); pool.forEach(x=>s.appendChild(h('option',{value:x.id},x.name+(x.pos?' · '+x.pos:''))));
+          const add=x=>{ L[side].players.push({id:x.id,name:x.name,number:'',position:x.pos||'',order:L[side].players.length+1,isSub:false,subTeamName:''}); draw(2); };
+          s.addEventListener('change',()=>{ const x=pool.find(u=>u.id===s.value); if(x) add(x); });
+          col.appendChild(s); col.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin-top:6px;',onclick:()=>addGuestModal(add)},'+ Add guest'));
+        }
+        cols.appendChild(col); });
+      b.appendChild(cols);
+      const ok=!missing.length;
+      b.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;'},[
+        pickup?null:h('button',{class:'btn btn-outline',onclick:async()=>{ close(); S.activeTab='lineup'; await openPregame(sched); }},'✎ Edit a lineup'),
+        h('button',Object.assign({class:'btn btn-primary',onclick:()=>{ if(ok) draw(4); }},ok?{}:{disabled:'disabled',style:'opacity:.5;'}),'Lineups confirmed ›'),
+        h('button',{class:'btn btn-outline',onclick:close},'Cancel')]));
+    }
+    if(step===4){
+      b.appendChild(h('div',{style:'font-weight:800;font-size:15px;margin:2px 0 4px;'},'Who keeps the official score?'));
+      b.appendChild(h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin-bottom:8px;line-height:1.45;'},'Only one team keeps the official scorecard, so nothing gets entered twice. The other team follows along on Live Feed and can challenge a play.'));
+      const kb=(side)=>h('button',{class:'sgKeep'+(keeper===side?' on':''),onclick:()=>{ keeper=side; draw(4); }},[h('div',{style:'font-weight:900;font-size:16px;'},side==='home'?'Home':'Away'),h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},sd[side].name)]);
+      b.appendChild(h('div',{style:'display:flex;gap:10px;margin-bottom:12px;'},[kb('away'),kb('home')]));
+      const go=h('button',Object.assign({class:'btn btn-gold',onclick:async()=>{ if(!keeper) return; go.disabled=true; go.textContent='Starting…'; try{ await createGameFromWizard(sched, sd, L, keeper, pickup); draw(5); setTimeout(()=>{ close(); playBallSplash(); },650); }catch(e){ go.disabled=false; go.textContent='⚾ Start game'; toast('Could not start: '+(e.message||e)); } }},keeper?{}:{disabled:'disabled',style:'opacity:.5;'}),'⚾ Start game');
+      b.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'},[go,h('button',{class:'btn btn-outline',onclick:()=>draw(2)},'‹ Back'),h('button',{class:'btn btn-outline',onclick:close},'Cancel')]));
+      b.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:8px;'},'Nothing is created until you tap Start game.'));
+    }
+    if(step===5) b.appendChild(h('div',{style:'background:var(--grass-1);color:#fff;border-radius:14px;text-align:center;padding:20px;font-family:var(--font-display);font-size:28px;font-weight:900;'},'⚾ PLAY BALL!'));
+  }
+  draw(2);
+}
+async function createGameFromWizard(sched, sd, L, keeper, pickup){
+  const pad=list=>{ const out=list.map((p,i)=>({id:p.id||uid(),name:p.name||'',number:p.number||'',position:p.position||'',order:i+1,isSub:!!p.isSub,subTeamName:p.subTeamName||''})); while(out.length<14) out.push({id:uid(),name:'',number:'',position:'',order:out.length+1,isSub:false,subTeamName:''}); return out; };
+  const ordered=side=>(L[side].players||[]).slice().sort((a,b)=>(a.order||99)-(b.order||99));
+  const base={date:sched.date, seasonId:S.currentSeasonId, matchupId:sched.matchupId||null, location:sched.location||'', scorekeeperSide:keeper, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[], atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''};
+  if(pickup){
+    if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
+    const ref=await addDoc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games'),Object.assign(base,{pickup:true, opponent:sd.away.name, opponentTeamId:null, homeAway:'home', home:{name:sd.home.name,coach:'',players:pad(ordered('home').filter(p=>p.name))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away').filter(p=>p.name))}, inningsPlanned:9}));
+    S.activeGameId=ref.id; S.activeTab='scorecard'; renderShell(); return;
+  }
+  if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
+  if(sched.matchupId && sched.opponentTeamId){
+    try{ const os=await getDocs(collection(db,'teams',sched.opponentTeamId,'games')); const d=os.docs.find(x=>x.data().matchupId===sched.matchupId);
+      if(d){ toast('The other team already started this game — opening it'); useGame({id:d.id, teamId:sched.opponentTeamId, ...d.data()}); return; } }catch(e){}
+  }
+  const innings=isTourneySeason()?(+tourneyCfg().innings||7):(seasonRulesOn(currentSeason())&&+currentSeason().seasonRules.innings?+currentSeason().seasonRules.innings:9);
+  const ref=await addDoc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games'),Object.assign(base,{opponent:sched.opponent, opponentTeamId:sched.opponentTeamId||null, homeAway:sched.homeAway,
+    home:{name:sd.home.name,coach:'',players:pad(ordered('home'))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away'))}, inningsPlanned:innings}));
+  S.activeGameId=ref.id; S.activeTab='scorecard'; renderShell();
+}
 async function findOrCreateGameFromSchedule(sched){
   const existing = S.allGamesForFeed.find(g=>g.matchupId && sched.matchupId && g.matchupId===sched.matchupId);
   if(existing){ useGame(existing); return; }
-  if(sched.pickup){
-    if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
-    const ref = await addDoc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games'),{
-      pickup:true, opponent:sched.awayName||'Away', opponentTeamId:null, date:sched.date, seasonId:S.currentSeasonId, matchupId:sched.matchupId||null,
-      homeAway:'home', location:sched.location||'',
-      scorekeeperSide:'home', scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[],
-      home:{ name:sched.homeName||'Home', coach:'', players: emptyLineupSlots() },
-      away:{ name:sched.awayName||'Away', coach:'', players: emptyLineupSlots() },
-      inningsPlanned:9, atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''
-    });
-    S.activeGameId = ref.id; S.activeTab='lineup'; renderShell();
-    toast('Build Home and Away from the pool, then score on the Scorecard tab');
-    return;
-  }
-  if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
-  const myTeam = S.teams.find(t=>t.id===S.selectedTeamId);
-  const isHome = sched.homeAway!=='away';
-  if(sched.matchupId && sched.opponentTeamId){
-    try{ const os=await getDocs(collection(db,'teams',sched.opponentTeamId,'games')); const d=os.docs.find(x=>x.data().matchupId===sched.matchupId);
-      if(d){ toast('The other team already started this game \u2014 opening it'); useGame({id:d.id, teamId:sched.opponentTeamId, ...d.data()}); return; } }catch(e){}
-  }
-  const homeName = isHome ? (myTeam?myTeam.name:'Home') : sched.opponent;
-  const awayName = isHome ? sched.opponent : (myTeam?myTeam.name:'Away');
-  const keeperSide = await chooseScorekeeperModal(homeName, awayName, null);
-  if(!keeperSide) return;
-  const myRoster = await fetchTeamRosterFormatted(S.selectedTeamId);
-  const oppRoster = await fetchTeamRosterFormatted(sched.opponentTeamId);
-  const ref = await addDoc(collection(db,'teams',S.selectedTeamId,'games'),{
-    opponent:sched.opponent, opponentTeamId:sched.opponentTeamId||null, date:sched.date, seasonId:S.currentSeasonId, matchupId:sched.matchupId||null,
-    homeAway:sched.homeAway, location:sched.location||'',
-    scorekeeperSide:keeperSide, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[],
-    home:{ name:homeName, coach:'', players: isHome?myRoster:oppRoster },
-    away:{ name:awayName, coach:'', players: isHome?oppRoster:myRoster },
-    inningsPlanned:isTourneySeason()?(+tourneyCfg().innings||7):9, atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''
-  });
-  S.activeGameId = ref.id; renderShell();
-  playBallSplash();
+  startGameWizard(sched);
 }
 /* ===================== SCOREKEEPER / ALERTS / CHALLENGES ===================== */
 function gameDoc(g){ return doc(db,'teams', g.teamId||S.selectedTeamId, 'games', g.id); }
@@ -3132,7 +3354,7 @@ Router.register('scorecard', (root)=>{
   let canEdit = canEditTeam();
   const game = currentGame();
 
-  if(game){ const tb=tourneyRulesBanner(game); if(tb) setTimeout(()=>{ const ph=root.querySelector('.pageHead'); if(ph&&ph.parentNode===root) root.insertBefore(tb, ph.nextSibling); },0); }
+  if(game){ const tb=tourneyRulesBanner(game); if(tb) setTimeout(()=>{ const ph=root.querySelector('.pageHead'); if(ph&&ph.parentNode===root){ root.querySelectorAll(':scope > .tRulesStrip').forEach(x=>x.remove()); tb.classList.add('tRulesStrip'); root.insertBefore(tb, ph.nextSibling); } },0); }
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Scorecard'), h('p',{}, game ? (formatDate(game.date)+'  ·  '+game.away.name+' at '+game.home.name) : 'Pick a scheduled game to start scoring.')]));
 
   if(!game){
@@ -3149,7 +3371,7 @@ Router.register('scorecard', (root)=>{
         const rowEdit = admin || canEdit;
         card.appendChild(h('div',{class:'gameListRow', onclick: rowEdit ? ()=>findOrCreateGameFromSchedule(sched) : null, style: rowEdit?'cursor:pointer;':''},[
           h('div',{},[h('div',{class:'glTeams'},label), h('div',{class:'glDate'},formatDate(sched.date)+(sched.time?' · '+sched.time:'')+(sched.location?' · '+sched.location:''))]),
-          rowEdit ? h('span',{style:'color:var(--grass-1);font-size:12px;font-weight:700;'}, started?'Continue →':'Score →') : h('span',{style:'color:var(--ink-soft);font-size:11px;'}, started?'Live':'Not started')
+          rowEdit ? h('span',{style:'color:var(--grass-1);font-size:12px;font-weight:700;'}, started?'Continue →':'Start ›') : h('span',{style:'color:var(--ink-soft);font-size:11px;'}, started?'Live':'Not started')
         ]));
       });
     }
@@ -3202,7 +3424,7 @@ function playerInitialLast(name){ if(!name) return ''; const parts=name.trim().s
 function diamondSVG(game, opts){
   opts=opts||{};
   const base=game.base;
-  const nameFor=(id)=> id ? playerInitialLast(playerName(game,id)) : '';
+  const nameFor=(id)=>{ if(!id) return ''; const dr=drActive(game,id); return dr ? playerInitialLast(dr.runnerName)+' (DR)' : playerInitialLast(playerName(game,id)); };
   const wrap=document.createElement('div'); wrap.className='diamondWrap';
   const svgNS='http://www.w3.org/2000/svg';
   const svg=document.createElementNS(svgNS,'svg'); svg.setAttribute('viewBox','0 0 240 220');
@@ -3271,7 +3493,7 @@ function liveDiamondCard(game, canEdit){
       h('div',{class:'diamondOuts'},[outPip(game.outs>=1),outPip(game.outs>=2),outPip(game.outs>=3)])
     ]),
     stage,
-    (canEdit&&(hasRunners||scoredEntries.length)) ? h('p',{class:'diamondHint'},'Drag a runner to correct their base or tag them out. Drag a scored player onto a base to put them back on, or onto Tag/Force Out if thrown out at home.') : null
+    (canEdit&&(hasRunners||scoredEntries.length)) ? h('p',{class:'diamondHint'},'Drag a runner to correct their base or tag them out. Drag a scored player onto a base to put them back on, or onto Tag/Force Out if thrown out at home.'+(hasRunners?' Designated runner: drag ⠿ a name from the scorecard below onto a base.':'')) : null
   ]);
 }
 function attachScoredChipDrag(chip, game, entry, tagOutBoxEl, svgEl){
@@ -3328,6 +3550,77 @@ function nextBatterOrderForSide(game, side){
   if(!lastPlayer) return 1;
   let next = (lastPlayer.order||1)+1; if(next>rosterCount) next=1; return next;
 }
+/* ===================== DESIGNATED RUNNERS =====================
+   Drag a player's name (⠿) from the Scorecard onto a runner's base. The runner shows as "G.Bartok (DR)".
+   The base still holds the batter, so a run scored counts for the batter, not the runner. Logged in game.drLog. */
+const DR_BASE_WORD={first:'1st',second:'2nd',third:'3rd'};
+function drEntries(game, side){ return (game.drLog||[]).filter(e=>!e.undone && (!side || e.side===side)); }
+function drActive(game, pid){
+  if(!pid) return null; const onBase=['first','second','third'].find(k=>game.base && game.base[k]===pid); if(!onBase) return null;
+  const list=drEntries(game).filter(e=>e.forId===pid && e.inning===game.inning && e.half===game.half); const e=list[list.length-1]; if(!e) return null;
+  if((game.atbats||[]).some(a=>a.playerId===pid && (a.ts||0)>e.ts)) return null;   // he batted again since
+  return e;
+}
+function drForScore(game, pid, ts, inning, half){
+  const list=drEntries(game).filter(e=>e.forId===pid && e.ts<(ts||Infinity) && e.inning===inning && e.half===half); const e=list[list.length-1]; if(!e) return null;
+  if((game.atbats||[]).some(a=>a.playerId===pid && (a.ts||0)>e.ts && (a.ts||0)<(ts||Infinity))) return null;
+  return e;
+}
+function drOutcome(game, e){
+  const act=drActive(game, e.forId); if(act && act.id===e.id){ const b=['first','second','third'].find(k=>game.base[k]===e.forId); return {txt:'On '+DR_BASE_WORD[b], cls:'', live:true}; }
+  const scored=(game.atbats||[]).some(a=>(a.ts||0)>e.ts && a.inning===e.inning && a.half===e.half && (a.scoredPlayerIds||[]).includes(e.forId))
+    || (game.manualScores||[]).some(m=>m.playerId===e.forId && m.inning===e.inning && m.side===e.side && (!m.ts || m.ts>e.ts));
+  if(scored) return {txt:'Scored (run to '+playerInitialLast(e.forName)+')', cls:'color:var(--grass-1);font-weight:800;'};
+  const ro=(game.runnerOuts||[]).find(r=>r.playerId===e.forId && r.inning===e.inning && (!r.ts || r.ts>e.ts));
+  if(ro) return {txt:'Out at '+(DR_BASE_WORD[ro.base]||ro.base), cls:'color:var(--leather-2);'};
+  const sameHalf=game.inning===e.inning && game.half===e.half;
+  return {txt:sameHalf?'Out':'Left on base', cls:'color:var(--ink-soft);'};
+}
+async function setDesignatedRunner(game, b, p){
+  const pid=game.base[b]; if(!pid) return; const side=battingSide(game);
+  if(pid===p.id){ toast(p.name+' is already on that base'); return; }
+  if(['first','second','third'].some(k=>game.base[k]===p.id)){ toast(p.name+' is on base — pick someone else'); return; }
+  if(['first','second','third'].some(k=>{ const x=drActive(game,game.base[k]); return x && x.runnerId===p.id && game.base[k]!==pid; })){ toast(p.name+' is already running for someone'); return; }
+  const log=(game.drLog||[]).slice(); const cur=drActive(game,pid); if(cur){ const i=log.findIndex(x=>x.id===cur.id); if(i>=0) log[i]={...cur, undone:true}; }
+  log.push({id:uid(), side, inning:game.inning, half:game.half, base:b, forId:pid, forName:playerName(game,pid), runnerId:p.id, runnerName:p.name, ts:Date.now(), by:(S.user&&S.user.email)||null});
+  game.drLog=log; await saveGame(game,{drLog:log}); toast('🏃 '+p.name+' DR for '+playerName(game,pid));
+}
+async function undoDesignatedRunner(game, e){
+  const log=(game.drLog||[]).map(x=>x.id===e.id?{...x, undone:true}:x); game.drLog=log; await saveGame(game,{drLog:log}); toast('Designated runner removed — '+playerInitialLast(e.forName)+' is back on base');
+}
+function attachDRDrag(handle, game, p){
+  handle.addEventListener('pointerdown', e=>{
+    e.preventDefault(); e.stopPropagation();
+    const svgEl=document.querySelector('#tabContent .diamondWrap svg'); if(!svgEl){ toast('Open the Scorecard base diagram first'); return; }
+    if(!['first','second','third'].some(k=>game.base[k])){ toast('No runners on base'); return; }
+    const card=svgEl.closest('.diamondCard'); const r=card.getBoundingClientRect(); if(r.top<0 || r.bottom>window.innerHeight) card.scrollIntoView({behavior:'smooth',block:'center'});
+    const ghost=h('div',{class:'drGhost'},'⠿ '+p.name); document.body.appendChild(ghost);
+    const place=ev=>{ ghost.style.left=(ev.clientX+10)+'px'; ghost.style.top=(ev.clientY-20)+'px'; }; place(e);
+    const nearest=ev=>{ const ctm=svgEl.getScreenCTM(); if(!ctm) return null; const pt=svgEl.createSVGPoint(); let best=null, bd=48;
+      ['first','second','third'].forEach(k=>{ if(!game.base[k]) return; [0,-17].forEach(dy=>{ pt.x=BASE_POS[k].x; pt.y=BASE_POS[k].y+dy; const q=pt.matrixTransform(ctm); const d=Math.hypot(ev.clientX-q.x, ev.clientY-q.y); if(d<bd){ bd=d; best=k; } }); }); return best; };
+    let hover=null;
+    const onMove=ev=>{ place(ev); if(hover){ hover.classList.remove('dropTarget'); hover=null; } const b=nearest(ev); if(b){ hover=svgEl.querySelector('.baseCircle-'+b); if(hover) hover.classList.add('dropTarget'); } };
+    const onUp=ev=>{ document.removeEventListener('pointermove',onMove); document.removeEventListener('pointerup',onUp); ghost.remove(); if(hover) hover.classList.remove('dropTarget');
+      const b=nearest(ev); if(b) setDesignatedRunner(game,b,p).then(()=>renderShell()); };
+    document.addEventListener('pointermove',onMove); document.addEventListener('pointerup',onUp);
+  });
+}
+let drOpen={};
+function drTableCard(game, side, canEdit){
+  const list=drEntries(game, side); if(!list.length) return null;
+  const by={}; list.forEach(e=>{ (by[e.runnerId]=by[e.runnerId]||{name:e.runnerName, items:[]}).items.push(e); });
+  const box=h('div',{class:'drTable'}); box.appendChild(h('div',{class:'drTableHead'},'Designated runners'));
+  Object.entries(by).sort((a,b)=>b[1].items.length-a[1].items.length || a[1].name.localeCompare(b[1].name)).forEach(([rid,x])=>{
+    const open=!!drOpen[game.id+'|'+rid];
+    box.appendChild(h('div',{class:'drRow'+(open?' open':''),onclick:()=>{ drOpen[game.id+'|'+rid]=!open; renderShell(); }},[h('span',{},(open?'▾ ':'▸ ')+x.name),h('b',{},'×'+x.items.length)]));
+    if(open){ const t=h('table',{class:'drDetail'}); t.appendChild(h('tr',{},['Inn','Ran for','Outcome',''].map(c=>h('th',{},c))));
+      x.items.forEach(e=>{ const o=drOutcome(game,e); t.appendChild(h('tr',{},[h('td',{},(e.half==='top'?'Top ':'Bot ')+e.inning),h('td',{},e.forName),h('td',{style:o.cls},o.txt),
+        h('td',{},(o.live&&canEdit)?h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 7px;font-size:11px;',onclick:ev=>{ ev.stopPropagation(); undoDesignatedRunner(game,e).then(()=>renderShell()); }},'↩ Undo'):null)])); });
+      box.appendChild(t); }
+  });
+  box.appendChild(h('div',{class:'drTableHint'},'Tap a name to see each time he ran. '+(canEdit?'Drag ⠿ a name onto a runner’s base. ':'')+'Runs count for the batter.'));
+  return box;
+}
 function scorecardGridCard(game, side, canEdit){
   const team=game[side]; const players=team.players.filter(p=>p.name&&p.name.trim());
   const innings = Math.max(game.inningsPlanned||9, game.inning);
@@ -3344,7 +3637,9 @@ function scorecardGridCard(game, side, canEdit){
   players.slice().sort((a,b)=>(a.order||99)-(b.order||99)).forEach(p=>{
     const isNext = isBattingTeam && p.order===nextBatterOrder;
     const row=h('tr',{class:isNext?'nextBatterRow':''});
-    row.appendChild(h('td',{class:'stickyCol playerCell'}, `${p.number?'#'+p.number+' ':''}${p.name}`+(isNext?' •':'')));
+    const nameCell=h('td',{class:'stickyCol playerCell'}, `${p.number?'#'+p.number+' ':''}${p.name}`+(isNext?' •':''));
+    if(isBattingTeam && canEdit && !game.completed){ const hd=h('span',{class:'drHandle',title:'Drag onto a base to run for that runner'},'⠿'); nameCell.insertBefore(hd, nameCell.firstChild); attachDRDrag(hd, game, p); }
+    row.appendChild(nameCell);
     for(let i=1;i<=innings;i++){
       const abs=game.atbats.filter(a=>a.side===side&&a.playerId===p.id&&a.inning===i);
       const cell=h('td',{class:'gridCell'+(i===game.inning?' currentInningCol':'')});
@@ -3370,7 +3665,9 @@ function scorecardGridCard(game, side, canEdit){
   });
   const runsRow=h('tr',{class:'runsRow'}); runsRow.appendChild(h('td',{class:'stickyCol runsRowLabel'},'RUNS'));
   for(let i=1;i<=innings;i++){ const rc=(game.score[side]&&game.score[side][i])||0; const cell=h('td',{class:'runsRowCell'+(rc>0?' tappable':'')+(i===game.inning?' currentInningCol':'')}, String(rc)); if(rc>0) cell.addEventListener('click',()=>runsDetailModal(game,side,i,team.name)); runsRow.appendChild(cell); }
-  table.appendChild(runsRow); scrollWrap.appendChild(table); card.appendChild(scrollWrap);
+  table.appendChild(runsRow); scrollWrap.appendChild(table);
+  const drt=drTableCard(game, side, canEdit);
+  if(drt){ card.appendChild(h('div',{class:'drWrap'},[scrollWrap, drt])); } else card.appendChild(scrollWrap);
   return card;
 }
 function runsDetailModal(game, side, inning, teamName){
@@ -5881,13 +6178,16 @@ function plainCall(game, a){
   const loc=zoneShort(a.zone);
   let t=name+', '+res+(loc?', '+loc:'');
   if(a.runsScored>0) t+=' \u2014 '+a.runsScored+' run'+(a.runsScored>1?'s':'')+' score'+(a.runsScored>1?'':'s');
+  { const d=(a.scoredPlayerIds||[]).map(id=>drForScore(game,id,a.ts,a.inning,a.half)).filter(Boolean); if(d.length) t+=' ('+d.map(e=>playerInitialLast(e.runnerName)+' (DR) for '+playerInitialLast(e.forName)).join(', ')+')'; }
+  if(a.runLimitEnd){ const row=limitRowFor(game); t+=' \u2014 '+((row&&row.runs)||'')+'-run limit reached, side retired'; }
   return t;
 }
 function playByPlayCard(game){
   const card = h('div',{class:'card'}); card.appendChild(h('h3',{},'Play-by-Play'));
   const plays = [
     ...(game.atbats||[]).map(a=>({kind:'ab', ...a})),
-    ...(game.runnerOuts||[]).map(r=>({kind:'ro', ...r}))
+    ...(game.runnerOuts||[]).map(r=>({kind:'ro', ...r})),
+    ...drEntries(game).map(e=>({kind:'dr', ...e}))
   ].sort((a,b)=>(b.ts||0)-(a.ts||0));
   if(!plays.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No plays yet.')); return card; }
   let lastKey='';
@@ -5897,13 +6197,18 @@ function playByPlayCard(game){
     if(key!==lastKey){ card.appendChild(h('div',{class:'sectiontitle',style:'margin-top:8px;'},key+' · '+game[a.side].name)); lastKey=key; }
     const name = playerInitialLast(playerName(game,a.playerId));
     let text;
+    if(a.kind==='dr'){
+      card.appendChild(h('div',{style:'font-size:12.5px;padding:5px 2px;border-bottom:1px solid var(--line);line-height:1.4;color:#5b3a8c;'},['🏃 ',h('b',{},a.runnerName+' DR for '+a.forName),' (on '+(baseWord[a.base]||a.base)+').']));
+      return;
+    }
     if(a.kind==='ro'){
       text = name+' out at '+(baseWord[a.base]||a.base)+' (tag/force)';
     } else {
       text = name+' '+(PLAY_VERB[a.result]||a.result)+zonePhrase(a.zone);
       if(a.runsScored>0){
-        const scorers=(a.scoredPlayerIds||[]).map(id=>playerInitialLast(playerName(game,id))).join(', ');
-        text += ' — '+scorers+(a.scoredPlayerIds&&a.scoredPlayerIds.length>1?' score':' scores');
+        const ids=a.scoredPlayerIds||[]; const credited=[];
+        const scorers=ids.map(id=>{ const e=drForScore(game,id,a.ts,a.inning,a.half); if(e){ credited.push(playerInitialLast(e.forName)); return playerInitialLast(e.runnerName)+' (DR)'; } return playerInitialLast(playerName(game,id)); }).join(', ');
+        text += ' — '+scorers+(ids.length>1?' score':' scores')+(credited.length?', run'+(credited.length>1?'s':'')+' credited to '+credited.join(', '):'');
       }
     }
     card.appendChild(h('div',{style:'font-size:12.5px;padding:5px 2px;border-bottom:1px solid var(--line);line-height:1.4;'+(a.kind==='ro'?'color:var(--leather-2);':'')},text+'.'));
@@ -6461,10 +6766,12 @@ const HELP_KB = [
   {k:'umpire scorekeeper report who umpired each game totals', q:'Where can I see who umpired each game?', a:'Report → Umpires & Scorekeepers. It lists every game this season with its umpire(s), scorekeeper, field and score, plus totals for each person. Pick a person to see just their games, or Export to Excel.'},
   {k:'license agreement advertiser league name id legal name entity address fill', q:'Where do the league’s name and ID in the League Agreement come from?', a:'They fill in automatically for each league: League ID and league name from the league itself, and legal name, entity type and mailing address from Admin → Settings → League contact (used in the License agreement). Fill those in, then in Super Admin → Licenses open the league’s draft and tap Use updated agreement or Reload standard agreement.'},
   {k:'notice notices inbox flag red send league admin super admin all leagues acknowledge where receive', q:'Where do notices show up, and how do I send one?', a:'A red 🚩 flag appears at the top of the app whenever a notice is waiting for you — tap it. League admins: notices are on Admin → 🚩 Notices, where you can also send one to Geezer Ball Scorecard. Super Admin: Super Admin → 🚩 Notices lists every league’s notices (Needs acknowledgment, Received, Sent) and lets you send one notice to one, several or all leagues. Waiting notices are marked 🚩 NEW until acknowledged.'},
-  {k:'tournament mode create pools bracket teams guests run limit champion', q:'How do I run a tournament?', a:'Admin → Season Builder → ＋ Create season → 🏆 Tournament. Then Admin → 🏆 Tournament: 1 Rules (run limit per inning, open last inning, innings, time limit, run rule, tiebreakers), 2 Teams (copy a league team, or make a new team from league players and outside guests, and put teams in pools), 3 Pool schedule (pick days, times and fields — the app lays out the games), 4 Pool standings, 5 Bracket (seeded from pool standings), then 🏆 Finish tournament. Scoring, Lineup, Live Feed and stats work like any season.'},
-  {k:'run limit cap per inning runs maximum tournament open inning', q:'How does the run limit work?', a:'In a tournament with a run limit (Admin → 🏆 Tournament → Rules), the Scorecard shows “This inning: 3 of 5 runs”. When a team reaches the limit, runs past it don’t count and the half-inning ends automatically. With “Last inning open”, the final inning has no limit.'},
+  {k:'tournament mode create pools bracket teams guests run limit champion', q:'How do I run a tournament?', a:'Admin → Season Builder → ＋ Create season → 🏆 Tournament. Then Admin → 🏆 Tournament: 1 Rules (run limit per inning with tappable open innings, innings, time limit, run rule rows, tiebreakers), 2 Teams (copy a league team, or make a new team from league players and outside guests, and put teams in pools), 3 Pool schedule (pick days, times and fields — the app lays out the games), 4 Pool standings, 5 Bracket (seeded from pool standings), then 🏆 Finish tournament. Scoring, Lineup, Live Feed and stats work like any season.'},
+  {k:'run limit cap per inning runs maximum tournament open inning', q:'How does the run limit work?', a:'Set it in Admin → 🏆 Tournament → 1 · Rules (or Admin → Settings → Season Rules for a regular season): pick the No. of Innings and max runs (or No limit), then tap the innings that have no limit (open innings) — for example 5 runs per inning, 7th and extra innings open. Add another row if 9-inning games use a different limit. On the Scorecard the rules strip shows “this inning: 3 of 5”, turns amber at one run from the limit, and shows OPEN in an open inning. When the limit is reached, runs past it don’t count and a red 🚩 Run limit reached box appears: tap OK — next half-inning to retire the side, or Keep playing if the umpire rules otherwise. Live Feed shows “run limit reached, side retired”.'},
+  {k:'season rules run limit run rule mercy formal informal settings league season', q:'Can a regular season have a run limit or run rule?', a:'Yes — Admin → Settings → Season Rules (for Formal and Informal seasons). Turn on Use season rules, pick innings per game, then add run limit rows (max runs, or No limit, and tap the innings with no limit) and run rule rows (No. of Innings / ahead by / after inning). Copy from brings over another season’s rules. Games that season show a green 📋 Season rules strip with the same warnings and pop-ups as tournaments. Pickup seasons don’t use Season Rules because rules can change game to game; tournaments set theirs in Admin → 🏆 Tournament. Season Rules are separate from League Rules (the bylaws document).'},
+  {k:'run rule mercy end early ahead by after inning lead', q:'How does the run rule (mercy) work?', a:'In Admin → 🏆 Tournament → 1 · Rules, add one row per rule (or Admin → Settings → Season Rules for a regular season): No. of Innings, ahead by (runs) and after inning — for example 15 after 3 and 10 after 5. No typing needed. When a team is that far ahead once the inning is complete (or the home team gets that far ahead in the bottom half), a green 🏁 Run rule reached box appears on the Scorecard: tap End game to make it final, or Keep playing. The umpire has the final say.'},
   {k:'tournament history stats champions player record separate', q:'Where are tournament stats kept?', a:'Separately from league seasons — pick the season with the TOURNAMENT tag on Report, Batting or Hit Zone. Report → 🏆 Tournament History shows every champion and runner-up, and each player’s totals across all tournaments (matched by email, or by name for guests), with Export to Excel.'},
-  {k:'test mode tournament practice simulate pool bracket', q:'Can I practise a tournament in Test Mode?', a:'Yes. Admin → 🧪 Test Mode → ＋ New test season → 🏆 Tournament. Each step (teams, rules, pool schedule, bracket, champion) can be done by hand or simulated — the app adds six fake teams in two pools (one is an outside team of guests), sets a 5-run limit, plays the pool games and bracket, and crowns a champion. Clear removes it all, or Make real keeps the rules, teams and schedule.'},
+  {k:'test mode tournament practice simulate pool bracket', q:'Can I practise a tournament in Test Mode?', a:'Yes. Admin → 🧪 Test Mode → ＋ New test season → 🏆 Tournament. Each step (teams, rules, pool schedule, bracket, champion) can be done by hand or simulated — the app adds six fake teams in two pools (one is an outside team of guests), sets a 5-run limit (7th and extras open) and a run rule (15 after 3, 10 after 5), plays the pool games and bracket, and crowns a champion. Clear removes it all, or Make real keeps the rules, teams and schedule.'},
   {k:'license who can see agreement private', q:'Who can see the league agreement?', a:'Only that league’s admin and the Super Admin. Players and managers can’t see the License tab.'},
   {k:'chat photo picture image post camera', q:'How do I post a photo in League Chat?', a:'Left menu → League Chat → tap the 📷 camera button → pick or take a photo → add a caption if you like → Send. Photos are shrunk automatically. Some leagues hold photos for admin approval first.'},
   {k:'report inappropriate chat message photo remove delete moderate', q:'How do I report or remove a chat message?', a:'Members: tap Report on the message. Admins: tap Delete on any message, “No photos” to stop one member posting photos, or Restrict to stop them posting at all. Reported messages and photos waiting for approval appear in the Chat moderation card on the League Chat page.'},
@@ -6478,7 +6785,9 @@ const HELP_KB = [
   {k:'tag force out runner out', q:'How do I record a tag or force out?', a:'Drag the runner onto “Tag / Force Out”, or tap it and choose the runner. It counts the out and shows on the grid and play-by-play.'},
   {k:'scored home actually out undo', q:'A runner auto-scored but was out at home', a:'Drag their chip from the “Scored” column back onto “Tag / Force Out.”'},
   {k:'undo last at-bat mistake', q:'How do I undo the last play?', a:'On the Scorecard, tap Undo next to “Record at-bat” to remove the most recent at-bat.'},
-  {k:'lineup batting order positions sub substitute', q:'How do I set a lineup?', a:'Lineup tab → pick the game → drag players to reorder, set positions, and check Sub for a fill-in. Subs are searched by name or draft pick; a sub must be another team’s pick number equal to or later than the player being replaced.'},
+  {k:'lineup batting order positions sub substitute ahead before game upcoming', q:'How do I set a lineup?', a:'Lineup tab → Select Game. Pick an Upcoming game to set your lineup ahead of time (managers edit their own team; admins both) — drag ⠿ to reorder, set positions, check Sub for a fill-in. It saves for that game and is used automatically when the game starts. During a game, pick it under In progress to make changes.'},
+  {k:'designated runner dr courtesy runner pinch run base drag', q:'How do I use a designated runner?', a:'On the Scorecard, drag the ⠿ next to a player’s name in the scorecard onto a runner’s base. The runner shows as “G.Bartok (DR)”. If he scores, the run counts for the batter he ran for, not the runner. The Designated runners table beside the scorecard shows each DR and how many times he ran — tap a name for the inning, who he ran for and the outcome (↩ Undo while he’s still on base). Live Feed play-by-play notes it too.'},
+  {k:'start game ribbon steps confirm lineups scorekeeper play ball', q:'How do I start a game?', a:'Scorecard → tap Start › on a scheduled game. A ribbon walks you through: ① Select game ② Lineups (check both teams; ✎ Edit a lineup if needed) ③ Confirmed ④ Start game (pick who keeps the official score) ⑤ Play Ball! Nothing is created until you tap Start game. Pickup games build Home and Away from today’s players in step ②.'},
   {k:'schedule add game import bulk template', q:'How do I add games to the schedule?', a:'Schedule tab (left menu): admins see Manage schedule under the game list — add one game (Home, Away, date, time, field) or Import Excel/CSV using the template. Pickup seasons add games with just date, time and field.'},
   {k:'roster method formal informal pickup draft season how built builder', q:'How do rosters get built?', a:'Admin → Season Builder. Pick the season, then Formal, Informal or Pickup across the top. The numbered steps show where you are; tap any step to go there and the gold “← Season Builder” bar brings you back. Formal: teams → sign-ups → player list → evaluation → draft → approve → roster → lineups. Informal: teams → sign-ups → player list → managers pick → admin approves → lineups. Pickup: game days → build sides at each game.'},
   {k:'pick players informal manager approve rosters pending', q:'How do managers pick players?', a:'Informal seasons: right menu → Pick Players. Tap Pick next to anyone unassigned; they show as pending on your team until the admin taps Approve rosters. Players don’t see teams until then.'},
@@ -6597,6 +6906,8 @@ const FAQ_DATA = [
     { q:'Can other leagues see my information?', a:'No. Each league’s data is separate: members of one league cannot read another league’s players, games, chat or sign-ups. Within your league, your name, team, position and statistics are visible to members; your email, phone and age are visible only to your league’s administrators and team managers, and to you.' },
     { q:'Who can see my registration answers?', a:'Only your league’s administrators. Managers and other players never see them. Your name, team and statistics are visible to members of your league, as described in the “Use of my information” agreement.' },
     { q:'How do I get an account?', a:'Tap “New here? Join the league” on the sign-in page, fill in the one form (league, name, phone, email and a password) and tap Join the league. Your admin approves you; until then you’ll see “Waiting for approval.” After that, just Sign In with the same email and password — every season.' },
+    { q:'What does (DR) mean next to a runner?', a:'A designated runner is running for that batter. If he scores, the run counts for the batter, not the runner. Live Feed play-by-play shows who ran for whom.' },
+    { q:'Can my manager set the lineup before the game?', a:'Yes. Managers set their team’s batting order and positions for upcoming games on the Lineup tab. The scorekeeper checks both lineups when starting the game on the Scorecard.' },
     { q:'Who keeps score?', a:'Only one team keeps the official scorecard for each game. Whoever starts the game picks Home or Away as scorekeeper; the league admin can change it. The other team watches on Live Feed.' },
     { q:'What if a play was scored wrong or missed?', a:'Managers of the other team tap “⚑ Challenge a play” on the Scorecard or Live Feed. The scorekeeper sees it right away and can Accept & fix or Reject with a reason. Both teams see the outcome. The app also flags missing hit locations and skipped batters automatically.' },
     { q:'How do players sign up for a season?', a:'New players: tap “Join the league” on the sign-in screen — create your login, fill in the yearly registration and pick the season. Returning players: sign in, complete the yearly registration if asked, then tap Sign up on the “Your seasons” card. The league admin sets the sign-up window. Pickup seasons need no sign-up.' },
@@ -6645,6 +6956,8 @@ const FAQ_DATA = [
   ]},
   { category:'Playoffs', items:[
     { q:'Does the app handle tournaments?', a:'Yes — a Tournament is its own season type, set up by your league admin. Teams can include outside players as guests, games can have a run limit per inning, and tournament stats are kept separate. See Report → 🏆 Tournament History for champions and career tournament stats.' },
+    { q:'Does my league use a run limit or run rule?', a:'If your league admin turned on Season Rules (Formal and Informal seasons) or set tournament rules, the Scorecard shows a 📋 Season rules or 🏆 Tournament rules strip at the top with the limits. If there’s no strip, there’s no run limit or run rule for that season.' },
+    { q:'What happens when a run limit or run rule is reached?', a:'The scorekeeper gets a pop-up. 🚩 Run limit reached: runs past the limit don’t count and the side is retired (or Keep playing if the umpire says so) — some innings, like the last one, can be open with no limit. 🏁 Run rule reached: when a team is far enough ahead after an inning (for example 15 after 3), the game can end early. Live Feed shows it too. The umpire has the final say.' },
     { q:'How do playoffs start?', a:'Admin → Settings → Playoffs: choose single or double elimination and seed by standings or manual order. Until then the Record tab shows a bracket preview with placeholder team numbers.' },
     { q:'How do results get entered?', a:'On the Record tab, the admin enters each matchup’s score; winners advance automatically.' }
   ]},
@@ -6895,7 +7208,8 @@ function settingsView(root){
   if(!S.currentSeasonId){ root.appendChild(h('div',{class:'sectiontitle'},'League branding')); root.appendChild(leagueLogoCard()); root.appendChild(leagueContactCard()); root.appendChild(emptyState('No season yet','Create a season in Admin \u2192 Season Builder to unlock schedule, playoff, sign-up and roster settings.','diamond')); return; }
   const season=S.seasons.find(x=>x.id===S.currentSeasonId)||{};
   const G=settingsSub!=='draft';
-  root.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 12px;'},[['general','General'],['draft','Draft']].map(([id,l])=>h('button',{style:'border-radius:14px;padding:5px 14px;font-size:12.5px;font-weight:800;cursor:pointer;border:1px solid '+(settingsSub===id?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ settingsSub=id; renderShell(); }},l))));
+  root.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 12px;'},[['general','General'],['draft','Draft'],['rules','Season Rules']].map(([id,l])=>h('button',{style:'border-radius:14px;padding:5px 14px;font-size:12.5px;font-weight:800;cursor:pointer;border:1px solid '+(settingsSub===id?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ settingsSub=id; renderShell(); }},l))));
+  if(settingsSub==='rules'){ root.appendChild(seasonRulesCard(season)); return; }
   // ---- Schedule (now managed on the Schedule tab) ----
   if(G) root.appendChild(h('div',{class:'sectiontitle'},'Schedule'));
   if(G) root.appendChild(h('div',{class:'card'},[h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},'Games are added, imported and edited on the Schedule tab (left menu) \u2014 the admin controls sit under the game list.'), h('button',{class:'btn btn-outline btn-sm',onclick:()=>goTab('schedule')},'Open Schedule')]));
@@ -8594,6 +8908,29 @@ function pwEye(inp){ const btn=h('button',{type:'button',class:'pwEye','aria-lab
   btn.addEventListener('click',()=>{ clearTimeout(t); if(inp.type==='password'){ inp.type='text'; btn.textContent='🙈 Hide'; btn.setAttribute('aria-label','Hide password'); t=setTimeout(hide,15000); } else hide(); try{ inp.focus(); }catch(e){} });
   return h('div',{class:'pwWrap'},[inp,btn]); }
 function leagueErrSacFly(){ const lg=(S.leagues||[]).find(l=>l.id===S.currentLeagueId)||{}; return !!lg.errSacFly; }
+function seasonRulesCard(season){
+  const card=h('div',{class:'card'}); const m=seasonMethod(season);
+  card.appendChild(h('h3',{},['Season Rules ',h('span',{style:'display:inline-block;font-size:10.5px;font-weight:800;border-radius:8px;padding:2px 8px;background:#e7efe7;color:var(--grass-1);vertical-align:2px;font-family:var(--font-body,inherit);'},(season.name||'This season')+' · '+methodShort(m))]));
+  if(isTourneySeason(season)){ card.appendChild(h('p',{style:'font-size:13px;margin:0 0 8px;'},'🏆 This is a tournament — its rules are set in Admin → 🏆 Tournament → 1 · Rules.')); card.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ adminSub='tourney'; renderShell(); }},'Open Tournament')); return card; }
+  if(m==='pickup'){ card.appendChild(h('p',{style:'font-size:13px;margin:0;'},'🧢 Pickup season — Season Rules don’t apply, since rules can change from game to game.')); return card; }
+  card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},['Game rules the Scorecard enforces for this season. Separate from ',h('b',{},'League Rules'),' (the bylaws document) and from tournament rules (Admin → 🏆 Tournament).']));
+  const c=Object.assign({innings:9},season.seasonRules||{}); const on=!!c.on;
+  const save=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
+  const sw=h('button',{type:'button',role:'switch','aria-checked':on?'true':'false','aria-label':'Use season rules',style:'flex:none;display:flex;align-items:center;width:112px;height:40px;border-radius:20px;border:none;cursor:pointer;position:relative;padding:0;background:'+(on?'var(--grass-1)':'#b9b9b0')+';',
+    onclick:async()=>{ const patch={on:!on}; if(!on && !season.seasonRules){ Object.assign(patch,{innings:9,limits:[],mercyRules:[]}); } await save(patch); toast(!on?'Season rules on — the Scorecard will enforce them':'Season rules off'); }},[
+    h('span',{style:'position:absolute;'+(on?'left:14px;':'right:14px;')+'color:#fff;font-weight:800;font-size:14px;'},on?'YES':'NO'),
+    h('span',{style:'position:absolute;top:4px;'+(on?'right:4px;':'left:4px;')+'width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);'})]);
+  card.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;padding:4px 0 10px;border-bottom:1px solid var(--line);'},[
+    h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Use season rules'),h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px;'},on?'On: Formal and Informal games this season show the 📋 Season rules strip, run limit warnings and run rule prompts.':'Off: games are scored with no run limit or run rule.')]), sw]));
+  if(!on) return card;
+  const inn=h('select',{style:'width:auto;'}); [5,6,7,8,9].forEach(n=>inn.appendChild(h('option',{value:String(n)},n+' innings'))); inn.value=String(+c.innings||9); inn.addEventListener('change',()=>save({innings:+inn.value}));
+  card.appendChild(h('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:8px;'},[h('div',{},[h('div',{style:'font-weight:700;font-size:14px;'},'Innings per game'),h('div',{style:'font-size:12px;color:var(--ink-soft);'},'Used for new games this season.')]),inn]));
+  card.appendChild(tourneyRulesEditor(c, save));
+  const others=(S.seasons||[]).filter(x=>x.id!==season.id && x.seasonRules && (tLimits(x.seasonRules).length||tMercy(x.seasonRules).length));
+  if(others.length){ const cs=h('select',{style:'width:auto;'}); others.forEach(x=>cs.appendChild(h('option',{value:x.id},(x.name||x.id)+' ('+methodShort(seasonMethod(x))+')')));
+    card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--ink-soft);'},['Copy from:',cs,h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ const src=others.find(x=>x.id===cs.value); if(!src) return; confirmModal('Copy season rules?','Replaces this season’s run limits and run rules with the ones from '+(src.name||'that season')+'.',async()=>{ const r=src.seasonRules; await save({innings:+r.innings||9,limits:tLimits(r),mercyRules:tMercy(r)}); toast('Season rules copied'); }); }},'Copy')])); }
+  return card;
+}
 function scoringOptionsCard(){
   const lg=(S.leagues||[]).find(l=>l.id===S.currentLeagueId); const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Scorecard options'));
   if(!lg){ card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);'},'Pick a league first.')); return card; }
@@ -9344,7 +9681,7 @@ function tsRoster(tid){ return (S.allPlayersForFeed||[]).filter(p=>p.teamId===ti
 function tsTwoTeams(){ const ts=S.teams.filter(t=>t.active!==false).map(t=>({t,n:tsRoster(t.id).length})).sort((a,b)=>b.n-a.n); return ts.length>=2?[ts[0].t,ts[1].t]:null; }
 async function tsAddGame(){ if(!tsGuard()) return; const two=tsTwoTeams(); if(!two){ toast('Add at least two teams first'); return; }
   await createScheduledMatchup(two[0].id,two[1].id,new Date().toISOString().slice(0,10),'10:00','Test field'); toast('Test game added: '+two[1].name+' at '+two[0].name); }
-function tsSimInnings(home, away, innings, capFn){
+function tsSimInnings(home, away, innings, capFn, mercyFn){
   const RES=[['1B',30],['2B',8],['3B',2],['HR',3],['GO',22],['FO',20],['SO',5],['BB',6],['E',2],['SF',1],['FC',1]]; const tot=RES.reduce((a,b)=>a+b[1],0);
   const pick=()=>{ let r=Math.random()*tot; for(const [k,w] of RES){ if((r-=w)<0) return k; } return 'GO'; };
   const HITZ=['SOF1','SOF2','SOF3','SOF4','DOF1','DOF2','DOF3','DOF4','IF2','IF4'], OUTZ=['IF1','IF2','IF3','IF4','IF5','SOF1','SOF2','SOF3','SOF4','DOF2','DOF3'];
@@ -9368,7 +9705,8 @@ function tsSimInnings(home, away, innings, capFn){
       ab.push({id:uid(),side,playerId:p.id,inning:inn,half,result:r,runLimitEnd:capEnd||undefined,zone:(r==='SO'||r==='BB')?null:(['GO','FO','SF','FC'].includes(r)?z(OUTZ):z(HITZ)),scoredPlayerIds:scored,runsScored:scored.length,rbi:r==='E'?0:scored.length,ts:ts+=20000});
       if(capEnd) break;
     }
-    score[side][String(inn)]=runs; } }
+    score[side][String(inn)]=runs; }
+    if(mercyFn){ const tot=s=>Object.values(s).reduce((x,y)=>x+y,0); if(mercyFn(inn, tot(score.away)-tot(score.home))) return {ab,score,mercy:inn}; } }
   return {ab,score};
 }
 async function tsAutoPlay(){ if(!tsGuard()) return;
@@ -9394,8 +9732,8 @@ async function tsTourneyTeams(){ if(!tsGuard()) return; const sid=S.currentSeaso
   await tsWait(()=>tourneyTeams(sid).length>=6 && tourneyTeams(sid).every(t=>tourneyRoster(t.id,sid).length>=11),8000);
   toast('Added 6 test teams in two pools (one is an outside team of guests)'); }
 async function tsTourneyRules(){ if(!tsGuard()) return; const sid=S.currentSeasonId;
-  await updateDoc(doc(db,'seasons',sid),{'tourney.format':'pools','tourney.runLimit':5,'tourney.openLast':true,'tourney.innings':7,'tourney.timeLimit':60,'tourney.rdCap':7,'tourney.bracket':'single'});
-  await tsWait(()=>+tourneyCfg().runLimit===5); toast('Sample rules: 5-run limit (last inning open), 7 innings, 60-minute limit'); }
+  await updateDoc(doc(db,'seasons',sid),{'tourney.format':'pools','tourney.limits':[{len:0,runs:5,open:[7],openExtra:true}],'tourney.mercyRules':[{len:0,lead:15,after:3},{len:0,lead:10,after:5}],'tourney.innings':7,'tourney.timeLimit':60,'tourney.rdCap':7,'tourney.bracket':'single'});
+  await tsWait(()=>tLimits(tourneyCfg()).length>0); toast('Sample rules: 5-run limit (7th & extras open), run rule 15 after 3 / 10 after 5, 7 innings'); }
 async function tsTourneyPool(){ if(!tsGuard()) return; const sid=S.currentSeasonId; if(tourneyTeams(sid).length<2){ toast('Add teams first'); return; }
   const plan=planPoolGames(sid,{days:[tsISO(tsNextSaturday())],start:'09:00',last:'18:00',mins:75,fields:['Field 1','Field 2'],perTeam:0}).filter(p=>p.date);
   const before=allLeagueSchedule().filter(g=>g.seasonId===sid).length;
@@ -9474,9 +9812,10 @@ function tsUnplayed(){ const sid=S.currentSeasonId; return (S.allScheduleForFeed
 async function tsPlayOne(se){ const sid=S.currentSeasonId; let H,A,ownerId,homeName,awayName,extra={};
   if(se.pickup){ const pool=pickupPool(sid).sort(()=>Math.random()-0.5); if(pool.length<6){ toast('Pool is too small — simulate sign-ups first'); return false; } const half=Math.ceil(Math.min(pool.length,22)/2); const mk=(l)=>l.map((p,i)=>({id:p.id,name:p.name,number:'',position:p.pos||'',order:i+1,isSub:false,subTeamName:''})); H=mk(pool.slice(0,half)); A=mk(pool.slice(half,half*2)); ownerId=se.teamId; homeName=se.homeName||'Home'; awayName=se.awayName||'Away'; extra={pickup:true,opponentTeamId:null,location:se.location||''}; }
   else { const home=S.teams.find(t=>t.id===se.teamId), away=S.teams.find(t=>t.id===se.opponentTeamId); if(!home||!away) return false; H=tsRoster(home.id); A=tsRoster(away.id); if(H.length<3||A.length<3) return false; ownerId=home.id; homeName=home.name; awayName=away.name; extra={opponentTeamId:away.id,location:se.location||''}; }
-  const tc=isTourneySeason()?tourneyCfg():null; const nInn=tc?(+tc.innings||7):7; const capFn=tc&&+tc.runLimit?(i=>(tc.openLast&&i>=nInn)?0:+tc.runLimit):null;
-  let g=tsSimInnings(H,A,nInn,capFn); const tot=s=>Object.values(s).reduce((a,b)=>a+b,0); let inn=nInn; if(tot(g.score.home)===tot(g.score.away)){ g=tsSimInnings(H,A,nInn+1,capFn); inn=nInn+1; }
-  await addDoc(collection(db,'teams',ownerId,'games'),Object.assign({matchupId:se.matchupId||null,homeAway:'home',opponent:awayName,seasonId:sid,date:se.date||todayISO(),time:se.time||'',home:{name:homeName,coach:'',players:H},away:{name:awayName,coach:'',players:A},atbats:g.ab,score:g.score,base:{},outs:3,inning:inn,half:'bottom',completed:true,completedAt:Date.now(),inningsPlanned:7,manualScores:[],scorekeeperSide:'home',challenges:[],isTest:true,updatedAt:Date.now()},extra));
+  const tc=rulesCfg(currentSeason()); const nInn=tc?(+tc.innings||7):7; const lrow=tc?ruleFor(tLimits(tc),nInn):null; const capFn=lrow&&+lrow.runs?(i=>inningOpen(lrow,i,nInn)?0:+lrow.runs):null;
+  const mrs=tc?(tMercy(tc).filter(r=>+r.len===nInn).length?tMercy(tc).filter(r=>+r.len===nInn):tMercy(tc).filter(r=>!+r.len)):[]; const mercyFn=mrs.length?((done,lead)=>mrs.some(r=>done>=+r.after&&Math.abs(lead)>=+r.lead)):null;
+  let g=tsSimInnings(H,A,nInn,capFn,mercyFn); const tot=s=>Object.values(s).reduce((a,b)=>a+b,0); let inn=g.mercy||nInn; if(tot(g.score.home)===tot(g.score.away)){ g=tsSimInnings(H,A,nInn+1,capFn,mercyFn); inn=nInn+1; }
+  await addDoc(collection(db,'teams',ownerId,'games'),Object.assign({matchupId:se.matchupId||null,homeAway:'home',opponent:awayName,seasonId:sid,date:se.date||todayISO(),time:se.time||'',home:{name:homeName,coach:'',players:H},away:{name:awayName,coach:'',players:A},atbats:g.ab,score:g.score,base:{},outs:3,inning:inn,half:'bottom',completed:true,completedAt:Date.now(),inningsPlanned:nInn,manualScores:[],scorekeeperSide:'home',challenges:[],isTest:true,updatedAt:Date.now()},extra));
   try{ await updateDoc(doc(db,'teams',se.teamId,'schedule',se.id),{completed:true}); if(se.linkedScheduleId&&se.opponentTeamId) await updateDoc(doc(db,'teams',se.opponentTeamId,'schedule',se.linkedScheduleId),{completed:true}); }catch(e){}
   return true; }
 async function tsPlay(all){ if(!tsGuard()) return; if(tsBusy) return; let list=tsUnplayed(); if(!list.length){ toast('Nothing left to play — simulate the schedule first'); return; }
@@ -9517,7 +9856,7 @@ async function tsRunAll(){ if(!tsGuard()||tsBusy) return; const sn=currentSeason
     tsBusy='Running all steps…'; renderShell();
     if(m==='tournament'){
       if(tourneyTeams(sn.id).length<2){ tsBusy='Teams…'; renderShell(); await tsTourneyTeams(); }
-      if(!+tourneyCfg().runLimit){ tsBusy='Rules…'; renderShell(); await tsTourneyRules(); }
+      if(!tLimits(tourneyCfg()).length){ tsBusy='Rules…'; renderShell(); await tsTourneyRules(); }
       if(need('tpool')){ tsBusy='Pool schedule…'; renderShell(); await tsTourneyPool(); }
       tsBusy=''; await tsPlay(true); await tsWait(()=>!tsUnplayed().length,10000);
       tsBusy='Bracket…'; renderShell(); await tsTourneyBracket(); await tsTourneyFinish();
