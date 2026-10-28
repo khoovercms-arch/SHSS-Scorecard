@@ -508,6 +508,23 @@ table.zoneTable{margin-bottom:14px;width:100%;} table.zoneTable td,table.zoneTab
 .drDetail th{text-align:left;font-size:10.5px;color:var(--ink-soft);padding:3px 2px;}
 .drDetail td{padding:3px 2px;border-top:1px solid #f0ead9;}
 .drTableHint{font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.4;}
+.netBar{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 12px;border-radius:10px;margin:0 0 10px;line-height:1.3;cursor:default;}
+.netBar.off{background:#3a2f12;color:#ffe3a0;cursor:pointer;}
+.netBar.up{background:#fff3cf;color:#7a4a00;}
+.netBar.on{background:#1f7a3f;color:#fff;}
+.netBarMore{font-size:12px;color:var(--ink-soft);background:#fffaf0;border:1px solid #e0b24a;border-radius:8px;padding:7px 10px;margin:-6px 0 10px;}
+.netYes{display:inline-block;background:#dff0e3;color:var(--grass-1);font-weight:800;font-size:11px;border-radius:8px;padding:2px 7px;}
+.netNo{display:inline-block;background:#ffe9b8;color:#7a4a00;font-weight:800;font-size:11px;border-radius:8px;padding:2px 7px;border:1px solid #e0b24a;}
+.netNote{font-size:11px;color:#7a4a00;margin-top:2px;white-space:normal;max-width:180px;}
+tr.schedCaution td{background:#fff6dc !important;}
+.fieldLink{color:var(--grass-1);font-weight:700;text-decoration:underline dotted;cursor:pointer;}
+.fieldTable input{min-width:120px;}
+.readyCard{border:2px solid var(--grass-1);}
+.readyCk{display:flex;gap:8px;align-items:center;font-size:13px;padding:4px 0;border-bottom:1px solid #f0ead9;}
+.readyCk .rY,.readyCk .rN{width:19px;height:19px;border-radius:50%;font-size:11px;font-weight:900;display:flex;align-items:center;justify-content:center;flex:none;}
+.readyCk .rY{background:#1f7a3f;color:#fff}.readyCk .rN{background:#d9a53a;color:#24332a}
+.drPickBtn{display:flex;justify-content:space-between;align-items:center;width:100%;border:2px solid var(--grass-1);border-radius:12px;padding:13px 14px;margin-bottom:8px;font-weight:800;font-size:15px;background:#fff;color:var(--ink);cursor:pointer;}
+@media (pointer:coarse){ .drHandle{font-size:18px;padding:4px 7px;} }
 </style>
 </head>
 <body>
@@ -550,7 +567,7 @@ import {
 import {
   getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, addDoc,
   updateDoc, deleteDoc, onSnapshot, arrayUnion, serverTimestamp, increment,
-  query, where, initializeFirestore, persistentLocalCache, persistentMultipleTabManager
+  query, where, initializeFirestore, persistentLocalCache, persistentMultipleTabManager, getDocsFromCache, waitForPendingWrites
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -1941,7 +1958,153 @@ function syncPoolTeam(){
   else if(isPoolTeamId(S.selectedTeamId)){ S.selectedTeamId=null; const nt=myTeamId() && S.teams.some(t=>t.id===myTeamId()) ? myTeamId() : ((S.teams[0]&&S.teams[0].id)||null); S.selectedTeamId=nt; switchTeamListeners(); }
 }
 function gameRef(id){ return doc(db,'teams',S.selectedTeamId,'games',id); }
-async function saveGame(game, patch){ if(game && game.__pregame){ for(const side of ['home','away']) if(patch[side]) await savePregameSide(game, side, patch[side]); renderShell(); return; } await updateDoc(gameRef(game.id), patch); }
+/* ===================== OFFLINE MODE =====================
+   When the signal drops, scoring keeps working: changes are saved on the phone (Firestore's local cache) and
+   upload by themselves when the phone is back in range. Writes never wait on the server while offline. */
+let netOffline = (typeof navigator!=='undefined' && navigator.onLine===false);
+let netPending = 0, netUploaded = 0, netBackMsg = null, netBarOpen = false, netBackTimer = null;
+function netBarEl(){
+  let bar=null;
+  if(netOffline) bar=h('div',{id:'netBar',class:'netBar off',onclick:()=>{ netBarOpen=!netBarOpen; refreshNetBar(); }},[h('span',{},'📴'),h('span',{style:'flex:1;'},['Offline — saving on phone', ...(netPending?[' · ',h('b',{},netPending+' waiting')]:[])]), h('span',{style:'opacity:.7;'},netBarOpen?'▴':'▾')]);
+  else if(netPending) bar=h('div',{id:'netBar',class:'netBar up'},[h('span',{},'⏳'),h('span',{style:'flex:1;'},['Uploading · ',h('b',{},netPending+' waiting')])]);
+  else if(netBackMsg) bar=h('div',{id:'netBar',class:'netBar on'},[h('span',{},'✓'),h('span',{style:'flex:1;'},netBackMsg)]);
+  if(!bar) return null;
+  if(netOffline && netBarOpen) return h('div',{id:'netBarWrap'},[bar, h('div',{class:'netBarMore'},'Keep scoring — plays are saved on this phone and upload when you’re back in range. Live Feed, Chat, Challenges, notices and sign-in need internet.')]);
+  return h('div',{id:'netBarWrap'},[bar]);
+}
+function refreshNetBar(){ const old=document.getElementById('netBarWrap'); const nb=netBarEl(); const c=document.getElementById('tabContent'); if(old){ if(nb) old.replaceWith(nb); else old.remove(); } else if(nb && c) c.insertBefore(nb, c.firstChild); }
+function netGoOffline(){ if(netOffline) return; netOffline=true; netUploaded=0; netBackMsg=null; renderShell(); }
+function netGoOnline(){ if(!netOffline) return; netOffline=false; renderShell();
+  try{ waitForPendingWrites(db).then(()=>netAllUploaded()).catch(()=>{}); }catch(e){} }
+function netAllUploaded(){ if(netPending>0 || netOffline) return; if(netUploaded>0){ netBackMsg='Back online — '+netUploaded+' change'+(netUploaded===1?'':'s')+' uploaded'; netUploaded=0; refreshNetBar(); clearTimeout(netBackTimer); netBackTimer=setTimeout(()=>{ netBackMsg=null; refreshNetBar(); },6000); } }
+// Every write goes through here: it never blocks more than 2.5 s, and counts as "waiting" until the server has it.
+function netWrite(p){
+  let done=false, counted=false;
+  const count=()=>{ if(done||counted) return; counted=true; netPending++; refreshNetBar(); };
+  if(netOffline) count();
+  const t=setTimeout(()=>{ if(!done){ count(); if(!netOffline && navigator.onLine===false) netGoOffline(); } },2500);
+  p.then(()=>{ done=true; clearTimeout(t); if(counted){ netPending=Math.max(0,netPending-1); netUploaded++; refreshNetBar(); if(!netPending && !netOffline) netAllUploaded(); } },
+         ()=>{ done=true; clearTimeout(t); if(counted){ netPending=Math.max(0,netPending-1); refreshNetBar(); } });
+  if(netOffline) return Promise.resolve();
+  return Promise.race([p, new Promise(r=>setTimeout(r,2500))]);
+}
+// Reads: offline (or very slow) → use what's saved on the phone.
+function emptySnap(){ return {docs:[], size:0, empty:true, forEach(){}}; }
+async function getDocsNet(q){
+  const cache=()=>getDocsFromCache(q).catch(()=>emptySnap());
+  if(netOffline) return cache();
+  try{ return await Promise.race([getDocs(q), new Promise((_,rej)=>setTimeout(()=>rej(new Error('slow')),4000))]); }catch(e){ return cache(); }
+}
+window.addEventListener('offline', netGoOffline);
+window.addEventListener('online', netGoOnline);
+function offlineNeedCard(what){
+  return h('div',{class:'card',style:'text-align:center;background:#fffaf0;border-color:#e0b24a;'},[h('div',{style:'font-size:26px;'},'📴'),h('div',{style:'font-weight:800;font-size:15px;margin:2px 0 4px;'},what+' needs internet'),h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},'It will be available when you’re back in range. Scoring still works offline.')]);
+}
+// ---- "Ready for the field?" (Scorecard) ----
+const FB_SDK_URL='https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js';
+async function fieldReadiness(games){
+  const out={app:false, games:games.length, rosters:false, lineupsMissing:[]};
+  try{ out.app = !!(window.caches && await caches.match(FB_SDK_URL) && await caches.match('./index.html')); }catch(e){}
+  const tids=[...new Set(games.flatMap(g=>{ const sd=schedSides(g); return [sd.home.id, sd.away.id]; }).filter(Boolean))];
+  let ok=true; for(const tid of tids){ try{ const sn=await getDocsFromCache(collection(db,'teams',tid,'players')); if(!sn.size){ ok=false; out.lineupsMissing.push(teamNameAny(tid)||tid); } }catch(e){ ok=false; out.lineupsMissing.push(teamNameAny(tid)||tid); } }
+  out.rosters = tids.length ? ok : true;
+  return out;
+}
+async function loadForField(games){
+  const tids=[...new Set(games.flatMap(g=>{ const sd=schedSides(g); return [sd.home.id, sd.away.id]; }).filter(Boolean))];
+  for(const tid of tids){ try{ await getDocs(collection(db,'teams',tid,'players')); }catch(e){} }
+  try{ await loadPregameLineups(true); }catch(e){}
+  try{ if(window.caches){ const c=await caches.open('geezer-ball-v4'); await c.addAll(['./','./index.html',FB_SDK_URL,'https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js','https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js']); } }catch(e){}
+}
+function readyForFieldCard(upcoming){
+  const d=new Date(); const iso=x=>x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+  const t0=iso(d); d.setDate(d.getDate()+1); const t1=iso(d);
+  const games=(upcoming||[]).filter(g=>!g.pickup && (g.date===t0 || g.date===t1));
+  if(!games.length) return null;
+  const card=h('div',{class:'card readyCard'}); const body=h('div',{},h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},'Checking…'));
+  const noNet=games.filter(g=>{ const f=fieldInfo(g.location); return f && f.internet && f.internet!=='yes'; });
+  card.appendChild(h('div',{style:'font-weight:900;font-size:15px;'},'📶 Ready for the field?'));
+  card.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin:2px 0 6px;'},'If the field has poor signal, check this while you still have internet.'));
+  noNet.forEach(g=>{ const f=fieldInfo(g.location); card.appendChild(h('div',{style:'background:#fff6dc;border:1px solid #e0b24a;border-radius:8px;padding:6px 9px;font-size:12px;margin-bottom:6px;'},['⚠ ',h('b',{},f.name),' — '+(f.internet==='no'?'no internet':'spotty internet')+'. Sign in and open the app before you get there.'])); });
+  card.appendChild(body);
+  const draw=r=>{ body.innerHTML='';
+    const ck=(ok,txt)=>h('div',{class:'readyCk'},[h('span',{class:ok?'rY':'rN'},ok?'✓':'!'),txt]);
+    body.appendChild(ck(r.app,'App saved on this phone'));
+    body.appendChild(ck(r.games>0,'Today’s & tomorrow’s games loaded ('+r.games+')'));
+    body.appendChild(ck(r.rosters, r.rosters?'Rosters & lineups loaded':'Rosters not loaded: '+r.lineupsMissing.join(', ')));
+    body.appendChild(ck(!!S.user,'Signed in as '+((S.profile&&S.profile.displayName)||(S.user&&S.user.email)||'—')));
+    const all=r.app&&r.rosters&&!!S.user;
+    if(all) body.appendChild(h('div',{style:'background:#dff0e3;color:var(--grass-1);font-weight:800;border-radius:8px;padding:7px;margin-top:6px;font-size:13px;text-align:center;'},'✓ Ready — you can score with no signal'));
+    else if(!netOffline) body.appendChild(h('button',{class:'btn btn-primary btn-sm',style:'margin-top:8px;',onclick:async ev=>{ ev.target.disabled=true; ev.target.textContent='Loading…'; await loadForField(games); draw(await fieldReadiness(games)); }},'Load now'));
+  };
+  fieldReadiness(games).then(draw);
+  return card;
+}
+/* ===================== FIELD LOCATIONS =====================
+   Admin lists each field once (name, address or map link, internet). Games pick their field from the list. */
+function curLeague(){ return (S.leagues||[]).find(l=>l.id===S.currentLeagueId)||null; }
+function leagueFields(){ const lg=curLeague(); return (lg && Array.isArray(lg.fields)) ? lg.fields : []; }
+function normField(s){ return String(s||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+function fieldInfo(name){ if(!name) return null; const n=normField(name); return leagueFields().find(f=>normField(f.name)===n)||null; }
+function internetBadge(f){
+  if(!f || !f.internet) return h('span',{style:'color:var(--ink-soft);'},'—');
+  if(f.internet==='yes') return h('span',{class:'netYes'},'✓ Yes');
+  return h('span',{class:'netNo'},f.internet==='no'?'⚠ No':'⚠ Spotty');
+}
+function mapsUrl(f){ const a=(f&&f.address)||''; if(/^https?:\/\//i.test(a)) return a; return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a||(f&&f.name)||''); }
+function fieldInfoModal(name){
+  const f=fieldInfo(name)||{name}; const ov=h('div',{class:'modalOverlay'}); const close=()=>ov.remove(); const opened=Date.now(); ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });
+  const warn = f.internet && f.internet!=='yes';
+  ov.appendChild(h('div',{class:'modalSheet'},[h('div',{class:'modalHandle'}),
+    h('div',{style:'font-family:var(--font-display);font-weight:800;font-size:20px;'},f.name||'Field'),
+    h('div',{style:'font-size:13px;color:var(--ink-soft);margin:2px 0 10px;'},f.address&&!/^https?:/i.test(f.address)?f.address:(f.address?'Map link':'No address entered yet')),
+    warn?h('div',{style:'background:#fff6dc;border:1px solid #e0b24a;border-radius:10px;padding:9px 10px;font-size:12.5px;line-height:1.45;margin-bottom:10px;'},['⚠ ',h('b',{},f.internet==='no'?'No internet at this field.':'Spotty internet at this field.'),' Sign in and open the app before you arrive — scoring still works offline and uploads later.']):null,
+    (f.address||f.name)?h('a',{class:'btn btn-primary btn-block',href:mapsUrl(f),target:'_blank',rel:'noopener',style:'display:block;text-align:center;text-decoration:none;margin-bottom:8px;'},'📍 Get directions'):null,
+    h('button',{class:'btn btn-outline btn-block',onclick:close},'Close')]));
+  document.body.appendChild(ov);
+}
+function fieldPicker(val, on, style){
+  const list=leagueFields(); if(!list.length){ const i=h('input',{type:'text',value:val||'',placeholder:'Field',class:'schedIn',style:style||'width:100px;'}); i.addEventListener('change',()=>on(i.value.trim())); return i; }
+  const wrap=h('span',{style:'display:inline-flex;gap:4px;align-items:center;'});
+  const s=h('select',{class:'schedIn',style:style||'width:auto;'}); s.appendChild(h('option',{value:''},'Field…'));
+  const known=fieldInfo(val); list.forEach(f=>{ const o=h('option',{value:f.name},f.name+(f.internet&&f.internet!=='yes'?' ⚠':'')); if(known&&known.name===f.name) o.setAttribute('selected','selected'); s.appendChild(o); });
+  if(val && !known){ const o=h('option',{value:val},val); o.setAttribute('selected','selected'); s.appendChild(o); }
+  s.appendChild(h('option',{value:'__other'},'＋ Other (type it)…'));
+  const other=h('input',{type:'text',placeholder:'Field name',class:'schedIn hidden',style:'width:110px;'}); other.addEventListener('change',()=>on(other.value.trim()));
+  s.addEventListener('change',()=>{ if(s.value==='__other'){ other.classList.remove('hidden'); other.focus(); return; } other.classList.add('hidden'); on(s.value); });
+  wrap.appendChild(s); wrap.appendChild(other); return wrap;
+}
+function fieldLocationsCard(){
+  const lg=curLeague(); if(!lg) return null; const list=leagueFields().map(f=>({...f}));
+  const save=async()=>{ try{ await updateDoc(doc(db,'leagues',lg.id),{fields:list.filter(f=>f.name&&f.name.trim())}); }catch(e){ toast('Could not save: '+(e.message||e)); } };
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},['Field locations ',h('span',{class:'pill-warn',style:'font-size:11px;vertical-align:2px;'},'Admin only')]));
+  card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;'},'Add each field once. Games pick their field from this list, and players tap a field on the Schedule to get directions.'));
+  const t=h('table',{class:'dataTable fieldTable'}); t.appendChild(h('tr',{},['Field name','Address or map link','Internet',''].map(x=>h('th',{style:'text-align:left;'},x))));
+  list.forEach((f,i)=>{ const nm=h('input',{type:'text',value:f.name||'',placeholder:'Field name'}); nm.addEventListener('change',()=>{ f.name=nm.value.trim(); save(); });
+    const ad=h('input',{type:'text',value:f.address||'',placeholder:'Street address or map link'}); ad.addEventListener('change',()=>{ f.address=ad.value.trim(); save(); });
+    const net=h('select',{style:'width:auto;'}); [['yes','✓ Yes'],['spotty','⚠ Spotty'],['no','⚠ No']].forEach(([v,l])=>net.appendChild(h('option',{value:v},l))); net.value=f.internet||'yes'; net.addEventListener('change',()=>{ f.internet=net.value; save(); });
+    t.appendChild(h('tr',{},[h('td',{},nm),h('td',{},ad),h('td',{},net),h('td',{},h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>confirmModal('Remove '+(f.name||'this field')+'?','Games keep the field name; it just won’t show directions or internet.',()=>{ list.splice(i,1); save(); })},'✕'))])); });
+  if(list.length) card.appendChild(h('div',{class:'gridScroll'},t));
+  card.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'border-style:dashed;margin-top:8px;',onclick:()=>{ list.push({name:'Field '+(list.length+1),address:'',internet:'yes'}); save(); }},'＋ Add a field'));
+  const used=[...new Set(allLeagueSchedule().map(g=>g.location).filter(Boolean))].filter(n=>!fieldInfo(n));
+  if(used.length) card.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:8px;'},['Fields on the schedule not listed yet: ',...used.slice(0,8).map((n,k)=>h('a',{href:'#',style:'margin-left:6px;',onclick:e=>{ e.preventDefault(); list.push({name:n,address:'',internet:'yes'}); save(); }},'＋ '+n))]));
+  card.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:8px;'},'Internet: ✓ Yes · ⚠ Spotty · ⚠ No. Spotty and No are highlighted on the Schedule and Scorecard.'));
+  return card;
+}
+/* ---- designated runner: tap version (phones & tablets) ---- */
+function drPickModal(game, p){
+  const occ=['third','second','first'].filter(k=>game.base[k] && game.base[k]!==p.id);
+  if(!occ.length){ toast('No runners on base'); return; }
+  const ov=h('div',{class:'modalOverlay'}); const close=()=>ov.remove(); const opened=Date.now(); ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });   // ignore the tap's own follow-up click
+  const sheet=h('div',{class:'modalSheet'},[h('div',{class:'modalHandle'}),h('div',{style:'font-weight:900;font-size:17px;margin-bottom:10px;'},p.name+' runs for…')]);
+  occ.forEach(k=>{ const pid=game.base[k]; const dr=drActive(game,pid);
+    sheet.appendChild(h('button',{class:'drPickBtn',onclick:()=>{ close(); setDesignatedRunner(game,k,p).then(()=>renderShell()); }},[h('span',{},DR_BASE_WORD[k]+' — '+playerInitialLast(playerName(game,pid))+(dr?' (DR: '+playerInitialLast(dr.runnerName)+')':'')),h('span',{},'›')])); });
+  sheet.appendChild(h('button',{class:'btn btn-outline btn-block',onclick:close},'Cancel'));
+  sheet.appendChild(h('div',{style:'font-size:11.5px;color:var(--ink-soft);margin-top:8px;'},'Picked the wrong one? Tap the right player — he replaces the DR on that base.'));
+  ov.appendChild(sheet); document.body.appendChild(ov);
+}
+
+async function saveGame(game, patch){ if(game && game.__pregame){ for(const side of ['home','away']) if(patch[side]) await savePregameSide(game, side, patch[side]); renderShell(); return; } await netWrite(updateDoc(gameRef(game.id), patch)); }
 
 
 /* ===================== SHELL / ROUTER ===================== */
@@ -2116,12 +2279,12 @@ function renderShell(){
     {id:'scorecard', label:'Scorecard', icon:'<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M9 4v16"/>'},
     {id:'batting', label:'Batting', icon:'<circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/>'},
     {id:'hitzone', label:'Hit zone', icon:'<path d="M12 2 L22 12 L12 22 L2 12 Z"/><path d="M12 2v20M2 12h20"/>'},
-    {id:'feed', label:'Live Feed', icon:'<path d="M4 11a8 8 0 0 1 16 0M8 11a4 4 0 0 1 8 0"/><circle cx="12" cy="17" r="1.5"/>'},
+    {id:'feed', label:'Live Feed'+(netOffline?' 📴':''), icon:'<path d="M4 11a8 8 0 0 1 16 0M8 11a4 4 0 0 1 8 0"/><circle cx="12" cy="17" r="1.5"/>'},
   ];
   const leftDrawerTabs = [
     {id:'schedule', label:'Schedule'}, isPickupSeason()?null:{id:'record', label:'Record'},
     {id:'report', label:'Report'},
-    {id:'chat', label:'League Chat'+(S.user&&S.activeTab!=='chat'&&annNewCount()?' \ud83d\udce3 '+annNewCount():'')}, {id:'rules', label:'League Rules'},
+    {id:'chat', label:'League Chat'+(netOffline?' 📴':'')+(S.user&&S.activeTab!=='chat'&&annNewCount()?' \ud83d\udce3 '+annNewCount():'')}, {id:'rules', label:'League Rules'},
     {id:'qa', label:'Q&A'}, {id:'terms', label:'Terms'}
   ].filter(Boolean);
   const rightDrawerTabs = [];
@@ -2163,6 +2326,7 @@ function renderShell(){
     schedule:'Manager', record:'Admin', report:'Player', history:'Manager', draft:'Manager', eval:'Manager', feed:'Player',
     qa:'Player', terms:'Player', admin:'Admin', superadmin:'Super Admin', chat:'Player', rules:'Player'
   };
+  { const nb=netBarEl(); if(nb) content.appendChild(nb); }
   { const bb=builderBackBar(); if(bb) content.appendChild(bb); }
   { const wc=welcomeCard(); if(wc) content.appendChild(wc); }
   { const rn=renewCard(); if(rn) content.appendChild(rn); }
@@ -2952,7 +3116,7 @@ function playerName(game,id){ const p=allPlayersInGame(game).find(x=>x.id===id);
 let scorecardTeamView='away';
 async function fetchTeamRosterFormatted(teamId){
   if(!teamId) return Array.from({length:14},(_,i)=>({id:uid(),name:'',number:'',position:'',order:i+1,isSub:false,subTeamName:''}));
-  const snap = await getDocs(collection(db,'teams',teamId,'players'));
+  const snap = await getDocsNet(collection(db,'teams',teamId,'players'));
   const filtered = snap.docs.map(d=>({id:d.id,...d.data()})).filter(p=>!S.currentSeasonId||p.seasonId===S.currentSeasonId||!p.seasonId);
   const formatted = filtered.sort((a,b)=>(a.order||99)-(b.order||99)).map((p,i)=>({id:p.id,name:p.name,number:p.number||'',position:p.position||'',order:i+1,isSub:!!p.isSub,subTeamName:p.subTeamName||''}));
   while(formatted.length<14) formatted.push({id:uid(),name:'',number:'',position:'',order:formatted.length+1,isSub:false,subTeamName:''});
@@ -3001,7 +3165,7 @@ let pgLoadAt=0, pgSelected=null; const pgGames={};
 function pgKey(matchupId, teamId){ return 'pg_'+matchupId+'_'+teamId; }
 function loadPregameLineups(force){
   if(!force && Date.now()-pgLoadAt<15000) return Promise.resolve(false); pgLoadAt=Date.now();
-  return getDocs(collection(db,'savedLineups')).then(sn=>{ const m={}; sn.docs.forEach(d=>{ if(d.id.startsWith('pg_')) m[d.id]=d.data(); }); S.pgLineups=m; return true; }).catch(()=>false);
+  return getDocsNet(collection(db,'savedLineups')).then(sn=>{ const m={}; sn.docs.forEach(d=>{ if(d.id.startsWith('pg_')) m[d.id]=d.data(); }); S.pgLineups=m; return true; }).catch(()=>false);
 }
 function pgLineup(matchupId, teamId){ return ((S.pgLineups||{})[pgKey(matchupId,teamId)])||null; }
 function teamNameAny(id){ return ((S.allTeams||[]).find(t=>t.id===id)||S.teams.find(t=>t.id===id)||{}).name || ''; }
@@ -3031,7 +3195,7 @@ async function openPregame(sched){
 async function savePregameSide(game, side, team){
   const tid=sideTeamId(game, side); if(!tid){ toast('That team isn’t in the league — set this lineup when the game starts'); return; }
   const data={pregame:true, matchupId:game.matchupId, teamId:tid, seasonId:game.seasonId||null, name:team.name||'', coach:team.coach||'', players:(team.players||[]).map(p=>({...p})), setBy:(S.user&&S.user.email)||null, setByName:(S.profile&&S.profile.displayName)||'', setAt:Date.now()};
-  await setDoc(doc(db,'savedLineups',pgKey(game.matchupId,tid)),data);
+  await netWrite(setDoc(doc(db,'savedLineups',pgKey(game.matchupId,tid)),data));
   S.pgLineups=S.pgLineups||{}; S.pgLineups[pgKey(game.matchupId,tid)]=data; game[side]={...team}; game.pgSet[side]=true; toast('Lineup saved for this game');
 }
 function pregameLineupNote(game){
@@ -3050,7 +3214,7 @@ function startRibbon(step){
 async function startGameWizard(sched){
   const pickup=!!sched.pickup;
   const ov=h('div',{class:'modalOverlay'}); const box=h('div',{class:'modalSheet',style:'padding:0;overflow:hidden;max-width:660px;'}); ov.appendChild(box); document.body.appendChild(ov);
-  const close=()=>ov.remove(); ov.addEventListener('click',e=>{ if(e.target===ov) close(); });
+  const close=()=>ov.remove(); const opened=Date.now(); ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });
   box.appendChild(startRibbon(2)); box.appendChild(h('div',{style:'padding:18px;color:var(--ink-soft);'},'Loading lineups…'));
   let sd, L={}, keeper=null;
   if(pickup){ sd={home:{id:null,name:sched.homeName||'Home'},away:{id:null,name:sched.awayName||'Away'}}; L.home={players:[],fromManager:false}; L.away={players:[],fromManager:false}; }
@@ -3106,17 +3270,17 @@ async function createGameFromWizard(sched, sd, L, keeper, pickup){
   const base={date:sched.date, seasonId:S.currentSeasonId, matchupId:sched.matchupId||null, location:sched.location||'', scorekeeperSide:keeper, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[], atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''};
   if(pickup){
     if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
-    const ref=await addDoc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games'),Object.assign(base,{pickup:true, opponent:sd.away.name, opponentTeamId:null, homeAway:'home', home:{name:sd.home.name,coach:'',players:pad(ordered('home').filter(p=>p.name))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away').filter(p=>p.name))}, inningsPlanned:9}));
+    const ref=doc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games')); await netWrite(setDoc(ref,Object.assign(base,{pickup:true, opponent:sd.away.name, opponentTeamId:null, homeAway:'home', home:{name:sd.home.name,coach:'',players:pad(ordered('home').filter(p=>p.name))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away').filter(p=>p.name))}, inningsPlanned:9})));
     S.activeGameId=ref.id; S.activeTab='scorecard'; renderShell(); return;
   }
   if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
   if(sched.matchupId && sched.opponentTeamId){
-    try{ const os=await getDocs(collection(db,'teams',sched.opponentTeamId,'games')); const d=os.docs.find(x=>x.data().matchupId===sched.matchupId);
+    try{ const os=await getDocsNet(collection(db,'teams',sched.opponentTeamId,'games')); const d=os.docs.find(x=>x.data().matchupId===sched.matchupId);
       if(d){ toast('The other team already started this game — opening it'); useGame({id:d.id, teamId:sched.opponentTeamId, ...d.data()}); return; } }catch(e){}
   }
   const innings=isTourneySeason()?(+tourneyCfg().innings||7):(seasonRulesOn(currentSeason())&&+currentSeason().seasonRules.innings?+currentSeason().seasonRules.innings:9);
-  const ref=await addDoc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games'),Object.assign(base,{opponent:sched.opponent, opponentTeamId:sched.opponentTeamId||null, homeAway:sched.homeAway,
-    home:{name:sd.home.name,coach:'',players:pad(ordered('home'))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away'))}, inningsPlanned:innings}));
+  const ref=doc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games')); await netWrite(setDoc(ref,Object.assign(base,{opponent:sched.opponent, opponentTeamId:sched.opponentTeamId||null, homeAway:sched.homeAway,
+    home:{name:sd.home.name,coach:'',players:pad(ordered('home'))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away'))}, inningsPlanned:innings})));
   S.activeGameId=ref.id; S.activeTab='scorecard'; renderShell();
 }
 async function findOrCreateGameFromSchedule(sched){
@@ -3360,6 +3524,7 @@ Router.register('scorecard', (root)=>{
   if(!game){
     const admin = isAdmin();
     const upcoming = (admin ? leagueSchedule() : seasonSchedule()).filter(g=>!g.completed).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    { const rc=readyForFieldCard(upcoming); if(rc) root.appendChild(rc); }
     const card = h('div',{class:'card'}); card.appendChild(h('h3',{}, admin ? 'Scheduled Games (league)' : 'Scheduled Games'));
     if(!upcoming.length){
       card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No games on the Schedule yet — add one on the Schedule tab first.'));
@@ -3370,7 +3535,7 @@ Router.register('scorecard', (root)=>{
                             : ((sched.homeAway==='away' ? '@ ' : 'vs ')+sched.opponent));
         const rowEdit = admin || canEdit;
         card.appendChild(h('div',{class:'gameListRow', onclick: rowEdit ? ()=>findOrCreateGameFromSchedule(sched) : null, style: rowEdit?'cursor:pointer;':''},[
-          h('div',{},[h('div',{class:'glTeams'},label), h('div',{class:'glDate'},formatDate(sched.date)+(sched.time?' · '+sched.time:'')+(sched.location?' · '+sched.location:''))]),
+          h('div',{},[h('div',{class:'glTeams'},label), h('div',{class:'glDate'},[formatDate(sched.date)+(sched.time?' · '+fmtTime(sched.time):'')+(sched.location?' · '+sched.location:''), (()=>{ const f=fieldInfo(sched.location); return f&&f.internet&&f.internet!=='yes'?h('span',{class:'netNo',style:'margin-left:6px;'},f.internet==='no'?'⚠ No internet':'⚠ Spotty internet'):null; })()])]),
           rowEdit ? h('span',{style:'color:var(--grass-1);font-size:12px;font-weight:700;'}, started?'Continue →':'Start ›') : h('span',{style:'color:var(--ink-soft);font-size:11px;'}, started?'Live':'Not started')
         ]));
       });
@@ -3493,7 +3658,7 @@ function liveDiamondCard(game, canEdit){
       h('div',{class:'diamondOuts'},[outPip(game.outs>=1),outPip(game.outs>=2),outPip(game.outs>=3)])
     ]),
     stage,
-    (canEdit&&(hasRunners||scoredEntries.length)) ? h('p',{class:'diamondHint'},'Drag a runner to correct their base or tag them out. Drag a scored player onto a base to put them back on, or onto Tag/Force Out if thrown out at home.'+(hasRunners?' Designated runner: drag ⠿ a name from the scorecard below onto a base.':'')) : null
+    (canEdit&&(hasRunners||scoredEntries.length)) ? h('p',{class:'diamondHint'},'Drag a runner to correct their base or tag them out. Drag a scored player onto a base to put them back on, or onto Tag/Force Out if thrown out at home.'+(hasRunners?' Designated runner: tap ⠿ by a name in the scorecard below.':'')) : null
   ]);
 }
 function attachScoredChipDrag(chip, game, entry, tagOutBoxEl, svgEl){
@@ -3591,6 +3756,8 @@ async function undoDesignatedRunner(game, e){
 function attachDRDrag(handle, game, p){
   handle.addEventListener('pointerdown', e=>{
     e.preventDefault(); e.stopPropagation();
+    if(e.pointerType && e.pointerType!=='mouse'){ drPickModal(game,p); return; }
+    const sx=e.clientX, sy=e.clientY;
     const svgEl=document.querySelector('#tabContent .diamondWrap svg'); if(!svgEl){ toast('Open the Scorecard base diagram first'); return; }
     if(!['first','second','third'].some(k=>game.base[k])){ toast('No runners on base'); return; }
     const card=svgEl.closest('.diamondCard'); const r=card.getBoundingClientRect(); if(r.top<0 || r.bottom>window.innerHeight) card.scrollIntoView({behavior:'smooth',block:'center'});
@@ -3601,6 +3768,7 @@ function attachDRDrag(handle, game, p){
     let hover=null;
     const onMove=ev=>{ place(ev); if(hover){ hover.classList.remove('dropTarget'); hover=null; } const b=nearest(ev); if(b){ hover=svgEl.querySelector('.baseCircle-'+b); if(hover) hover.classList.add('dropTarget'); } };
     const onUp=ev=>{ document.removeEventListener('pointermove',onMove); document.removeEventListener('pointerup',onUp); ghost.remove(); if(hover) hover.classList.remove('dropTarget');
+      if(Math.hypot(ev.clientX-sx, ev.clientY-sy)<6){ drPickModal(game,p); return; }
       const b=nearest(ev); if(b) setDesignatedRunner(game,b,p).then(()=>renderShell()); };
     document.addEventListener('pointermove',onMove); document.addEventListener('pointerup',onUp);
   });
@@ -3618,7 +3786,7 @@ function drTableCard(game, side, canEdit){
         h('td',{},(o.live&&canEdit)?h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 7px;font-size:11px;',onclick:ev=>{ ev.stopPropagation(); undoDesignatedRunner(game,e).then(()=>renderShell()); }},'↩ Undo'):null)])); });
       box.appendChild(t); }
   });
-  box.appendChild(h('div',{class:'drTableHint'},'Tap a name to see each time he ran. '+(canEdit?'Drag ⠿ a name onto a runner’s base. ':'')+'Runs count for the batter.'));
+  box.appendChild(h('div',{class:'drTableHint'},'Tap a name to see each time he ran. '+(canEdit?'Tap ⠿ by a name (or drag it onto a base) to make him a DR. ':'')+'Runs count for the batter.'));
   return box;
 }
 function scorecardGridCard(game, side, canEdit){
@@ -4123,8 +4291,8 @@ Router.register('schedule', (root)=>{
   let rows=all.filter(g=>{ if(scheduleSeasonFilter==='all') return true; if(scheduleSeasonFilter==='mine') return isMyGame(g); if(scheduleSeasonFilter==='upcoming'){ const p=schedPlayed(g); return !(p&&p.completed) && (!g.date||g.date>=t); } if(scheduleSeasonFilter==='played'){ const p=schedPlayed(g); return !!p || (g.date&&g.date<t); } return g.seasonId===scheduleSeasonFilter; });
   const card=h('div',{class:'card',style:'padding:0;overflow:hidden;'});
   const tbl=h('table',{class:'schedTable'});
-  tbl.appendChild(h('tr',{},[h('th',{},'Date'),h('th',{class:'schedTime'},'Time'),h('th',{},'Teams'),h('th',{class:'schedField'},'Field'),h('th',{},'Score'),h('th',{},'Status'), scheduleEditing?h('th',{}):null]));
-  const cols=scheduleEditing?7:6;
+  tbl.appendChild(h('tr',{},[h('th',{},'Date'),h('th',{class:'schedTime'},'Time'),h('th',{},'Teams'),h('th',{class:'schedField'},'Field'),h('th',{},'Internet'),h('th',{},'Score'),h('th',{},'Status'), scheduleEditing?h('th',{}):null]));
+  const cols=scheduleEditing?8:7;
   const inp=(type,val,ph,on,extra)=>{ const i=h('input',Object.assign({type,value:val||'',placeholder:ph||'',class:'schedIn'},extra||{})); i.addEventListener('change',()=>on(i.value)); return i; };
   const teamSel=(val,on,exclude)=>{ const s=h('select',{class:'schedIn'}); s.appendChild(h('option',{value:''},'Team…')); S.teams.filter(x=>x.active!==false).slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(tm=>{ const o=h('option',{value:tm.id},tm.name); if(tm.id===val) o.setAttribute('selected','selected'); s.appendChild(o); }); s.addEventListener('change',()=>on(s.value)); return s; };
   const order=scheduleSeasonOrder(rows);
@@ -4140,7 +4308,8 @@ Router.register('schedule', (root)=>{
       const score=p?(totalRuns(p,'away')+'–'+totalRuns(p,'home')):'—';
       let dl=g.date||'—'; try{ if(g.date) dl=new Date(g.date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'numeric',day:'numeric'}); }catch(e){}
       const past=(p&&p.completed)||(g.date&&g.date<t);
-      const tr=h('tr',{class:past?'schedPast':'',style:(!scheduleEditing&&p?'cursor:pointer;':'')});
+      const fi=fieldInfo(g.location); const caution=!past && fi && fi.internet && fi.internet!=='yes';
+      const tr=h('tr',{class:(past?'schedPast':'')+(caution?' schedCaution':''),style:(!scheduleEditing&&p?'cursor:pointer;':'')});
       const stripe='border-left:5px solid '+hexTint(color,0.35)+';';
       const rowEdit = scheduleEditing && (admin || isMyGame(g));
       if(rowEdit){
@@ -4151,13 +4320,15 @@ Router.register('schedule', (root)=>{
         else if(p) tr.appendChild(h('td',{title:'Teams can’t change once the game has been scored'},[tm.away,' at ',tm.home]));
         else if(!admin) tr.appendChild(h('td',{title:'Only an admin can change the teams'},[tm.away,' at ',tm.home]));
         else { let hId=ids.home, aId=ids.away; tr.appendChild(h('td',{style:'white-space:nowrap;'},[teamSel(aId,v=>{ aId=v; schedChangeTeams(g,hId,aId); }),' at ',teamSel(hId,v=>{ hId=v; schedChangeTeams(g,hId,aId); })])); }
-        tr.appendChild(h('td',{class:'schedField'},inp('text',g.location,'Field',v=>updateScheduledGame(g,{location:v.trim()}),{style:'width:100px;'})));
+        tr.appendChild(h('td',{class:'schedField'},fieldPicker(g.location,v=>updateScheduledGame(g,{location:v}))));
       } else {
         tr.appendChild(h('td',{style:stripe+'white-space:nowrap;'},[dl, h('small',{class:'schedPhoneOnly'},fmtTime(g.time)||'')]));
         tr.appendChild(h('td',{class:'schedTime',style:'white-space:nowrap;'},fmtTime(g.time)||'—'));
-        tr.appendChild(h('td',{},[tm.away+' '+tm.sep+' '+tm.home, h('small',{class:'schedPhoneOnly'},g.location||'')]));
-        tr.appendChild(h('td',{class:'schedField'},g.location||'—'));
+        const fLink=nm=>nm?h('span',{class:'fieldLink',onclick:ev=>{ ev.stopPropagation(); fieldInfoModal(nm); }},nm):'—';
+        tr.appendChild(h('td',{},[tm.away+' '+tm.sep+' '+tm.home, h('small',{class:'schedPhoneOnly'},fLink(g.location))]));
+        tr.appendChild(h('td',{class:'schedField'},fLink(g.location)));
       }
+      tr.appendChild(h('td',{style:'white-space:nowrap;'},[internetBadge(fi), caution?h('div',{class:'netNote'},'Sign in & open the app before you get there'):null]));
       tr.appendChild(h('td',{style:'font-family:var(--font-mono);font-weight:800;white-space:nowrap;'},score));
       tr.appendChild(h('td',{},h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap;background:'+st.bg+';color:'+st.fg+';'},st.label)));
       if(scheduleEditing && !admin) tr.appendChild(h('td',{}));
@@ -4172,7 +4343,7 @@ Router.register('schedule', (root)=>{
     const ssel=h('select',{class:'schedIn'}); S.seasons.filter(x=>x.status!=='ended').sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)).forEach(x=>{ const o=h('option',{value:x.id},x.name); if(x.id===A.seasonId) o.setAttribute('selected','selected'); ssel.appendChild(o); }); ssel.addEventListener('change',()=>{ A.seasonId=ssel.value; A.home=''; A.away=''; renderShell(); });
     const di=inp('date',A.date,'',v=>{ A.date=v; }); di.addEventListener('input',()=>{ A.date=di.value; });
     const ti=inp('time',A.time,'',v=>{ A.time=v; });
-    const li=inp('text',A.loc,'Field',v=>{ A.loc=v; },{style:'width:100px;'}); li.addEventListener('input',()=>{ A.loc=li.value; });
+    const li=fieldPicker(A.loc,v=>{ A.loc=v; });
     const teamsCell = pick ? [inp('text',A.home,'Home (optional)',v=>{ A.home=v; },{style:'width:110px;'}),' vs ',inp('text',A.away,'Away (optional)',v=>{ A.away=v; },{style:'width:110px;'})]
                            : [teamSel(A.away,v=>{ A.away=v; }),' at ',teamSel(A.home,v=>{ A.home=v; })];
     const rp=inp('number',A.repeat,'1',v=>{ A.repeat=v; },{min:'1',max:'30',style:'width:52px;'});
@@ -4184,7 +4355,8 @@ Router.register('schedule', (root)=>{
     ])]));
   }
   const sw=h('div',{class:'gridScroll',style:'margin:0;padding:0;'}); sw.appendChild(tbl); card.appendChild(sw); root.appendChild(card);
-  if(!admin) root.appendChild(h('p',{style:'font-size:11px;color:var(--ink-soft);margin:8px 2px 0;'},'Tap a game that has started to watch it on Live Feed.'));
+  if(!admin) root.appendChild(h('p',{style:'font-size:11px;color:var(--ink-soft);margin:8px 2px 0;'},'Tap a game that has started to watch it on Live Feed. Tap a field for directions.'));
+  if(admin){ const fc=fieldLocationsCard(); if(fc){ root.appendChild(h('div',{style:'height:12px;'})); root.appendChild(fc); } }
 });
 let scheduleEditId = null;
 function fmtTime(t){ if(!t) return ''; const [hh,mm]=t.split(':'); let hr=parseInt(hh); if(isNaN(hr)) return t; const ap=hr>=12?'PM':'AM'; hr=hr%12||12; return hr+':'+(mm||'00')+' '+ap; }
@@ -6216,6 +6388,7 @@ function playByPlayCard(game){
   return card;
 }
 Router.register('feed', (root)=>{
+  if(netOffline) root.appendChild(offlineNeedCard('Live Feed'));
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Live Feed'),h('p',{},'Watch any game in the league as it happens.')]));
   { const fa=feedAnnouncementsCard(); if(fa) root.appendChild(fa); }
   const teamName=id=>(S.teams.find(t=>t.id===id)||{}).name||id;
@@ -6503,6 +6676,7 @@ function chatClearCard(){
 }
 
 Router.register('chat', (root)=>{
+  if(netOffline){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'League Chat')])); root.appendChild(offlineNeedCard('League Chat')); return; }
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'League Chat'),h('p',{},'Talk with the whole league. Keep it friendly and within league rules.')]));
   { if(!S.annVisit) S.annVisit={at:Date.now(), key:annSeenKey()}; const ab=announcementsBox(); if(ab) root.appendChild(ab); }
   if(!S.currentLeagueId && !S.leagues.length){ root.appendChild(emptyState('No league yet','Ask your commissioner to set up the league.','diamond')); return; }
@@ -6786,7 +6960,9 @@ const HELP_KB = [
   {k:'scored home actually out undo', q:'A runner auto-scored but was out at home', a:'Drag their chip from the “Scored” column back onto “Tag / Force Out.”'},
   {k:'undo last at-bat mistake', q:'How do I undo the last play?', a:'On the Scorecard, tap Undo next to “Record at-bat” to remove the most recent at-bat.'},
   {k:'lineup batting order positions sub substitute ahead before game upcoming', q:'How do I set a lineup?', a:'Lineup tab → Select Game. Pick an Upcoming game to set your lineup ahead of time (managers edit their own team; admins both) — drag ⠿ to reorder, set positions, check Sub for a fill-in. It saves for that game and is used automatically when the game starts. During a game, pick it under In progress to make changes.'},
-  {k:'designated runner dr courtesy runner pinch run base drag', q:'How do I use a designated runner?', a:'On the Scorecard, drag the ⠿ next to a player’s name in the scorecard onto a runner’s base. The runner shows as “G.Bartok (DR)”. If he scores, the run counts for the batter he ran for, not the runner. The Designated runners table beside the scorecard shows each DR and how many times he ran — tap a name for the inning, who he ran for and the outcome (↩ Undo while he’s still on base). Live Feed play-by-play notes it too.'},
+  {k:'designated runner dr courtesy runner pinch run base drag tap', q:'How do I use a designated runner?', a:'On the Scorecard, tap the ⠿ next to a player’s name in the scorecard, then tap the base he’s running for (on a computer you can also drag the name onto the base). The runner shows as “G.Bartok (DR)”. If he scores, the run counts for the batter he ran for. Picked the wrong one? Tap the right player — he replaces the DR on that base. The Designated runners table beside the scorecard shows each DR and how many times he ran; tap a name for the inning, who he ran for and the outcome.'},
+  {k:'offline no internet signal no service field dead zone', q:'Does the app work with no internet at the field?', a:'Yes. When the signal drops, a thin 📴 Offline bar appears and scoring keeps working — plays are saved on the phone and upload by themselves when you’re back in range (the bar turns green: “Back online — 3 changes uploaded”). Live Feed, Chat, Challenges, notices and sign-in need internet. Before going to a field with poor signal, open the Scorecard while you still have internet and check “Ready for the field?”.'},
+  {k:'field location directions address internet accessible map', q:'How do I add field locations?', a:'Schedule tab → Field locations (admins): add each field once with its address or map link and whether it has internet (Yes, Spotty or No). Games pick their field from that list. The Schedule shows an Internet column, and games at fields with Spotty or No internet are highlighted. Anyone can tap a field name for directions.'},
   {k:'start game ribbon steps confirm lineups scorekeeper play ball', q:'How do I start a game?', a:'Scorecard → tap Start › on a scheduled game. A ribbon walks you through: ① Select game ② Lineups (check both teams; ✎ Edit a lineup if needed) ③ Confirmed ④ Start game (pick who keeps the official score) ⑤ Play Ball! Nothing is created until you tap Start game. Pickup games build Home and Away from today’s players in step ②.'},
   {k:'schedule add game import bulk template', q:'How do I add games to the schedule?', a:'Schedule tab (left menu): admins see Manage schedule under the game list — add one game (Home, Away, date, time, field) or Import Excel/CSV using the template. Pickup seasons add games with just date, time and field.'},
   {k:'roster method formal informal pickup draft season how built builder', q:'How do rosters get built?', a:'Admin → Season Builder. Pick the season, then Formal, Informal or Pickup across the top. The numbered steps show where you are; tap any step to go there and the gold “← Season Builder” bar brings you back. Formal: teams → sign-ups → player list → evaluation → draft → approve → roster → lineups. Informal: teams → sign-ups → player list → managers pick → admin approves → lineups. Pickup: game days → build sides at each game.'},
@@ -6906,6 +7082,8 @@ const FAQ_DATA = [
     { q:'Can other leagues see my information?', a:'No. Each league’s data is separate: members of one league cannot read another league’s players, games, chat or sign-ups. Within your league, your name, team, position and statistics are visible to members; your email, phone and age are visible only to your league’s administrators and team managers, and to you.' },
     { q:'Who can see my registration answers?', a:'Only your league’s administrators. Managers and other players never see them. Your name, team and statistics are visible to members of your league, as described in the “Use of my information” agreement.' },
     { q:'How do I get an account?', a:'Tap “New here? Join the league” on the sign-in page, fill in the one form (league, name, phone, email and a password) and tap Join the league. Your admin approves you; until then you’ll see “Waiting for approval.” After that, just Sign In with the same email and password — every season.' },
+    { q:'Does the app work at a field with no internet?', a:'Yes — scoring keeps working and uploads when you’re back in range. Fields marked ⚠ on the Schedule have poor signal: sign in and open the app before you get there.' },
+    { q:'Where is the field?', a:'Tap the field name on the Schedule tab for the address and a Get directions button.' },
     { q:'What does (DR) mean next to a runner?', a:'A designated runner is running for that batter. If he scores, the run counts for the batter, not the runner. Live Feed play-by-play shows who ran for whom.' },
     { q:'Can my manager set the lineup before the game?', a:'Yes. Managers set their team’s batting order and positions for upcoming games on the Lineup tab. The scorekeeper checks both lineups when starting the game on the Scorecard.' },
     { q:'Who keeps score?', a:'Only one team keeps the official scorecard for each game. Whoever starts the game picks Home or Away as scorekeeper; the league admin can change it. The other team watches on Live Feed.' },
