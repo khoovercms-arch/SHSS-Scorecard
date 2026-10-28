@@ -525,6 +525,8 @@ tr.schedCaution td{background:#fff6dc !important;}
 .readyCk .rY{background:#1f7a3f;color:#fff}.readyCk .rN{background:#d9a53a;color:#24332a}
 .drPickBtn{display:flex;justify-content:space-between;align-items:center;width:100%;border:2px solid var(--grass-1);border-radius:12px;padding:13px 14px;margin-bottom:8px;font-weight:800;font-size:15px;background:#fff;color:var(--ink);cursor:pointer;}
 @media (pointer:coarse){ .drHandle{font-size:18px;padding:4px 7px;} }
+.fieldAddr{display:block;font-size:11.5px;color:var(--ink-soft);font-weight:400;}
+.fieldOv{display:inline-block;background:#e9e1f5;color:#5b3a8c;font-weight:800;font-size:10px;border-radius:6px;padding:1px 6px;margin-left:4px;}
 </style>
 </head>
 <body>
@@ -2022,10 +2024,10 @@ function readyForFieldCard(upcoming){
   const games=(upcoming||[]).filter(g=>!g.pickup && (g.date===t0 || g.date===t1));
   if(!games.length) return null;
   const card=h('div',{class:'card readyCard'}); const body=h('div',{},h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},'Checking…'));
-  const noNet=games.filter(g=>{ const f=fieldInfo(g.location); return f && f.internet && f.internet!=='yes'; });
+  const noNet=games.filter(g=>{ const f=gameFieldInfo(g); return f && f.internet && f.internet!=='yes'; });
   card.appendChild(h('div',{style:'font-weight:900;font-size:15px;'},'📶 Ready for the field?'));
   card.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin:2px 0 6px;'},'If the field has poor signal, check this while you still have internet.'));
-  noNet.forEach(g=>{ const f=fieldInfo(g.location); card.appendChild(h('div',{style:'background:#fff6dc;border:1px solid #e0b24a;border-radius:8px;padding:6px 9px;font-size:12px;margin-bottom:6px;'},['⚠ ',h('b',{},f.name),' — '+(f.internet==='no'?'no internet':'spotty internet')+'. Sign in and open the app before you get there.'])); });
+  noNet.forEach(g=>{ const f=gameFieldInfo(g); card.appendChild(h('div',{style:'background:#fff6dc;border:1px solid #e0b24a;border-radius:8px;padding:6px 9px;font-size:12px;margin-bottom:6px;'},['⚠ ',h('b',{},f.name),' — '+(f.internet==='no'?'no internet':'spotty internet')+'. Sign in and open the app before you get there.'])); });
   card.appendChild(body);
   const draw=r=>{ body.innerHTML='';
     const ck=(ok,txt)=>h('div',{class:'readyCk'},[h('span',{class:ok?'rY':'rN'},ok?'✓':'!'),txt]);
@@ -2052,8 +2054,8 @@ function internetBadge(f){
   return h('span',{class:'netNo'},f.internet==='no'?'⚠ No':'⚠ Spotty');
 }
 function mapsUrl(f){ const a=(f&&f.address)||''; if(/^https?:\/\//i.test(a)) return a; return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a||(f&&f.name)||''); }
-function fieldInfoModal(name){
-  const f=fieldInfo(name)||{name}; const ov=h('div',{class:'modalOverlay'}); const close=()=>ov.remove(); const opened=Date.now(); ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });
+function fieldInfoModal(name, game){
+  const f=(game?gameFieldInfo(game):fieldInfo(name))||{name}; const ov=h('div',{class:'modalOverlay'}); const close=()=>ov.remove(); const opened=Date.now(); ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });
   const warn = f.internet && f.internet!=='yes';
   ov.appendChild(h('div',{class:'modalSheet'},[h('div',{class:'modalHandle'}),
     h('div',{style:'font-family:var(--font-display);font-weight:800;font-size:20px;'},f.name||'Field'),
@@ -2074,6 +2076,85 @@ function fieldPicker(val, on, style){
   s.addEventListener('change',()=>{ if(s.value==='__other'){ other.classList.remove('hidden'); other.focus(); return; } other.classList.add('hidden'); on(s.value); });
   wrap.appendChild(s); wrap.appendChild(other); return wrap;
 }
+/* ---- field by name: one saved location per field name; a game can override it ---- */
+const NET_CHOICES=[['yes','Yes'],['spotty','Spotty'],['no','No']];
+function normNet(v){ const s=String(v==null?'':v).trim().toLowerCase(); if(!s) return ''; if(/^(y|yes|true|good|ok|✓)/.test(s)) return 'yes'; if(/^(n|no|none|false)\b/.test(s)) return 'no'; if(/spot|weak|limit|poor|some/.test(s)) return 'spotty'; return null; }
+function gameFieldInfo(g){
+  if(!g) return null; const base=fieldInfo(g.location); const ov=g.fieldOverride;
+  if(ov && (ov.address || ov.internet)) return {name:g.location||(base&&base.name)||'', address:ov.address||(base&&base.address)||'', internet:ov.internet||(base&&base.internet)||'', override:true};
+  return base;
+}
+async function saveLeagueField(name, patch){
+  const lg=curLeague(); if(!lg) return; const list=leagueFields().map(f=>({...f})); const n=normField(name);
+  const i=list.findIndex(f=>normField(f.name)===n); if(i>=0) list[i]={...list[i], ...patch}; else list.push({name, address:'', internet:'yes', ...patch});
+  await updateDoc(doc(db,'leagues',lg.id),{fields:list});
+}
+function schedGamesAtField(name){ const n=normField(name); return allLeagueSchedule().filter(g=>normField(g.location)===n && g.seasonId===S.currentSeasonId); }
+function fieldAdminModal(name, game){
+  const f=fieldInfo(name)||{name, address:'', internet:'yes'}; const used=schedGamesAtField(name).length;
+  const ov=h('div',{class:'modalOverlay'}); const close=()=>ov.remove(); const opened=Date.now(); ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });
+  const sheet=h('div',{class:'modalSheet'}); ov.appendChild(sheet); document.body.appendChild(ov);
+  const netSel=(val)=>{ const s=h('select',{style:'width:auto;'}); NET_CHOICES.forEach(([v,l])=>s.appendChild(h('option',{value:v},(v==='yes'?'✓ ':'⚠ ')+l))); s.value=val||'yes'; return s; };
+  const lab=t=>h('div',{style:'font-size:11px;font-weight:800;text-transform:uppercase;color:var(--ink-soft);margin:10px 0 4px;'},t);
+  const drawAll=()=>{ sheet.innerHTML='';
+    const ad=h('input',{type:'text',value:f.address||'',placeholder:'Street address or map link'}); const ns=netSel(f.internet);
+    sheet.appendChild(h('div',{class:'modalHandle'}));
+    sheet.appendChild(h('div',{style:'font-family:var(--font-display);font-weight:800;font-size:20px;'},name));
+    sheet.appendChild(h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},'Used by '+used+' game'+(used===1?'':'s')+' this season'));
+    sheet.appendChild(lab('Address or map link')); sheet.appendChild(ad); sheet.appendChild(lab('Internet')); sheet.appendChild(ns);
+    sheet.appendChild(h('button',{class:'btn btn-primary btn-block',style:'margin-top:12px;',onclick:async()=>{ await saveLeagueField(name,{address:ad.value.trim(),internet:ns.value}); close(); toast('Saved for all '+name+' games'); }},'Save for all '+name+' games'));
+    if(game) sheet.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:8px;border-color:#6b3fa0;color:#5b3a8c;',onclick:drawOne},'Different location for this game only…'));
+    if(f.address||name) sheet.appendChild(h('a',{class:'btn btn-outline btn-block',href:mapsUrl(f.address?f:{name}),target:'_blank',rel:'noopener',style:'display:block;text-align:center;text-decoration:none;margin-top:8px;'},'📍 Get directions'));
+    sheet.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:8px;',onclick:close},'Close'));
+  };
+  const drawOne=()=>{ sheet.innerHTML=''; const o=game.fieldOverride||{};
+    const ad=h('input',{type:'text',value:o.address||'',placeholder:'Address for this game'}); const ns=netSel(o.internet||f.internet);
+    let dl=game.date||''; try{ dl=new Date(game.date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'numeric',day:'numeric'}); }catch(e){}
+    const tm=schedTeams(game);
+    sheet.appendChild(h('div',{class:'modalHandle'}));
+    sheet.appendChild(h('div',{style:'font-family:var(--font-display);font-weight:800;font-size:19px;'},name+' — '+dl+(game.time?', '+fmtTime(game.time):'')));
+    sheet.appendChild(h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},tm.away+' '+tm.sep+' '+tm.home+' · other '+name+' games keep '+(f.address||'the regular location')));
+    sheet.appendChild(lab('Address for this game')); sheet.appendChild(ad); sheet.appendChild(lab('Internet')); sheet.appendChild(ns);
+    sheet.appendChild(h('button',{class:'btn btn-primary btn-block',style:'margin-top:12px;',onclick:async()=>{ await updateScheduledGame(game,{fieldOverride:{address:ad.value.trim(),internet:ns.value}}); close(); toast('Saved for this game only'); }},'Save for this game'));
+    if(game.fieldOverride) sheet.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:8px;',onclick:async()=>{ await updateScheduledGame(game,{fieldOverride:null}); close(); toast('Back to the regular '+name+' location'); }},'↩ Use the regular '+name+' location'));
+    sheet.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:8px;',onclick:drawAll},'‹ Back'));
+  };
+  if(game && game.fieldOverride) drawOne(); else drawAll();
+}
+/* ---- schedule template / export (Excel, with Yes / Spotty / No pick-lists for Internet) ---- */
+const SCHED_COLS=['Home Team','Away Team','Date','Time','Field','Field Address','Internet'];
+async function schedWorkbookDownload(rows, filename){
+  if(typeof ExcelJS==='undefined'){ toast('Excel is unavailable right now'); return; }
+  const wb=new ExcelJS.Workbook(); const ws=wb.addWorksheet('Schedule');
+  ws.columns=[{width:18},{width:18},{width:12},{width:9},{width:20},{width:34},{width:11}];
+  ws.addRow(SCHED_COLS); ws.getRow(1).font={bold:true}; ws.getRow(1).fill={type:'pattern',pattern:'solid',fgColor:{argb:'FFE8EDE6'}};
+  rows.forEach(r=>ws.addRow(r));
+  const last=Math.max(rows.length+1, 300);
+  const teamNames=S.teams.filter(t=>t.active!==false).map(t=>t.name);
+  for(let i=2;i<=last;i++){
+    ws.getCell('G'+i).dataValidation={type:'list',allowBlank:true,formulae:['"Yes,Spotty,No"'],showErrorMessage:true,errorTitle:'Internet',error:'Pick Yes, Spotty or No'};
+    if(teamNames.length && teamNames.join(',').length<250){ const fl=['"'+teamNames.map(n=>n.replace(/"/g,'')).join(',')+'"']; ws.getCell('A'+i).dataValidation={type:'list',allowBlank:true,formulae:fl}; ws.getCell('B'+i).dataValidation={type:'list',allowBlank:true,formulae:fl}; }
+  }
+  ws.addRow([]); const nr=ws.addRow(['Notes: Date as YYYY-MM-DD, Time as 18:00. Enter a field’s address and internet once — other games at the same field can leave them blank. Internet: Yes, Spotty or No.']); nr.font={italic:true,color:{argb:'FF6B6B5E'}};
+  const buf=await wb.xlsx.writeBuffer(); const blob=new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+  const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=filename; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);
+}
+const netWord=v=>({yes:'Yes',spotty:'Spotty',no:'No'}[v]||'');
+function downloadScheduleTemplate(){
+  const a=S.teams[0]?S.teams[0].name:'Team A', b=S.teams[1]?S.teams[1].name:'Team B';
+  schedWorkbookDownload([[a,b,'2026-04-12','18:00','Main Field','123 Park Rd, Pittsburgh PA','Yes'],[b,a,'2026-04-19','18:00','Main Field','','']],'schedule-template.xlsx').then(()=>toast('Template downloaded'));
+}
+function exportScheduleExcel(){
+  const games=leagueSchedule().filter(g=>!g.pickup).sort((x,y)=>((x.date||'')+(x.time||'')).localeCompare((y.date||'')+(y.time||'')));
+  if(!games.length){ toast('No games to export'); return; }
+  const seen=new Set();
+  const rows=games.map(g=>{ const ids=schedHomeAwayIds(g); const fi=fieldInfo(g.location); const ov=g.fieldOverride;
+    let addr='', net='';
+    if(ov && (ov.address||ov.internet)){ addr=ov.address||''; net=netWord(ov.internet); }
+    else if(fi && !seen.has(normField(fi.name))){ seen.add(normField(fi.name)); addr=fi.address||''; net=netWord(fi.internet); }
+    return [teamNameById(ids.home), teamNameById(ids.away), g.date||'', g.time||'', g.location||'', addr, net]; });
+  schedWorkbookDownload(rows,'Schedule - '+(currentSeasonName()||'season')+'.xlsx').then(()=>toast('Schedule exported — edit it and use Import to bring changes back in'));
+}
 function fieldLocationsCard(){
   const lg=curLeague(); if(!lg) return null; const list=leagueFields().map(f=>({...f}));
   const save=async()=>{ try{ await updateDoc(doc(db,'leagues',lg.id),{fields:list.filter(f=>f.name&&f.name.trim())}); }catch(e){ toast('Could not save: '+(e.message||e)); } };
@@ -2082,7 +2163,7 @@ function fieldLocationsCard(){
   const t=h('table',{class:'dataTable fieldTable'}); t.appendChild(h('tr',{},['Field name','Address or map link','Internet',''].map(x=>h('th',{style:'text-align:left;'},x))));
   list.forEach((f,i)=>{ const nm=h('input',{type:'text',value:f.name||'',placeholder:'Field name'}); nm.addEventListener('change',()=>{ f.name=nm.value.trim(); save(); });
     const ad=h('input',{type:'text',value:f.address||'',placeholder:'Street address or map link'}); ad.addEventListener('change',()=>{ f.address=ad.value.trim(); save(); });
-    const net=h('select',{style:'width:auto;'}); [['yes','✓ Yes'],['spotty','⚠ Spotty'],['no','⚠ No']].forEach(([v,l])=>net.appendChild(h('option',{value:v},l))); net.value=f.internet||'yes'; net.addEventListener('change',()=>{ f.internet=net.value; save(); });
+    const net=h('select',{style:'width:auto;'}); NET_CHOICES.forEach(([v,l])=>net.appendChild(h('option',{value:v},(v==='yes'?'✓ ':'⚠ ')+l))); net.value=f.internet||'yes'; net.addEventListener('change',()=>{ f.internet=net.value; save(); });
     t.appendChild(h('tr',{},[h('td',{},nm),h('td',{},ad),h('td',{},net),h('td',{},h('button',{class:'btn btn-outline btn-sm',style:'color:var(--leather-2);',onclick:()=>confirmModal('Remove '+(f.name||'this field')+'?','Games keep the field name; it just won’t show directions or internet.',()=>{ list.splice(i,1); save(); })},'✕'))])); });
   if(list.length) card.appendChild(h('div',{class:'gridScroll'},t));
   card.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'border-style:dashed;margin-top:8px;',onclick:()=>{ list.push({name:'Field '+(list.length+1),address:'',internet:'yes'}); save(); }},'＋ Add a field'));
@@ -3535,7 +3616,7 @@ Router.register('scorecard', (root)=>{
                             : ((sched.homeAway==='away' ? '@ ' : 'vs ')+sched.opponent));
         const rowEdit = admin || canEdit;
         card.appendChild(h('div',{class:'gameListRow', onclick: rowEdit ? ()=>findOrCreateGameFromSchedule(sched) : null, style: rowEdit?'cursor:pointer;':''},[
-          h('div',{},[h('div',{class:'glTeams'},label), h('div',{class:'glDate'},[formatDate(sched.date)+(sched.time?' · '+fmtTime(sched.time):'')+(sched.location?' · '+sched.location:''), (()=>{ const f=fieldInfo(sched.location); return f&&f.internet&&f.internet!=='yes'?h('span',{class:'netNo',style:'margin-left:6px;'},f.internet==='no'?'⚠ No internet':'⚠ Spotty internet'):null; })()])]),
+          h('div',{},[h('div',{class:'glTeams'},label), h('div',{class:'glDate'},[formatDate(sched.date)+(sched.time?' · '+fmtTime(sched.time):'')+(sched.location?' · '+sched.location:''), (()=>{ const f=gameFieldInfo(sched); return f&&f.internet&&f.internet!=='yes'?h('span',{class:'netNo',style:'margin-left:6px;'},f.internet==='no'?'⚠ No internet':'⚠ Spotty internet'):null; })()])]),
           rowEdit ? h('span',{style:'color:var(--grass-1);font-size:12px;font-weight:700;'}, started?'Continue →':'Start ›') : h('span',{style:'color:var(--ink-soft);font-size:11px;'}, started?'Live':'Not started')
         ]));
       });
@@ -4274,6 +4355,7 @@ Router.register('schedule', (root)=>{
     if(scheduleEditing){ strip.appendChild(h('button',{class:'btn btn-gold btn-sm',style:'font-size:13px;padding:7px 14px;',onclick:()=>{ scheduleEditing=false; renderShell(); }},'✓ Done')); }
     else {
       strip.appendChild(h('button',{class:'btn btn-outline btn-sm',title:'Download the Excel template',onclick:()=>downloadScheduleTemplate()},'⬇ Template'));
+      strip.appendChild(h('button',{class:'btn btn-outline btn-sm',title:'Download this season’s schedule in the template layout',onclick:()=>exportScheduleExcel()},'⬇ Export'));
       strip.appendChild(h('button',{class:'btn btn-outline btn-sm',title:'Import a season of league games from Excel/CSV',onclick:()=>fi.click()},'⬆ Import'));
       strip.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'border:2px solid var(--grass-1);color:var(--grass-1);font-size:13px;padding:6px 12px;',onclick:()=>{ scheduleEditing=true; scheduleAdd=null; renderShell(); }},'✎ Change schedule'));
       strip.appendChild(h('button',{class:'btn btn-primary btn-sm',style:'font-size:13px;padding:7px 12px;',onclick:()=>{ const sid=S.seasons.some(x=>x.id===scheduleSeasonFilter)?scheduleSeasonFilter:(S.currentSeasonId||(chipSeasons[0]||{}).id); const last=all.filter(g=>g.seasonId===sid).slice(-1)[0]||{}; scheduleAdd={seasonId:sid, date:'', time:last.time||'', loc:last.location||'', home:'', away:'', repeat:'1'}; renderShell(); }},'+ Add game'));
@@ -4308,7 +4390,7 @@ Router.register('schedule', (root)=>{
       const score=p?(totalRuns(p,'away')+'–'+totalRuns(p,'home')):'—';
       let dl=g.date||'—'; try{ if(g.date) dl=new Date(g.date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'numeric',day:'numeric'}); }catch(e){}
       const past=(p&&p.completed)||(g.date&&g.date<t);
-      const fi=fieldInfo(g.location); const caution=!past && fi && fi.internet && fi.internet!=='yes';
+      const fi=gameFieldInfo(g); const caution=!past && fi && fi.internet && fi.internet!=='yes';
       const tr=h('tr',{class:(past?'schedPast':'')+(caution?' schedCaution':''),style:(!scheduleEditing&&p?'cursor:pointer;':'')});
       const stripe='border-left:5px solid '+hexTint(color,0.35)+';';
       const rowEdit = scheduleEditing && (admin || isMyGame(g));
@@ -4324,9 +4406,10 @@ Router.register('schedule', (root)=>{
       } else {
         tr.appendChild(h('td',{style:stripe+'white-space:nowrap;'},[dl, h('small',{class:'schedPhoneOnly'},fmtTime(g.time)||'')]));
         tr.appendChild(h('td',{class:'schedTime',style:'white-space:nowrap;'},fmtTime(g.time)||'—'));
-        const fLink=nm=>nm?h('span',{class:'fieldLink',onclick:ev=>{ ev.stopPropagation(); fieldInfoModal(nm); }},nm):'—';
+        const fLink=nm=>nm?h('span',{class:'fieldLink',onclick:ev=>{ ev.stopPropagation(); if(admin && !g.pickup) fieldAdminModal(nm,g); else fieldInfoModal(nm,g); }},nm):'—';
+        const fAddr=fi&&fi.address&&!/^https?:/i.test(fi.address)?h('span',{class:'fieldAddr'},fi.address):null; const fTag=fi&&fi.override?h('span',{class:'fieldOv'},'this game only'):null;
         tr.appendChild(h('td',{},[tm.away+' '+tm.sep+' '+tm.home, h('small',{class:'schedPhoneOnly'},fLink(g.location))]));
-        tr.appendChild(h('td',{class:'schedField'},fLink(g.location)));
+        tr.appendChild(h('td',{class:'schedField'},[fLink(g.location), fTag, fAddr]));
       }
       tr.appendChild(h('td',{style:'white-space:nowrap;'},[internetBadge(fi), caution?h('div',{class:'netNote'},'Sign in & open the app before you get there'):null]));
       tr.appendChild(h('td',{style:'font-family:var(--font-mono);font-weight:800;white-space:nowrap;'},score));
@@ -4360,13 +4443,13 @@ Router.register('schedule', (root)=>{
 });
 let scheduleEditId = null;
 function fmtTime(t){ if(!t) return ''; const [hh,mm]=t.split(':'); let hr=parseInt(hh); if(isNaN(hr)) return t; const ap=hr>=12?'PM':'AM'; hr=hr%12||12; return hr+':'+(mm||'00')+' '+ap; }
-async function createScheduledMatchup(homeTeamId, awayTeamId, date, time, location){
+async function createScheduledMatchup(homeTeamId, awayTeamId, date, time, location, extra){
   const homeTeam = S.teams.find(t=>t.id===homeTeamId);
   const awayTeam = S.teams.find(t=>t.id===awayTeamId);
   if(!homeTeam||!awayTeam) return;
   const matchupId = uid();
-  const homeRef = await addDoc(collection(db,'teams',homeTeamId,'schedule'),{opponent:awayTeam.name,opponentTeamId:awayTeamId,homeAway:'home',date,time:time||'',location:location||'',completed:false,seasonId:S.currentSeasonId,matchupId});
-  const awayRef = await addDoc(collection(db,'teams',awayTeamId,'schedule'),{opponent:homeTeam.name,opponentTeamId:homeTeamId,homeAway:'away',date,time:time||'',location:location||'',completed:false,seasonId:S.currentSeasonId,matchupId});
+  const homeRef = await addDoc(collection(db,'teams',homeTeamId,'schedule'),Object.assign({opponent:awayTeam.name,opponentTeamId:awayTeamId,homeAway:'home',date,time:time||'',location:location||'',completed:false,seasonId:S.currentSeasonId,matchupId},extra||{}));
+  const awayRef = await addDoc(collection(db,'teams',awayTeamId,'schedule'),Object.assign({opponent:homeTeam.name,opponentTeamId:homeTeamId,homeAway:'away',date,time:time||'',location:location||'',completed:false,seasonId:S.currentSeasonId,matchupId},extra||{}));
   await updateDoc(homeRef, { linkedScheduleId: awayRef.id });
   await updateDoc(awayRef, { linkedScheduleId: homeRef.id });
 }
@@ -4375,13 +4458,6 @@ async function updateScheduledGame(sched, patch){
   if(sched.linkedScheduleId && sched.opponentTeamId){
     await updateDoc(doc(db,'teams',sched.opponentTeamId,'schedule',sched.linkedScheduleId), patch);
   }
-}
-function downloadScheduleTemplate(){
-  const csv = 'Home Team,Away Team,Date,Time,Field\n'+(S.teams[0]?S.teams[0].name:'Team A')+','+(S.teams[1]?S.teams[1].name:'Team B')+',2026-04-12,18:00,Main Field\n';
-  const blob = new Blob([csv],{type:'text/csv'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='schedule-template.csv';
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 async function handleBulkScheduleFile(file){
   if(!file) return;
@@ -4396,23 +4472,44 @@ async function handleBulkScheduleFile(file){
     const header = rows[0].map(c=>c?String(c).trim().toLowerCase():'');
     const hIdx=header.findIndex(c=>c.includes('home')); const aIdx=header.findIndex(c=>c.includes('away'));
     const dIdx=header.findIndex(c=>c.includes('date')); const tIdx=header.findIndex(c=>c.includes('time'));
-    const fIdx=header.findIndex(c=>c.includes('field')||c.includes('location'));
+    const aAddr=header.findIndex(c=>c.includes('address')||c.includes('map'));
+    const fIdx=header.findIndex((c,k)=>k!==aAddr && (c.includes('field')||c.includes('location')));
+    const nIdx=header.findIndex(c=>c.includes('internet')||c.includes('signal')||c.includes('wifi'));
     if(hIdx===-1||aIdx===-1||dIdx===-1){ toast('File needs Home Team, Away Team, and Date columns'); return; }
     const parsed = rows.slice(1).filter(r=>r&&r[hIdx]&&r[aIdx]&&r[dIdx]).map(r=>({
       home:String(r[hIdx]).trim(), away:String(r[aIdx]).trim(),
       date:String(r[dIdx]).trim(), time: tIdx!==-1&&r[tIdx]?String(r[tIdx]).trim():'',
-      location: fIdx!==-1&&r[fIdx]?String(r[fIdx]).trim():''
-    }));
+      location: fIdx!==-1&&r[fIdx]?String(r[fIdx]).trim():'',
+      address: aAddr!==-1&&r[aAddr]?String(r[aAddr]).trim():'',
+      internetRaw: nIdx!==-1&&r[nIdx]!=null?String(r[nIdx]).trim():''
+    })).filter(x=>!/^notes:/i.test(x.home));
     if(!parsed.length){ toast('No valid rows found'); return; }
-    confirmModal('Import '+parsed.length+' game(s)?','This adds them to both teams\u2019 schedules for '+currentSeasonName()+'. Team names must match exactly.', async ()=>{
+    // fields: first address/internet seen for a new field is saved; a different one on a later row is that game only
+    const plan={}; const newFields=[], badNet=[]; let overrides=0;
+    parsed.forEach(row=>{ row.internet=normNet(row.internetRaw); if(row.internet===null){ badNet.push(row.internetRaw); row.internet=''; }
+      if(!row.location) return; const key=normField(row.location); const saved=fieldInfo(row.location);
+      if(!plan[key]) plan[key]={name:row.location, saved, set:null};
+      const P=plan[key];
+      if(!row.address && !row.internet) return;
+      const ref=P.saved ? {address:P.saved.address||'', internet:P.saved.internet||''} : P.set;
+      if(!ref){ P.set={address:row.address, internet:row.internet||'yes'}; newFields.push(row.location); return; }
+      if(P.saved && !P.saved.address && row.address && !P.fill){ P.fill={address:row.address, internet:row.internet||P.saved.internet||'yes'}; return; }
+      const diffA=row.address && normField(row.address)!==normField(ref.address||''); const diffN=row.internet && row.internet!==(ref.internet||'yes');
+      if(diffA||diffN){ row.override={address:row.address||'', internet:row.internet||ref.internet||''}; overrides++; } });
+    const summary=[parsed.length+' game(s)'];
+    if(newFields.length) summary.push(newFields.length+' new field'+(newFields.length===1?'':'s')+' saved ('+newFields.slice(0,4).join(', ')+(newFields.length>4?'…':'')+')');
+    if(overrides) summary.push(overrides+' game-only location'+(overrides===1?'':'s'));
+    if(badNet.length) summary.push(badNet.length+' Internet value'+(badNet.length===1?'':'s')+' not Yes/Spotty/No — left blank');
+    confirmModal('Import '+parsed.length+' game(s)?','This adds them to both teams\u2019 schedules for '+currentSeasonName()+'. Team names must match exactly. '+summary.join(' · ')+'.', async ()=>{
       let added=0, skipped=0;
+      for(const P of Object.values(plan)){ if(P.set) await saveLeagueField(P.name, P.set); else if(P.fill) await saveLeagueField(P.saved.name, P.fill); }
       for(const row of parsed){
         const homeTeam = S.teams.find(t=>t.name.toLowerCase()===row.home.toLowerCase());
         const awayTeam = S.teams.find(t=>t.name.toLowerCase()===row.away.toLowerCase());
         if(!homeTeam||!awayTeam){ skipped++; continue; }
         let dateVal = row.date;
         if(/^\d+$/.test(dateVal)){ const d=new Date(Math.round((parseInt(dateVal)-25569)*86400*1000)); dateVal=d.toISOString().slice(0,10); }
-        await createScheduledMatchup(homeTeam.id, awayTeam.id, dateVal, row.time, row.location);
+        await createScheduledMatchup(homeTeam.id, awayTeam.id, dateVal, row.time, row.location, row.override?{fieldOverride:row.override}:null);
         added++;
       }
       toast('Imported '+added+' game(s)'+(skipped?', skipped '+skipped+' (team name not found)':''));
@@ -6962,7 +7059,7 @@ const HELP_KB = [
   {k:'lineup batting order positions sub substitute ahead before game upcoming', q:'How do I set a lineup?', a:'Lineup tab → Select Game. Pick an Upcoming game to set your lineup ahead of time (managers edit their own team; admins both) — drag ⠿ to reorder, set positions, check Sub for a fill-in. It saves for that game and is used automatically when the game starts. During a game, pick it under In progress to make changes.'},
   {k:'designated runner dr courtesy runner pinch run base drag tap', q:'How do I use a designated runner?', a:'On the Scorecard, tap the ⠿ next to a player’s name in the scorecard, then tap the base he’s running for (on a computer you can also drag the name onto the base). The runner shows as “G.Bartok (DR)”. If he scores, the run counts for the batter he ran for. Picked the wrong one? Tap the right player — he replaces the DR on that base. The Designated runners table beside the scorecard shows each DR and how many times he ran; tap a name for the inning, who he ran for and the outcome.'},
   {k:'offline no internet signal no service field dead zone', q:'Does the app work with no internet at the field?', a:'Yes. When the signal drops, a thin 📴 Offline bar appears and scoring keeps working — plays are saved on the phone and upload by themselves when you’re back in range (the bar turns green: “Back online — 3 changes uploaded”). Live Feed, Chat, Challenges, notices and sign-in need internet. Before going to a field with poor signal, open the Scorecard while you still have internet and check “Ready for the field?”.'},
-  {k:'field location directions address internet accessible map', q:'How do I add field locations?', a:'Schedule tab → Field locations (admins): add each field once with its address or map link and whether it has internet (Yes, Spotty or No). Games pick their field from that list. The Schedule shows an Internet column, and games at fields with Spotty or No internet are highlighted. Anyone can tap a field name for directions.'},
+  {k:'field location directions address internet accessible map override import export template', q:'How do I add field locations?', a:'Enter a field’s location once and every game at that field shows it. On the Schedule tab, tap the field name (for example “Texas”) → enter the address or map link and Internet (Yes, Spotty or No) → Save for all Texas games. For one game at a different spot, tap that game’s field → Different location for this game only (it shows a “this game only” tag; ↩ Use the regular location puts it back). The Field locations list on the Schedule tab shows every saved field. Games at Spotty or No fields are highlighted. Anyone can tap a field for directions. The ⬇ Template and ⬇ Export files have Field, Field Address and Internet columns (Internet is a Yes/Spotty/No pick-list): fill the address once per field; a different address on a later row becomes a game-only location when you Import.'},
   {k:'start game ribbon steps confirm lineups scorekeeper play ball', q:'How do I start a game?', a:'Scorecard → tap Start › on a scheduled game. A ribbon walks you through: ① Select game ② Lineups (check both teams; ✎ Edit a lineup if needed) ③ Confirmed ④ Start game (pick who keeps the official score) ⑤ Play Ball! Nothing is created until you tap Start game. Pickup games build Home and Away from today’s players in step ②.'},
   {k:'schedule add game import bulk template', q:'How do I add games to the schedule?', a:'Schedule tab (left menu): admins see Manage schedule under the game list — add one game (Home, Away, date, time, field) or Import Excel/CSV using the template. Pickup seasons add games with just date, time and field.'},
   {k:'roster method formal informal pickup draft season how built builder', q:'How do rosters get built?', a:'Admin → Season Builder. Pick the season, then Formal, Informal or Pickup across the top. The numbered steps show where you are; tap any step to go there and the gold “← Season Builder” bar brings you back. Formal: teams → sign-ups → player list → evaluation → draft → approve → roster → lineups. Informal: teams → sign-ups → player list → managers pick → admin approves → lineups. Pickup: game days → build sides at each game.'},
