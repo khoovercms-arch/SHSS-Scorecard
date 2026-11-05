@@ -508,6 +508,20 @@ table.zoneTable{margin-bottom:14px;width:100%;} table.zoneTable td,table.zoneTab
 .drDetail th{text-align:left;font-size:10.5px;color:var(--ink-soft);padding:3px 2px;}
 .drDetail td{padding:3px 2px;border-top:1px solid #f0ead9;}
 .drTableHint{font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.4;}
+.passBtn{border:1.5px solid var(--gold);background:#fff8e6;color:#7a5a00;border-radius:14px;padding:3px 10px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;}
+.passBtn.on{background:var(--gold);color:#2a1f05;}
+.passBtn.sm{font-size:10.5px;padding:2px 7px;margin-left:6px;}
+.passGiven{display:inline-block;margin-top:4px;font-size:11.5px;font-weight:700;color:#7a5a00;background:#fff3cf;border-radius:8px;padding:2px 8px;}
+.passCodeWrap{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:#fffaf0;border:1.5px solid var(--gold);border-radius:14px;padding:12px;}
+.passQR{width:168px;height:168px;flex:none;background:#fff;border-radius:8px;display:flex;align-items:center;justify-content:center;}
+.passQR img,.passQR canvas{display:block;}
+.passCode{font-family:var(--font-mono);font-size:34px;font-weight:900;letter-spacing:.08em;color:var(--ink);line-height:1.1;}
+.passBar{display:flex;align-items:center;gap:8px;background:var(--gold);color:#2a1f05;border-radius:10px;padding:7px 12px;margin:0 0 12px;font-size:13.5px;}
+.passBar button{border:1.5px solid #2a1f05;background:transparent;color:#2a1f05;border-radius:14px;padding:2px 12px;font-weight:800;font-size:12.5px;cursor:pointer;flex:none;}
+.passBarGame{font-weight:600;opacity:.85;}
+@media (max-width:520px){ .passBarGame{display:none;} }
+.passTag{display:inline-block;margin-left:6px;font-size:10.5px;font-weight:800;color:#7a5a00;background:#fff3cf;border-radius:8px;padding:1px 7px;white-space:nowrap;}
+.passEntryLink{display:block;margin:14px auto 0;background:rgba(201,154,58,.18);border:1.5px solid var(--gold);color:#ffe3a0;border-radius:18px;padding:7px 16px;font-size:13px;font-weight:800;cursor:pointer;}
 .netBar{display:flex;gap:8px;align-items:center;font-size:12.5px;padding:5px 12px;border-radius:10px;margin:0 0 10px;line-height:1.3;cursor:default;}
 .netBar.off{background:#3a2f12;color:#ffe3a0;cursor:pointer;}
 .netBar.up{background:#fff3cf;color:#7a4a00;}
@@ -564,7 +578,7 @@ tr.schedCaution td{background:#fff6dc !important;}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-  createUserWithEmailAndPassword, signOut, sendPasswordResetEmail
+  createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, signInAnonymously
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
   getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, addDoc,
@@ -653,7 +667,7 @@ let S = {
   seasons:[], currentSeasonId:null,
   players:[], schedule:[], games:[], activeGameId:null,
   draft:null, draftPool:[], allGamesForFeed:[], allPlayersForFeed:[], allScheduleForFeed:[], suggestions:[], signups:[], chat:[], rules:null,
-  activeTab:'roster', authMode:'login', authError:'', authMessage:'', drawerOpen:null
+  activeTab:'roster', authMode:(()=>{ try{ return new URLSearchParams(location.search).get('pass')?'pass':'login'; }catch(e){ return 'login'; } })(), authError:'', authMessage:'', drawerOpen:null
 };
 let unsub = { team: [], season: [] };
 let clockTick = null;
@@ -1288,11 +1302,12 @@ let lastAlertCount=null;
 function isAdmin(){ return isSuperAdmin() || (S.profile && S.profile.role === 'admin' && (!S.profile.leagueId || S.profile.leagueId===S.currentLeagueId)); }
 function isManager(){ return S.profile && S.profile.role === 'manager'; }
 function myTeamId(){ return S.profile ? S.profile.teamId : null; }
-function canEditTeam(){ if(isManager() && isPickupSeason()) return true; return isAdmin() || (isManager() && myTeamId()===S.selectedTeamId); }
+function canEditTeam(){ if(S.passMode) return true; if(isManager() && isPickupSeason()) return true; return isAdmin() || (isManager() && myTeamId()===S.selectedTeamId); }
 
 onAuthStateChanged(auth, async (u)=>{
   cleanupTeamListeners();
-  if(!u){ S.user=null; S.profile=null; renderShell(); loadPublicLeagues(); return; }
+  if(!u){ S.user=null; S.profile=null; S.passMode=null; renderShell(); loadPublicLeagues(); return; }
+  if(u.isAnonymous){ await enterPassMode(u); return; }   // scorekeeper pass: no account, one game
   try{
     S.user = u;
     const pRef = doc(db,'users',u.uid);
@@ -1483,6 +1498,7 @@ function startLeagueData(){
   listen(L('playerCards'), snap=>{ S.playerCards = snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); }, 'player cards');
   listen(L('announcements'), snap=>{ S.announcements = snap.docs.map(d=>({id:d.id, ...d.data()})); renderShell(); }, 'announcements');
   listen(doc(db,'leagueRules',lid), snap=>{ S.rulesAll = snap.exists()?[{id:snap.id,...snap.data()}]:[]; renderShell(); }, 'league rules');
+  if(staff) listen(query(collection(db,'scorePasses'),where('leagueId','==',lid),where('active','==',true)), snap=>{ S.passes=snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); }, 'scorekeeper passes');
   if(staff){
     listen(L('signups'), snap=>{ S.signups = snap.docs.map(d=>({id:d.id, ...d.data()})); renderShell(); }, 'sign-ups');
     listen(L('users'), snap=>{ S.usersDirectory = snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); }, 'members');
@@ -1505,6 +1521,7 @@ function flattenFeed(){ S.allGamesForFeed=Object.values(feedBy.games).flat(); S.
 // everything, as before the privacy upgrade (also the Super Admin's view)
 function startLegacyData(){
   const listen=(ref,fn,err)=>unsubL.push(onSnapshot(ref,fn,err||dataErr('legacy')));
+  if((isAdmin()||isManager()) && S.currentLeagueId) listen(query(collection(db,'scorePasses'),where('leagueId','==',S.currentLeagueId),where('active','==',true)), snap=>{ S.passes=snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); }, ()=>{ S.passes=[]; });
   listen(collection(db,'teams'), snap=>onTeamsList(snap.docs.map(d=>({id:d.id,...d.data()}))));
   listen(collection(db,'users'), snap=>{ S.usersDirectory = snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); });
   listen(collection(db,'draftPool'), snap=>{ S.draftPool = snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); });
@@ -1566,6 +1583,7 @@ function switchLeague(leagueId){
 }
 function cleanupTeamListeners(){ unsub.team.forEach(fn=>fn()); unsub.team=[]; }
 function switchTeamListeners(){
+  if(S.passMode) return;   // the pass loads its own game only
   cleanupTeamListeners();
   if(!S.selectedTeamId) return;
   const t = S.selectedTeamId;
@@ -2012,6 +2030,7 @@ function pickupPool(sid){
   return out.sort((a,b)=>rosterLastKey(a.name).localeCompare(rosterLastKey(b.name)));
 }
 function addGuestModal(onAdded){
+  if(S.passMode) return passGuestModal(onAdded);
   const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet'}); overlay.appendChild(sheet);
   const close=()=>overlay.remove(); overlay.addEventListener('click',e=>{ if(e.target===overlay) close(); });
   sheet.appendChild(h('div',{class:'modalHandle'})); sheet.appendChild(h('h3',{},'Add a guest player'));
@@ -2323,7 +2342,7 @@ window.addEventListener('resize', ()=>{
 let tabSessionStart = Date.now();
 let tabSessionTab = S.activeTab;
 function flushTabUsage(){
-  if(!S.user || !S.profile || S.profile.role==='pending') return;
+  if(!S.user || !S.profile || S.profile.role==='pending' || S.passMode || S.user.isAnonymous) return;
   const durationSec = Math.round((Date.now()-tabSessionStart)/1000);
   if(durationSec < 1) return;
   const started = tabSessionStart;
@@ -2341,6 +2360,7 @@ function renderShell(){
     if(spOn){ ['authWrap','pendingWrap','mainUI'].forEach(id=>{ const e=document.getElementById(id); if(e) e.classList.add('hidden'); }); const dr=document.getElementById('drawerRoot'); if(dr) dr.remove(); ['helpFab','helpPanel','appMark','geezerSpeaker','geezerPicker'].forEach(id=>{ const e=document.getElementById(id); if(e) e.remove(); }); renderSponsorPortal(); return; } }
   if(S.activeTab==='history'){ S.activeTab='report'; reportView='batting'; } // Batting History merged into Report
   if(S.activeTab !== tabSessionTab){ flushTabUsage(); if(['report','history'].includes(tabSessionTab)){ resetReportFilters(); reportView='menu'; } if(tabSessionTab==='batting'){ battingPlayerPick=null; pfReset('batting'); } if(tabSessionTab==='hitzone'){ hz={team:'all',player:'all',selectedZone:null}; pfReset('hitzone'); } if(tabSessionTab==='feed'){ feedCallsPrimed=false; } if(tabSessionTab==='admin'){ rulesDraftLocal=null; } tabSessionTab=S.activeTab; tabSessionStart=Date.now(); }
+  if(S.user && S.user.isAnonymous){ renderPassShell(); return; }
   const authWrap = document.getElementById('authWrap');
   const pendingWrap = document.getElementById('pendingWrap');
   const mainUI = document.getElementById('mainUI');
@@ -2708,6 +2728,7 @@ function renderAuth(wrap){
   card.appendChild(h('p',{class:'sub'}, joining?'Join the league':'Welcome back'));
   if(S.authError) card.appendChild(h('div',{class:'authErr'}, S.authError));
   if(S.authMessage) card.appendChild(h('div',{class:'authMsg'}, S.authMessage));
+  if(S.authMode==='pass'){ card.innerHTML=''; renderPassAuth(card); panel.appendChild(card); wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.')); return; }
   if(S.authMode==='sponsor'){ card.removeChild(card.lastChild); if(S.authError||S.authMessage){ card.removeChild(card.lastChild); if(S.authError&&S.authMessage) card.removeChild(card.lastChild); } renderSponsorAuth(card); panel.appendChild(card); wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.')); return; }
   if(joining){ renderJoinForm(card, lgImg, lgTitle); panel.appendChild(card); wrap.appendChild(h('div',{class:'authFoot'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.')); return; }
   const emailInp = h('input',{type:'email',placeholder:'Email',autocomplete:'email',value:S.loginPrefill||''});
@@ -2730,6 +2751,7 @@ function renderAuth(wrap){
   links.appendChild(h('button',{onclick:()=>doReset(emailInp.value.trim())},'Forgot password?'));
   links.appendChild(h('button',{onclick:()=>{ S.authMode='sponsor'; S.authError=''; S.authMessage=''; renderShell(); }},'Sponsor sign-in'));
   card.appendChild(links);
+  card.appendChild(h('button',{class:'passEntryLink',onclick:()=>{ S.authMode='pass'; S.authError=''; S.authMessage=''; renderShell(); }},'🔑 Have a scorekeeper code?'));
   panel.appendChild(card);
   panel.appendChild(h('div',{class:'authAlt',style:'border:1.5px solid var(--gold);background:rgba(201,154,58,.18);',onclick:()=>{ S.authMode='join'; S.authError=''; S.authMessage=''; renderShell(); }},[
     h('div',{},[h('strong',{},'New here? Join the league'), 'Register for the season and create your login \u2014 one form, 2 minutes.']),
@@ -2995,6 +3017,12 @@ function lineupTeamPanel(game, side, canEdit){
     panel.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin:6px 6px 0 0;',onclick:()=>addGuestModal(addToSide)},'+ Add guest'));
     const last=S.allGamesForFeed.filter(g=>g.pickup && g.seasonId===S.currentSeasonId && g.id!==game.id && (g[side].players||[]).some(p=>p.name)).sort((a,b)=>(b.date||'').localeCompare(a.date||''))[0];
     if(last) panel.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin:6px 0 10px;',onclick:()=>confirmModal('Copy '+(side==='home'?'Home':'Away')+' from the last game?','Replaces this side\u2019s lineup with the one from '+formatDate(last.date)+'.',async()=>{ await saveGame(game,{[side]:{...team,name:last[side].name||team.name,players:last[side].players}}); toast('Lineup copied'); renderShell(); })},'Same as last game ('+formatDate(last.date)+')'));
+  } else if(canEdit && S.passMode && !game.__pregame){
+    panel.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Team name'), h('p',{style:'margin:0;font-weight:600;'},team.name||'—')]));
+    const addG=(x)=>{ const players=(team.players||[]).slice().sort((a,b)=>(a.order||99)-(b.order||99)); const slot=players.find(p=>!p.name||!p.name.trim());
+      if(slot){ slot.id=x.id; slot.name=x.name; } else players.push({id:x.id,name:x.name,number:'',position:'',order:players.length+1,isSub:false,subTeamName:''});
+      saveGame(game,{[side]:{...team,players}}); renderShell(); };
+    panel.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin:0 0 10px;',onclick:()=>addGuestModal(addG)},'+ Add guest'));
   } else if(canEdit && !game.__pregame){
     const isCustom = !S.teams.some(t=>t.name===team.name);
     const teamSel=h('select',{});
@@ -3017,7 +3045,7 @@ function lineupTeamPanel(game, side, canEdit){
     panel.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Team name'), h('p',{style:'margin:0;font-weight:600;'},team.name||'—')]));
     if(team.coach) panel.appendChild(h('div',{class:'fieldRow'},[h('label',{},'Coach'), h('p',{style:'margin:0;'},team.coach)]));
   }
-  if(canEdit && !game.pickup){
+  if(canEdit && !game.pickup && !S.passMode){
     panel.appendChild(h('div',{style:'display:flex;gap:8px;margin-bottom:12px;'},[
       h('button',{class:'btn btn-gold',style:'flex:1;',onclick:async()=>{
         await setDoc(doc(db,'savedLineups',(team.name||'unnamed').toLowerCase().replace(/[^a-z0-9]+/g,'-')),{ name:team.name, coach:team.coach||'', players:team.players });
@@ -3329,6 +3357,8 @@ let pgLoadAt=0, pgSelected=null; const pgGames={};
 function pgKey(matchupId, teamId){ return 'pg_'+matchupId+'_'+teamId; }
 function loadPregameLineups(force){
   if(!force && Date.now()-pgLoadAt<15000) return Promise.resolve(false); pgLoadAt=Date.now();
+  if(S.passMode){ const P=S.passMode.pass; const ids=[P.homeTeamId,P.awayTeamId].filter(Boolean).map(t=>pgKey(P.matchupId,t));
+    return Promise.all(ids.map(id=>getDoc(doc(db,'savedLineups',id)).then(d=>d.exists()?[id,d.data()]:null).catch(()=>null))).then(r=>{ const m={}; r.filter(Boolean).forEach(([k,v])=>{ m[k]=v; }); S.pgLineups=m; return true; }); }
   return getDocsNet(collection(db,'savedLineups')).then(sn=>{ const m={}; sn.docs.forEach(d=>{ if(d.id.startsWith('pg_')) m[d.id]=d.data(); }); S.pgLineups=m; return true; }).catch(()=>false);
 }
 function pgLineup(matchupId, teamId){ return ((S.pgLineups||{})[pgKey(matchupId,teamId)])||null; }
@@ -3380,7 +3410,7 @@ async function startGameWizard(sched){
   const ov=h('div',{class:'modalOverlay'}); const box=h('div',{class:'modalSheet',style:'padding:0;overflow:hidden;max-width:660px;'}); ov.appendChild(box); document.body.appendChild(ov);
   const close=()=>ov.remove(); const opened=Date.now(); ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });
   box.appendChild(startRibbon(2)); box.appendChild(h('div',{style:'padding:18px;color:var(--ink-soft);'},'Loading lineups…'));
-  let sd, L={}, keeper=null;
+  let sd, L={}, keeper=S.passMode?S.passMode.pass.side:null;
   if(pickup){ sd={home:{id:null,name:sched.homeName||'Home'},away:{id:null,name:sched.awayName||'Away'}}; L.home={players:[],fromManager:false}; L.away={players:[],fromManager:false}; }
   else { await loadPregameLineups(true); sd=schedSides(sched); L.home=await sideLineupPlayers(sched.matchupId, sd.home.id); L.away=await sideLineupPlayers(sched.matchupId, sd.away.id); }
   const named=side=>(L[side].players||[]).filter(p=>p.name&&p.name.trim()).sort((a,b)=>(a.order||99)-(b.order||99));
@@ -3400,6 +3430,8 @@ async function startGameWizard(sched){
           pickup?h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 8px;',onclick:()=>{ L[side].players=L[side].players.filter(x=>x.id!==p.id); draw(2); }},'✕'):null])));
         if(!list.length) col.appendChild(h('div',{style:'background:#fde3df;border-radius:8px;padding:7px 9px;font-size:12px;color:#7a2a20;margin-top:4px;'},pickup?'No players yet — add them below.':'⚠ '+sd[side].name+' has no players yet — add them on the Lineup tab, or in Admin.'));
         else col.appendChild(h('div',{style:'font-size:11.5px;color:var(--ink-soft);margin-top:4px;'},list.length+' players'));
+        if(!pickup && S.passMode){ const addG=x=>{ L[side].players.push({id:x.id,name:x.name,number:'',position:'',order:L[side].players.length+1,isSub:false,subTeamName:''}); draw(2); };
+          col.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin-top:6px;',onclick:()=>addGuestModal(addG)},'+ Add guest')); }
         if(pickup){
           const taken=new Set(named('home').concat(named('away')).map(p=>p.id)); const pool=pickupPool().filter(x=>!taken.has(x.id));
           const s=h('select',{style:'margin-top:6px;'}); s.appendChild(h('option',{value:''},'＋ Add a player ('+pool.length+' available)…')); pool.forEach(x=>s.appendChild(h('option',{value:x.id},x.name+(x.pos?' · '+x.pos:''))));
@@ -3411,14 +3443,14 @@ async function startGameWizard(sched){
       b.appendChild(cols);
       const ok=!missing.length;
       b.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;'},[
-        pickup?null:h('button',{class:'btn btn-outline',onclick:async()=>{ close(); S.activeTab='lineup'; await openPregame(sched); }},'✎ Edit a lineup'),
+        (pickup||S.passMode)?null:h('button',{class:'btn btn-outline',onclick:async()=>{ close(); S.activeTab='lineup'; await openPregame(sched); }},'✎ Edit a lineup'),
         h('button',Object.assign({class:'btn btn-primary',onclick:()=>{ if(ok) draw(4); }},ok?{}:{disabled:'disabled',style:'opacity:.5;'}),'Lineups confirmed ›'),
         h('button',{class:'btn btn-outline',onclick:close},'Cancel')]));
     }
     if(step===4){
       b.appendChild(h('div',{style:'font-weight:800;font-size:15px;margin:2px 0 4px;'},'Who keeps the official score?'));
-      b.appendChild(h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin-bottom:8px;line-height:1.45;'},'Only one team keeps the official scorecard, so nothing gets entered twice. The other team follows along on Live Feed and can challenge a play.'));
-      const kb=(side)=>h('button',{class:'sgKeep'+(keeper===side?' on':''),onclick:()=>{ keeper=side; draw(4); }},[h('div',{style:'font-weight:900;font-size:16px;'},side==='home'?'Home':'Away'),h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},sd[side].name)]);
+      b.appendChild(h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin-bottom:8px;line-height:1.45;'},S.passMode?'Your scorekeeper pass keeps score for this team. You’re recorded as the scorekeeper: '+S.passMode.name+'.':'Only one team keeps the official scorecard, so nothing gets entered twice. The other team follows along on Live Feed and can challenge a play.'));
+      const kb=(side)=>(S.passMode && side!==keeper)?null:h('button',{class:'sgKeep'+(keeper===side?' on':''),onclick:()=>{ if(!S.passMode){ keeper=side; draw(4); } }},[h('div',{style:'font-weight:900;font-size:16px;'},side==='home'?'Home':'Away'),h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},sd[side].name)]);
       b.appendChild(h('div',{style:'display:flex;gap:10px;margin-bottom:12px;'},[kb('away'),kb('home')]));
       const go=h('button',Object.assign({class:'btn btn-gold',onclick:async()=>{ if(!keeper) return; go.disabled=true; go.textContent='Starting…'; try{ await createGameFromWizard(sched, sd, L, keeper, pickup); draw(5); setTimeout(()=>{ close(); playBallSplash(); },650); }catch(e){ go.disabled=false; go.textContent='⚾ Start game'; toast('Could not start: '+(e.message||e)); } }},keeper?{}:{disabled:'disabled',style:'opacity:.5;'}),'⚾ Start game');
       b.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;'},[go,h('button',{class:'btn btn-outline',onclick:()=>draw(2)},'‹ Back'),h('button',{class:'btn btn-outline',onclick:close},'Cancel')]));
@@ -3432,6 +3464,7 @@ async function createGameFromWizard(sched, sd, L, keeper, pickup){
   const pad=list=>{ const out=list.map((p,i)=>({id:p.id||uid(),name:p.name||'',number:p.number||'',position:p.position||'',order:i+1,isSub:!!p.isSub,subTeamName:p.subTeamName||''})); while(out.length<14) out.push({id:uid(),name:'',number:'',position:'',order:out.length+1,isSub:false,subTeamName:''}); return out; };
   const ordered=side=>(L[side].players||[]).slice().sort((a,b)=>(a.order||99)-(b.order||99));
   const base={date:sched.date, seasonId:S.currentSeasonId, matchupId:sched.matchupId||null, location:sched.location||'', scorekeeperSide:keeper, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[], atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''};
+  if(S.passMode){ base.scorekeeperName=S.passMode.name+PASS_TAG; base.scorekeeperPass=S.passMode.code; base.scorekeeperSetBy='scorekeeper pass'; }
   if(pickup){
     if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
     const ref=doc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games')); await netWrite(setDoc(ref,Object.assign(base,{pickup:true, opponent:sd.away.name, opponentTeamId:null, homeAway:'home', home:{name:sd.home.name,coach:'',players:pad(ordered('home').filter(p=>p.name))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away').filter(p=>p.name))}, inningsPlanned:9})));
@@ -3452,13 +3485,268 @@ async function findOrCreateGameFromSchedule(sched){
   if(existing){ useGame(existing); return; }
   startGameWizard(sched);
 }
+/* ===================== SCOREKEEPER PASS =====================
+   One pass per game. A manager of either team (or the admin) makes it; whoever holds it scores that one game
+   with no account (a hidden anonymous sign-in). Stored in scorePasses/{6-digit code}; the holder's claim in passClaims/{uid}.
+   The pass ends when the game is final, or when the admin / that manager turns it off. */
+const PASS_TAG=' (scorekeeper pass)';
+function keeperShown(g){ const k=(g&&g.scorekeeperName)||''; return (g&&g.scorekeeperPass&&k.endsWith(PASS_TAG))?k.slice(0,-PASS_TAG.length):k; }
+function passGameOk(g){ return !!(S.passMode && g && S.passMode.pass && g.matchupId===S.passMode.pass.matchupId && !g.completed && !S.passMode.off); }
+function passLink(code){ return location.origin+location.pathname+'?pass='+code; }
+function fmtPassCode(c){ c=String(c||''); return c.slice(0,3)+' '+c.slice(3); }
+function activePassFor(matchupId){ return (S.passes||[]).filter(p=>p.matchupId===matchupId && p.active).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0))[0]||null; }
+function passSides(sched){ if(sched.pickup) return {home:null,away:null}; const sd=schedSides(sched); return {home:sd.home.id||null, away:sd.away.id||null, homeName:sd.home.name, awayName:sd.away.name}; }
+function passMySide(sched){ const t=myTeamId(); if(!t) return null; const s=passSides(sched); return s.home===t?'home':(s.away===t?'away':null); }
+function passStartedGame(sched){ return (S.allGamesForFeed||[]).find(g=>g.matchupId && g.matchupId===sched.matchupId)||null; }
+function canMakePassFor(sched){
+  if(S.passMode || !sched || !sched.matchupId || sched.completed) return false;
+  const g=passStartedGame(sched); if(g && g.completed) return false;
+  if(isAdmin()) return true;
+  if(!isManager()) return false;
+  return sched.pickup ? isPickupSeason() : !!passMySide(sched);
+}
+// "Pass given by ..." for the other manager
+function passGivenLine(sched){
+  if(S.passMode) return null; const p=activePassFor(sched.matchupId); if(!p) return null;
+  const g=passStartedGame(sched); if(g && g.completed) return null;
+  if(isAdmin() || (sched.pickup && isManager()) || passMySide(sched)===p.side) return null;   // your own pass: the button already says "Pass on"
+  return h('div',{class:'passGiven'},'🔑 Pass given by '+(p.createdByName||'a manager')+(p.teamName?' ('+p.teamName+')':''));
+}
+function passButton(sched, small){
+  if(!canMakePassFor(sched)) return null; const p=activePassFor(sched.matchupId);
+  return h('button',{class:'passBtn'+(p?' on':'')+(small?' sm':''),title:p?'Scorekeeper pass is on':'Give someone a scorekeeper pass for this game',onclick:ev=>{ ev.stopPropagation(); passModal(sched); }},p?'🔑 Pass on':'🔑 Pass');
+}
+let qrLoading=null;
+function loadQR(){ if(window.QRCode) return Promise.resolve(window.QRCode); if(qrLoading) return qrLoading;
+  qrLoading=new Promise((res,rej)=>{ const sc=document.createElement('script'); sc.src='https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js'; sc.onload=()=>res(window.QRCode); sc.onerror=()=>{ qrLoading=null; rej(new Error('qr')); }; document.head.appendChild(sc); });
+  return qrLoading; }
+async function newPassCode(){
+  for(let i=0;i<8;i++){ const c=String(Math.floor(100000+Math.random()*900000)); try{ const d=await getDoc(doc(db,'scorePasses',c)); if(!d.exists()) return c; }catch(e){ return c; } }
+  return String(Math.floor(100000+Math.random()*900000));
+}
+async function createPass(sched, side, old){
+  const sides=passSides(sched); const sd=sched.pickup?{home:{name:sched.homeName||'Home'},away:{name:sched.awayName||'Away'}}:schedSides(sched);
+  const code=await newPassCode();
+  const data={ code, active:true, leagueId:S.currentLeagueId||null, seasonId:sched.seasonId||S.currentSeasonId||null, matchupId:sched.matchupId,
+    schedTeamId:sched.teamId||S.selectedTeamId||null, pickup:!!sched.pickup, side, homeTeamId:sides.home, awayTeamId:sides.away,
+    homeName:sd.home.name||'Home', awayName:sd.away.name||'Away', teamName:(sd[side]||{}).name||'', date:sched.date||'', time:sched.time||'', location:sched.location||'',
+    createdBy:(S.user&&S.user.uid)||null, createdByName:(S.profile&&S.profile.displayName)||'', createdByEmail:(S.user&&S.user.email)||null, createdAt:Date.now() };
+  if(sched.pickup) data.poolNames=pickupPool(sched.seasonId||S.currentSeasonId).map(x=>({id:x.id,name:x.name||'',pos:x.pos||''}));   // names only — no contact details
+  await setDoc(doc(db,'scorePasses',code), data);
+  if(old) try{ await updateDoc(doc(db,'scorePasses',old.code),{active:false, endedAt:Date.now(), endedBy:(S.user&&S.user.email)||null, replacedBy:code}); }catch(e){}
+  const g=passStartedGame(sched); if(g && !g.completed && scorekeeperSide(g)!==side && isAdmin()){ try{ await updateDoc(gameDoc(g),{scorekeeperSide:side, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now()}); }catch(e){} }
+  S.passes=(S.passes||[]).filter(p=>p.code!==code && (!old || p.code!==old.code)).concat([{id:code,...data}]);
+  return {id:code,...data};
+}
+function passModal(sched){
+  const ov=h('div',{class:'modalOverlay'}); const box=h('div',{class:'modalSheet',style:'max-width:440px;'}); ov.appendChild(box); document.body.appendChild(ov);
+  const opened=Date.now(); const close=()=>{ ov.remove(); renderShell(); }; ov.addEventListener('click',e=>{ if(e.target===ov && Date.now()-opened>500) close(); });
+  const sides=passSides(sched); const sd=sched.pickup?{home:{name:sched.homeName||'Home'},away:{name:sched.awayName||'Away'}}:schedSides(sched);
+  const title=sd.away.name+' at '+sd.home.name;
+  let pick=null;
+  function draw(){
+    box.innerHTML=''; box.appendChild(h('div',{class:'modalHandle'}));
+    box.appendChild(h('h3',{style:'margin-bottom:2px;'},'🔑 Scorekeeper pass'));
+    box.appendChild(h('div',{style:'font-size:13px;color:var(--ink-soft);margin-bottom:10px;'},title+' · '+schedWhen(sched)));
+    const p=activePassFor(sched.matchupId); const g=passStartedGame(sched);
+    const mine=isAdmin() || (isManager() && (sched.pickup || (p && passMySide(sched)===p.side)));
+    if(p && !mine){
+      box.appendChild(h('div',{class:'passGiven',style:'font-size:14px;padding:10px 12px;'},'🔑 Pass given by '+(p.createdByName||'a manager')+(p.teamName?' ('+p.teamName+')':'')));
+      box.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);line-height:1.45;'},(p.teamName||'That team')+' keeps the official score. You can follow along on Live Feed and challenge a play.'));
+      box.appendChild(h('button',{class:'btn btn-outline btn-block',onclick:close},'Close')); return;
+    }
+    if(p){
+      const link=passLink(p.code);
+      const qr=h('div',{class:'passQR'},h('div',{style:'font-size:11px;color:var(--ink-soft);'},'Loading QR…'));
+      loadQR().then(Q=>{ qr.innerHTML=''; try{ new Q(qr,{text:link,width:168,height:168,correctLevel:Q.CorrectLevel.M}); }catch(e){ qr.innerHTML=''; qr.appendChild(h('div',{style:'font-size:11px;color:var(--ink-soft);'},'QR not available — use the code')); } })
+        .catch(()=>{ qr.innerHTML=''; qr.appendChild(h('div',{style:'font-size:11px;color:var(--ink-soft);padding:8px;text-align:center;'},'QR needs internet — the code works the same')); });
+      box.appendChild(h('div',{class:'passCodeWrap'},[qr, h('div',{style:'flex:1;min-width:150px;'},[
+        h('div',{style:'font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);'},'Code'),
+        h('div',{class:'passCode'},fmtPassCode(p.code)),
+        h('div',{style:'font-size:12.5px;color:var(--ink-soft);line-height:1.45;margin-top:4px;'},['Scan the QR, or open the app and tap ',h('b',{},'Have a scorekeeper code?'),' — no account needed.']),
+        h('div',{style:'font-size:12px;font-weight:700;color:var(--grass-1);margin-top:6px;'},'This game only · ends when the game is final')])]));
+      box.appendChild(h('div',{style:'font-size:13px;margin:10px 0 4px;'},['Keeping score: ',h('b',{},(p.side==='home'?'Home · ':'Away · ')+(p.teamName||'')),' · given by '+(p.createdByName||'')]));
+      if(isAdmin()){
+        const other=p.side==='home'?'away':'home';
+        box.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin:2px 0 8px;',onclick:()=>confirmModal('Change the scorekeeping team?','The pass will keep score for '+sd[other].name+' instead. A new code is made; the old one stops working.',async()=>{ try{ await createPass(sched, other, p); toast('Now keeping score for '+sd[other].name); }catch(e){ toast('Could not change: '+(e.message||e)); } draw(); })},'⇄ Change to '+sd[other].name));
+      }
+      const msg='You’re keeping score for '+title+' ('+formatDate(sched.date)+(sched.time?' '+fmtSchedTime(sched.time):'')+'). Open '+link+' — or use code '+p.code+' in the Geezer Ball Scorecard app. No account needed.';
+      box.appendChild(h('div',{style:'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;'},[
+        h('a',{class:'btn btn-gold',href:'sms:?&body='+encodeURIComponent(msg),style:'text-decoration:none;'},'💬 Send by text'),
+        h('button',{class:'btn btn-outline',onclick:async()=>{ try{ await createPass(sched, p.side, p); toast('New code made — the old one stops working'); }catch(e){ toast('Could not make a new code: '+(e.message||e)); } draw(); }},'↻ New code'),
+        h('button',{class:'btn btn-outline',style:'color:var(--leather-2);border-color:var(--leather-2);',onclick:()=>confirmModal('Turn off this pass?','Whoever has code '+fmtPassCode(p.code)+' can’t score any more. Plays already entered stay.',async()=>{ try{ await updateDoc(doc(db,'scorePasses',p.code),{active:false, endedAt:Date.now(), endedBy:(S.user&&S.user.email)||null}); p.active=false; toast('Pass turned off'); }catch(e){ toast('Could not turn off: '+(e.message||e)); } draw(); })},'Turn off'),
+        h('button',{class:'btn btn-outline',onclick:close},'Close')]));
+      return;
+    }
+    // no pass yet
+    const keeperSide=g?scorekeeperSide(g):null;
+    if(g && !isAdmin() && !sched.pickup && passMySide(sched)!==keeperSide){
+      box.appendChild(h('p',{style:'font-size:13.5px;line-height:1.5;'},['This game has started and ',h('b',{},(sd[keeperSide]||{}).name||'the other team'),' is keeping score, so only their manager (or the admin) can give a pass.']));
+      box.appendChild(h('button',{class:'btn btn-outline btn-block',onclick:close},'Close')); return;
+    }
+    let side=null;
+    if(isAdmin() || sched.pickup){
+      if(g) side=pick||keeperSide; else side=pick;
+      box.appendChild(h('div',{style:'font-weight:800;font-size:14px;margin:4px 0 6px;'},'Which team keeps score?'));
+      const kb=s2=>h('button',{class:'sgKeep'+(side===s2?' on':''),onclick:()=>{ pick=s2; draw(); }},[h('div',{style:'font-weight:900;font-size:15px;'},s2==='home'?'Home':'Away'),h('div',{style:'font-size:12.5px;color:var(--ink-soft);'},sd[s2].name)]);
+      box.appendChild(h('div',{style:'display:flex;gap:10px;margin-bottom:10px;'},[kb('away'),kb('home')]));
+    } else {
+      side=g?keeperSide:passMySide(sched);
+      box.appendChild(h('p',{style:'font-size:13.5px;line-height:1.5;margin:4px 0 10px;'},['Give a scorekeeper a pass to score this game for ',h('b',{},(sd[side]||{}).name||''),'. ',g?'':'Making the pass makes your team the scorekeeping team.']));
+    }
+    box.appendChild(h('ul',{style:'font-size:12.5px;color:var(--ink-soft);line-height:1.5;margin:0 0 12px;padding-left:18px;'},[
+      h('li',{},'QR code + 6-digit code — they never sign in or make an account'),
+      h('li',{},'They see only this game: lineups and the scorecard'),
+      h('li',{},'Ends when the game is final — or turn it off any time')]));
+    const go=h('button',Object.assign({class:'btn btn-gold btn-block',onclick:async()=>{ if(!side) return; go.disabled=true; go.textContent='Making pass…'; try{ await createPass(sched, side, null); }catch(e){ toast('Could not make the pass: '+(e.message||e)); } draw(); }},side?{}:{disabled:'disabled',style:'opacity:.5;'}),'🔑 Make pass');
+    box.appendChild(go);
+    box.appendChild(h('button',{class:'btn btn-outline btn-block',style:'margin-top:8px;',onclick:close},'Cancel'));
+  }
+  draw();
+}
+// ---- the pass holder's side ----
+function passGuestModal(onAdded){
+  const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet'}); overlay.appendChild(sheet);
+  const opened=Date.now(); const close=()=>overlay.remove(); overlay.addEventListener('click',e=>{ if(e.target===overlay && Date.now()-opened>500) close(); });
+  sheet.appendChild(h('div',{class:'modalHandle'})); sheet.appendChild(h('h3',{},'Add a guest player'));
+  sheet.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 8px;'},'Name only — for this game.'));
+  const nm=h('input',{type:'text',placeholder:'First and last name'}); sheet.appendChild(nm);
+  const add=()=>{ const n=nm.value.trim().replace(/\s+/g,' '); if(!n){ toast('Enter a name'); return; } close(); toast(n+' added'); if(onAdded) onAdded({id:'g_'+uid(),name:n,pos:''}); };
+  nm.addEventListener('keydown',e=>{ if(e.key==='Enter') add(); });
+  sheet.appendChild(h('div',{style:'display:flex;gap:8px;margin-top:10px;'},[h('button',{class:'btn btn-outline',style:'flex:1;',onclick:close},'Cancel'), h('button',{class:'btn btn-primary',style:'flex:1;',onclick:add},'Add guest')]));
+  document.body.appendChild(overlay); setTimeout(()=>nm.focus(),50);
+}
+function passEntryFromUrl(){ try{ const q=new URLSearchParams(location.search).get('pass'); return q?q.replace(/\D/g,'').slice(0,6):''; }catch(e){ return ''; } }
+async function startPass(code, name){
+  code=String(code||'').replace(/\D/g,''); name=String(name||'').trim().replace(/\s+/g,' ');
+  S.authError=''; S.authMessage='';
+  if(code.length!==6){ S.authError='Enter the 6-digit code from the manager.'; renderShell(); return; }
+  if(name.length<2){ S.authError='Type your name — it’s recorded as the scorekeeper.'; renderShell(); return; }
+  try{ localStorage.setItem('gbPass', JSON.stringify({code, name:name.slice(0,40)})); }catch(e){}
+  S.passBusy='Opening your scorekeeper pass…'; renderShell();
+  try{ await signInAnonymously(auth); }
+  catch(e){ S.passBusy=null; try{ localStorage.removeItem('gbPass'); }catch(x){} S.authError='Could not open the pass: '+String(e.message||e).replace('Firebase: ','')+' (the league’s Firebase needs Anonymous sign-in turned on).'; renderShell(); }
+}
+const passUnsub=[];
+async function enterPassMode(u){
+  let saved=null; try{ saved=JSON.parse(localStorage.getItem('gbPass')||'null'); }catch(e){}
+  S.user=u; S.profile=null; S.passMode=null;
+  const fail=async(msg)=>{ passUnsub.splice(0).forEach(f=>{ try{ f(); }catch(e){} }); try{ localStorage.removeItem('gbPass'); }catch(e){} S.passMode=null; S.passBusy=null; S.user=null; S.authMode='pass'; S.authError=msg; try{ await signOut(auth); }catch(e){} renderShell(); };
+  if(!saved || !saved.code) return fail('');
+  S.passBusy='Opening your scorekeeper pass…'; renderShell();
+  try{
+    const ps=await getDoc(doc(db,'scorePasses',saved.code));
+    if(!ps.exists()) return fail('That code wasn’t found. Check the 6 digits, or ask the manager for the code again.');
+    const pass={id:ps.id,...ps.data()};
+    if(pass.active!==true) return fail('That pass has been turned off. Ask the manager for a new code.');
+    await netWrite(setDoc(doc(db,'passClaims',u.uid),{code:saved.code, name:saved.name, at:Date.now()}));
+    S.passMode={code:saved.code, name:saved.name, pass};
+    S.profile={role:'pass', leagueId:pass.leagueId, displayName:saved.name};
+    await loadPassData();
+    S.passBusy=null; S.activeTab='scorecard'; renderShell();
+  }catch(e){ return fail('Could not open the pass: '+String(e.message||e).replace('Firebase: ','')); }
+}
+async function loadPassData(){
+  const P=S.passMode.pass; const opt=p=>p.catch(()=>null);
+  S.currentLeagueId=P.leagueId||null;
+  const lg=P.leagueId?await opt(getDoc(doc(db,'leagues',P.leagueId))):null; S.leagues=lg&&lg.exists()?[{id:lg.id,...lg.data()}]:[];
+  const sn=P.seasonId?await opt(getDoc(doc(db,'seasons',P.seasonId))):null; const season=sn&&sn.exists()?{id:sn.id,...sn.data()}:{id:P.seasonId,name:'',rosterMethod:P.pickup?'pickup':'draft'};
+  S.allSeasons=[season]; S.seasons=[season]; S.currentSeasonId=season.id;
+  const tids=[...new Set([P.schedTeamId,P.homeTeamId,P.awayTeamId].filter(Boolean))];
+  const teams=[]; for(const t of tids){ const d=await opt(getDoc(doc(db,'teams',t))); teams.push(d&&d.exists()?{id:t,...d.data()}:{id:t,name:t===P.homeTeamId?P.homeName:(t===P.awayTeamId?P.awayName:'Pickup'),pickup:P.pickup&&t===P.schedTeamId}); }
+  S.allTeams=teams; S.teams=teams.filter(t=>!t.pickup);
+  S.selectedTeamId=P.schedTeamId;
+  const sc=P.schedTeamId?await opt(getDocs(query(collection(db,'teams',P.schedTeamId,'schedule'),where('matchupId','==',P.matchupId)))):null;
+  let rows=sc?sc.docs.map(d=>({id:d.id, teamId:P.schedTeamId, ...d.data()})).filter(r=>r.matchupId===P.matchupId):[];
+  if(!rows.length) rows=[{id:'pass_'+P.matchupId, teamId:P.schedTeamId, matchupId:P.matchupId, seasonId:P.seasonId, date:P.date, time:P.time, location:P.location, pickup:!!P.pickup, homeName:P.homeName, awayName:P.awayName,
+    homeAway:P.schedTeamId===P.awayTeamId?'away':'home', opponent:P.schedTeamId===P.awayTeamId?P.homeName:P.awayName, opponentTeamId:P.schedTeamId===P.awayTeamId?P.homeTeamId:P.awayTeamId, completed:false}];
+  S.schedule=rows; S.allScheduleForFeed=rows;
+  const pl=[]; for(const t of [P.homeTeamId,P.awayTeamId].filter(Boolean)){ const d=await opt(getDocs(collection(db,'teams',t,'players'))); if(d) d.docs.forEach(x=>pl.push({id:x.id, teamId:t, ...x.data()})); }
+  S.allPlayersForFeed=pl; S.players=pl.filter(p=>p.teamId===P.schedTeamId);
+  S.signups=(P.poolNames||[]).map(x=>({id:x.id, name:x.name, pos:x.pos||'', seasonId:P.seasonId})); S.usersDirectory=[];
+  S.chat=[]; S.announcements=[]; S.rulesAll=[]; S.draftPool=[]; S.passes=[];
+  await loadPregameLineups(true);
+  const byTeam={};
+  const flat=()=>{ const all=Object.values(byTeam).flat(); S.games=all; S.allGamesForFeed=all;
+    const g=all.find(x=>!x.completed)||all[0];
+    if(g && !S.activeGameId){ S.activeGameId=g.id; S.selectedTeamId=g.teamId; }
+    if(g && S.activeGameId===g.id && S.selectedTeamId!==g.teamId) S.selectedTeamId=g.teamId;
+    if(g && !g.completed && !g.scorekeeperName && !S.passMode.named){ S.passMode.named=true; netWrite(updateDoc(doc(db,'teams',g.teamId,'games',g.id),{scorekeeperName:S.passMode.name+PASS_TAG, scorekeeperPass:S.passMode.code})).catch(()=>{}); }
+    feedRender(); };
+  [...new Set([P.schedTeamId,P.homeTeamId,P.awayTeamId].filter(Boolean))].forEach(t=>{
+    passUnsub.push(onSnapshot(query(collection(db,'teams',t,'games'),where('matchupId','==',P.matchupId)), snap=>{ byTeam[t]=snap.docs.map(d=>({id:d.id, teamId:t, ...d.data()})).filter(g=>g.matchupId===P.matchupId); flat(); }, ()=>{})); });
+  passUnsub.push(onSnapshot(doc(db,'scorePasses',S.passMode.code), snap=>{ if(!S.passMode) return; const d=snap.exists()?snap.data():null; S.passMode.off=!d || d.active!==true; if(d) S.passMode.pass={...S.passMode.pass, ...d, id:snap.id}; renderShell(); }, ()=>{}));
+}
+async function exitPass(){
+  passUnsub.splice(0).forEach(f=>{ try{ f(); }catch(e){} });
+  try{ localStorage.removeItem('gbPass'); }catch(e){}
+  try{ await signOut(auth); }catch(e){}
+  try{ location.href=location.pathname; }catch(e){}
+}
+function renderPassShell(){
+  const authWrap=document.getElementById('authWrap'), pendingWrap=document.getElementById('pendingWrap'), mainUI=document.getElementById('mainUI');
+  { const dr=document.getElementById('drawerRoot'); if(dr) dr.remove(); } document.body.classList.remove('docked');
+  ['helpFab','helpPanel','geezerSpeaker','geezerPicker','appMark'].forEach(id=>{ const e=document.getElementById(id); if(e) e.remove(); });
+  if(!S.passMode){
+    authWrap.classList.add('hidden'); mainUI.classList.add('hidden'); pendingWrap.classList.remove('hidden'); pendingWrap.innerHTML='';
+    pendingWrap.appendChild(h('h1',{},'🔑 Scorekeeper pass')); pendingWrap.appendChild(h('p',{},S.passBusy||'Opening…'));
+    return;
+  }
+  authWrap.classList.add('hidden'); pendingWrap.classList.add('hidden'); mainUI.classList.remove('hidden');
+  const P=S.passMode.pass; const lg=(S.leagues||[])[0];
+  const logoEl=document.getElementById('brandLogo'); if(logoEl){ const src=(lg&&lg.logoDataUrl)||DEFAULT_LOGO; if(logoEl.src!==src) logoEl.src=src; }
+  const titleEl=document.getElementById('brandTitle'); if(titleEl) titleEl.textContent=(lg&&(lg.shortName||lg.name))||'Geezer Ball Scorecard';
+  const who=document.getElementById('whoRow'); who.innerHTML=''; who.appendChild(h('button',{onclick:exitPass},'Exit'));
+  { const abr=document.getElementById('appBrandRow'); if(abr){ abr.innerHTML=''; abr.classList.add('hidden'); } }
+  document.getElementById('teamPickRow').classList.add('hidden');
+  ['leftDrawerBtn','rightDrawerBtn'].forEach(id=>{ const b=document.getElementById(id); if(b) b.style.display='none'; });
+  if(!['lineup','scorecard'].includes(S.activeTab)) S.activeTab='scorecard';
+  const nav=document.getElementById('bottomNav'); nav.innerHTML='';
+  [{id:'lineup',label:'Lineup',icon:'<circle cx="8" cy="8" r="2"/><circle cx="8" cy="14" r="2"/><circle cx="8" cy="20" r="2"/><path d="M13 8h7M13 14h7M13 20h7"/>'},
+   {id:'scorecard',label:'Scorecard',icon:'<rect x="3" y="4" width="18" height="16" rx="1.5"/><path d="M3 9h18M9 4v16"/>'}].forEach(t=>{
+    nav.appendChild(h('button',{class:'navBtn'+(S.activeTab===t.id?' active':''),onclick:()=>{ S.activeTab=t.id; renderShell(); }},[h('svg',{viewBox:'0 0 24 24',html:t.icon}),h('span',{},t.label)])); });
+  updateScoreBug();
+  const content=document.getElementById('tabContent');
+  const keep=(()=>{ const a=document.activeElement; if(a && ['INPUT','TEXTAREA','SELECT'].includes(a.tagName) && content.contains(a)){ let pos=null; try{ pos=a.selectionStart; }catch(e){} return {el:a, id:a.getAttribute('data-pf')?a.id:null, pos}; } return null; })();
+  content.innerHTML='';
+  { const nb=netBarEl(); if(nb) content.appendChild(nb); }
+  content.appendChild(h('div',{class:'passBar'},[h('span',{},'🔑'),h('span',{style:'flex:1;min-width:0;'},['Scorekeeper pass · ',h('b',{},S.passMode.name),h('span',{class:'passBarGame'},' · '+(P.awayName||'Away')+' at '+(P.homeName||'Home'))]),h('button',{onclick:exitPass},'Exit')]));
+  const g=(S.games||[]).find(x=>x.matchupId===P.matchupId);
+  if(g && g.completed){
+    content.appendChild(h('div',{class:'card',style:'text-align:center;padding:22px 16px;'},[h('div',{style:'font-size:34px;'},'🏁'),h('h3',{style:'justify-content:center;'},'Game final — thanks for keeping score!'),
+      h('div',{style:'font-family:var(--font-display);font-size:24px;font-weight:900;margin:6px 0;'},(g.away.name||'Away')+' '+totalRuns(g,'away')+' – '+totalRuns(g,'home')+' '+(g.home.name||'Home')),
+      h('p',{style:'font-size:13px;color:var(--ink-soft);'},'This pass has ended. You can close the app.'),h('button',{class:'btn btn-primary',onclick:exitPass},'Exit')]));
+  } else if(S.passMode.off){
+    content.appendChild(h('div',{class:'card',style:'text-align:center;padding:22px 16px;'},[h('div',{style:'font-size:34px;'},'🔒'),h('h3',{style:'justify-content:center;'},'This pass was turned off'),
+      h('p',{style:'font-size:13px;color:var(--ink-soft);'},'Plays you entered are saved. Ask the manager for a new code if you’re still keeping score.'),h('button',{class:'btn btn-primary',onclick:exitPass},'Exit')]));
+  } else {
+    const fn=Router.tabs[S.activeTab]; if(fn) fn(content);
+  }
+  content.appendChild(h('p',{class:'copyright'},'© '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.'));
+  if(keep){ const el=keep.el.isConnected?keep.el:(keep.id?document.getElementById(keep.id):null); if(el && document.activeElement!==el){ el.focus({preventScroll:true}); try{ if(keep.pos!=null) el.setSelectionRange(keep.pos,keep.pos); }catch(e){} } }
+}
+function renderPassAuth(card){
+  card.appendChild(h('div',{style:'font-size:30px;text-align:center;'},'🔑'));
+  card.appendChild(h('h2',{style:'text-align:center;margin:0 0 2px;font-size:22px;color:#fff;'},'Scorekeeper pass'));
+  card.appendChild(h('p',{class:'sub'},'Keeping score for one game? No account needed.'));
+  if(S.authError) card.appendChild(h('div',{class:'authErr'}, S.authError));
+  const codeInp=h('input',{type:'text',inputmode:'numeric',autocomplete:'one-time-code',maxlength:'7',placeholder:'6-digit code',value:S.passPrefill||passEntryFromUrl()||'',style:'text-align:center;font-size:22px;letter-spacing:.2em;font-weight:800;'});
+  const nameInp=h('input',{type:'text',placeholder:'Your name (first and last)',autocomplete:'name'});
+  codeInp.addEventListener('input',()=>{ S.passPrefill=codeInp.value; });
+  card.appendChild(h('div',{class:'authField'},codeInp)); card.appendChild(h('div',{class:'authField'},nameInp));
+  const go=()=>startPass(codeInp.value, nameInp.value);
+  nameInp.addEventListener('keydown',e=>{ if(e.key==='Enter') go(); });
+  card.appendChild(h('button',Object.assign({class:'authBtn',onclick:go},S.passBusy?{disabled:'disabled'}:{}),S.passBusy?'Opening…':'Start scoring'));
+  card.appendChild(h('p',{style:'font-size:12px;color:#e8e2cf;opacity:.85;margin:8px 2px 0;line-height:1.4;text-align:center;'},'You’ll see only this game — lineups and the scorecard. Your name is recorded as the scorekeeper.'));
+  card.appendChild(h('div',{class:'authLinks'},h('button',{onclick:()=>{ S.authMode='login'; S.authError=''; renderShell(); }},'← Back to sign in')));
+}
 /* ===================== SCOREKEEPER / ALERTS / CHALLENGES ===================== */
 function gameDoc(g){ return doc(db,'teams', g.teamId||S.selectedTeamId, 'games', g.id); }
 function scorekeeperSide(g){ return (g && g.scorekeeperSide) || ownerSideOf(g); }
 function scorekeeperTeamId(g){ return sideTeamId(g, scorekeeperSide(g)); }
 function myGameSide(g){ const t=myTeamId(); if(!t||!g) return null; if(sideTeamId(g,'home')===t) return 'home'; if(sideTeamId(g,'away')===t) return 'away'; return null; }
-function canScoreGame(g){ if(!g) return false; if(isAdmin()) return true; if(isManager() && isPickupSeason()) return true; return !!(isManager() && myTeamId() && myTeamId()===scorekeeperTeamId(g)); }
-function canChallengeGame(g){ if(!g) return false; if(isAdmin()) return true; return !!(isManager() && myGameSide(g) && myTeamId()!==scorekeeperTeamId(g)); }
+function canScoreGame(g){ if(!g) return false; if(S.passMode) return passGameOk(g); if(isAdmin()) return true; if(isManager() && isPickupSeason()) return true; return !!(isManager() && myTeamId() && myTeamId()===scorekeeperTeamId(g)); }
+function canChallengeGame(g){ if(!g || S.passMode) return false; if(isAdmin()) return true; return !!(isManager() && myGameSide(g) && myTeamId()!==scorekeeperTeamId(g)); }
 function halfLabel(a){ return (a.half==='top'?'Top ':'Bot ')+a.inning; }
 function playLabel(g,a){ return halfLabel(a)+' · '+playerInitialLast(playerName(g,a.playerId))+' — '+((RESULTS[a.result]||{}).label||a.result)+(a.zone?' ('+zoneShort(a.zone)+')':''); }
 function gameEntryIssues(g){
@@ -3536,8 +3824,8 @@ async function resolveChallenge(game, id, status, note){
 }
 /* ===== Game officials: umpire(s) and scorekeeper name — both optional ===== */
 function gameUmpires(g){ return (g&&Array.isArray(g.umpires))?g.umpires.filter(Boolean):[]; }
-function officialsLine(g){ const u=gameUmpires(g), k=(g&&g.scorekeeperName)||''; const parts=[]; if(u.length) parts.push((u.length>1?'Umpires: ':'Umpire: ')+u.join(', ')); if(k) parts.push('Scorekeeper: '+k); return parts.join(' · '); }
-function canEditOfficials(g){ return isAdmin() || (!g.completed && canScoreGame(g)); }
+function officialsLine(g){ const u=gameUmpires(g), k=(g&&g.scorekeeperName)||''; const parts=[]; if(u.length) parts.push((u.length>1?'Umpires: ':'Umpire: ')+u.join(', ')); if(k) parts.push('Scorekeeper: '+keeperShown(g)+(g.scorekeeperPass?' 🔑 scorekeeper pass':'')); return parts.join(' · '); }
+function canEditOfficials(g){ if(S.passMode) return false; return isAdmin() || (!g.completed && canScoreGame(g)); }
 // names to pick from, so nobody has to type: people who umpired or kept score before, then this season's rosters
 function officialNamePool(g){
   const ids=leagueTeamIdSet(); const games=dedupeByMatchup((S.allGamesForFeed||[]).filter(x=>ids.has(x.teamId)));
@@ -3596,7 +3884,7 @@ function officialsReportCard(){
   const sel=h('select',{style:'max-width:260px;'}); sel.appendChild(h('option',{value:''},'Everyone')); names.forEach(n=>sel.appendChild(h('option',{value:n},n))); sel.value=names.includes(offPerson)?offPerson:''; sel.addEventListener('change',()=>{ offPerson=sel.value; renderShell(); });
   const shown=offPerson?games.filter(g=>gameUmpires(g).includes(offPerson)||g.scorekeeperName===offPerson):games;
   const sch=S.allScheduleForFeed||[]; const fieldOf=g=>g.location||g.field||((g.matchupId&&sch.find(x=>x.matchupId===g.matchupId&&x.location))||{}).location||'';
-  const rows=shown.map(g=>{ const k=scorekeeperSide(g); return { date:g.date, game:(g.away&&g.away.name)+' at '+(g.home&&g.home.name), field:fieldOf(g), ump:gameUmpires(g).join(', '), keeper:g.scorekeeperName||'', team:(g[k]||{}).name||'', score:totalRuns(g,'away')+'–'+totalRuns(g,'home'), status:g.completed?'Final':'Live' }; });
+  const rows=shown.map(g=>{ const k=scorekeeperSide(g); return { date:g.date, game:(g.away&&g.away.name)+' at '+(g.home&&g.home.name), field:fieldOf(g), ump:gameUmpires(g).join(', '), keeper:g.scorekeeperName||'', shown:keeperShown(g), pass:!!g.scorekeeperPass, team:(g[k]||{}).name||'', score:totalRuns(g,'away')+'–'+totalRuns(g,'home'), status:g.completed?'Final':'Live' }; });
   const exportX=()=>{ const data=[['Date','Game','Field','Umpire(s)','Scorekeeper','Scorekeeping team','Score (away–home)','Status']].concat(rows.map(r=>[r.date,r.game,r.field,r.ump,r.keeper,r.team,r.score,r.status]));
     const tally=new Map(); games.forEach(g=>{ gameUmpires(g).forEach(n=>{ const t=tally.get(n)||{u:0,k:0}; t.u++; tally.set(n,t); }); if(g.scorekeeperName){ const t=tally.get(g.scorekeeperName)||{u:0,k:0}; t.k++; tally.set(g.scorekeeperName,t); } });
     const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(data); ws['!cols']=[12,32,16,30,22,18,14,8].map(w=>({wch:w})); XLSX.utils.book_append_sheet(wb,ws,'Games');
@@ -3611,7 +3899,7 @@ function officialsReportCard(){
   const wrap=h('div',{style:'overflow-x:auto;'}); const t=h('table',{class:'dataTable'});
   const showField=rows.some(r=>r.field);
   t.appendChild(h('tr',{},['Date','Game'].concat(showField?['Field']:[],['Umpire(s)','Scorekeeper','Score']).map(x=>h('th',{style:'text-align:left;'},x))));
-  rows.forEach(r=>t.appendChild(h('tr',{},[h('td',{style:'white-space:nowrap;'},formatDate(r.date)),h('td',{},r.game),showField?h('td',{},r.field||'—'):null,h('td',{},r.ump||h('span',{style:'color:var(--ink-soft);'},'—')),h('td',{},r.keeper?[r.keeper,h('div',{style:'font-size:11px;color:var(--ink-soft);'},r.team)]:h('span',{style:'color:var(--ink-soft);'},'—')),h('td',{style:'white-space:nowrap;font-family:var(--font-mono);'},r.score+(r.status==='Live'?' · live':''))])));
+  rows.forEach(r=>t.appendChild(h('tr',{},[h('td',{style:'white-space:nowrap;'},formatDate(r.date)),h('td',{},r.game),showField?h('td',{},r.field||'—'):null,h('td',{},r.ump||h('span',{style:'color:var(--ink-soft);'},'—')),h('td',{},r.keeper?[r.shown,r.pass?h('span',{class:'passTag'},'🔑 scorekeeper pass'):null,h('div',{style:'font-size:11px;color:var(--ink-soft);'},r.team)]:h('span',{style:'color:var(--ink-soft);'},'—')),h('td',{style:'white-space:nowrap;font-family:var(--font-mono);'},r.score+(r.status==='Live'?' · live':''))])));
   wrap.appendChild(t); card.appendChild(wrap);
   if(tally.size){ const tt=h('table',{class:'dataTable',style:'margin-top:14px;'}); tt.appendChild(h('tr',{},[h('th',{style:'text-align:left;'},'Totals'),h('th',{},'Umpired'),h('th',{},'Kept score')]));
     [...tally].sort((a,b)=>(b[1].u+b[1].k)-(a[1].u+a[1].k)||a[0].localeCompare(b[0])).forEach(([n,v])=>tt.appendChild(h('tr',{},[h('td',{},n),h('td',{style:'text-align:center;'},String(v.u)),h('td',{style:'text-align:center;'},String(v.k))])));
@@ -3686,10 +3974,10 @@ Router.register('scorecard', (root)=>{
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Scorecard'), h('p',{}, game ? (formatDate(game.date)+'  ·  '+game.away.name+' at '+game.home.name) : 'Pick a scheduled game to start scoring.')]));
 
   if(!game){
-    const admin = isAdmin();
+    const admin = isAdmin() || !!S.passMode;
     const upcoming = (admin ? leagueSchedule() : seasonSchedule()).filter(g=>!g.completed).sort((a,b)=>new Date(a.date)-new Date(b.date));
-    { const rc=readyForFieldCard(upcoming); if(rc) root.appendChild(rc); }
-    const card = h('div',{class:'card'}); card.appendChild(h('h3',{}, admin ? 'Scheduled Games (league)' : 'Scheduled Games'));
+    if(!S.passMode){ const rc=readyForFieldCard(upcoming); if(rc) root.appendChild(rc); }
+    const card = h('div',{class:'card'}); card.appendChild(h('h3',{}, S.passMode ? 'Your game' : admin ? 'Scheduled Games (league)' : 'Scheduled Games'));
     if(!upcoming.length){
       card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No games on the Schedule yet — add one on the Schedule tab first.'));
     } else {
@@ -3699,8 +3987,9 @@ Router.register('scorecard', (root)=>{
                             : ((sched.homeAway==='away' ? '@ ' : 'vs ')+sched.opponent));
         const rowEdit = admin || canEdit;
         card.appendChild(h('div',{class:'gameListRow', onclick: rowEdit ? ()=>findOrCreateGameFromSchedule(sched) : null, style: rowEdit?'cursor:pointer;':''},[
-          h('div',{},[h('div',{class:'glTeams'},label), h('div',{class:'glDate'},[formatDate(sched.date)+(sched.time?' · '+fmtTime(sched.time):'')+(sched.location?' · '+sched.location:''), (()=>{ const f=gameFieldInfo(sched); return f&&f.internet&&f.internet!=='yes'?h('span',{class:'netNo',style:'margin-left:6px;'},f.internet==='no'?'⚠ No internet':'⚠ Spotty internet'):null; })()])]),
-          rowEdit ? h('span',{style:'color:var(--grass-1);font-size:12px;font-weight:700;'}, started?'Continue →':'Start ›') : h('span',{style:'color:var(--ink-soft);font-size:11px;'}, started?'Live':'Not started')
+          h('div',{},[h('div',{class:'glTeams'},label), h('div',{class:'glDate'},[formatDate(sched.date)+(sched.time?' · '+fmtTime(sched.time):'')+(sched.location?' · '+sched.location:''), (()=>{ const f=gameFieldInfo(sched); return f&&f.internet&&f.internet!=='yes'?h('span',{class:'netNo',style:'margin-left:6px;'},f.internet==='no'?'⚠ No internet':'⚠ Spotty internet'):null; })()]), passGivenLine(sched)]),
+          h('div',{style:'display:flex;align-items:center;gap:8px;flex:none;'},[passButton(sched),
+          rowEdit ? h('span',{style:'color:var(--grass-1);font-size:12px;font-weight:700;'}, started?'Continue →':'Start ›') : h('span',{style:'color:var(--ink-soft);font-size:11px;'}, started?'Live':'Not started')])
         ]));
       });
     }
@@ -3711,7 +4000,7 @@ Router.register('scorecard', (root)=>{
   canEdit = canScoreGame(game);
   root.appendChild(h('div',{class:'card',style:'display:flex;justify-content:space-between;align-items:center;'},[
     h('span',{style:'font-size:13px;color:var(--ink-soft);'},'Playing a scheduled game'),
-    h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.activeGameId=null; renderShell(); }},'Switch Game')
+    S.passMode?null:h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.activeGameId=null; renderShell(); }},'Switch Game')
   ]));
   root.appendChild(gameIntegrityCard(game));
 
@@ -4496,7 +4785,7 @@ Router.register('schedule', (root)=>{
       }
       tr.appendChild(h('td',{style:'white-space:nowrap;'},[internetBadge(fi), caution?h('div',{class:'netNote'},'Sign in & open the app before you get there'):null]));
       tr.appendChild(h('td',{style:'font-family:var(--font-mono);font-weight:800;white-space:nowrap;'},score));
-      tr.appendChild(h('td',{},h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap;background:'+st.bg+';color:'+st.fg+';'},st.label)));
+      tr.appendChild(h('td',{style:'white-space:nowrap;'},[h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap;background:'+st.bg+';color:'+st.fg+';'},st.label), scheduleEditing?null:passButton(g,true)]));
       if(scheduleEditing && !admin) tr.appendChild(h('td',{}));
       if(scheduleEditing && admin) tr.appendChild(h('td',{},h('button',{title:'Remove game',style:'background:none;border:none;color:var(--leather-2);font-weight:900;font-size:15px;cursor:pointer;',onclick:()=>confirmModal('Remove this game?',dl+' · '+tm.away+' '+tm.sep+' '+tm.home+(p?' — it has already been scored; the scorecard stays, only the schedule entry is removed.':''),()=>schedDeleteGame(g),{danger:true})},'✕')));
       if(!scheduleEditing && p) tr.addEventListener('click',()=>{ liveFeedGameId=p.id; S.activeTab='feed'; renderShell(); });
@@ -7144,6 +7433,8 @@ const HELP_KB = [
   {k:'undo last at-bat mistake', q:'How do I undo the last play?', a:'On the Scorecard, tap Undo next to “Record at-bat” to remove the most recent at-bat.'},
   {k:'lineup batting order positions sub substitute ahead before game upcoming', q:'How do I set a lineup?', a:'Lineup tab → Select Game. Pick an Upcoming game to set your lineup ahead of time (managers edit their own team; admins both) — drag ⠿ to reorder, set positions, check Sub for a fill-in. It saves for that game and is used automatically when the game starts. During a game, pick it under In progress to make changes.'},
   {k:'everyone bats every inning bat around lineup second set outs bases clear', q:'How does “Everyone bats every inning” work?', a:'An optional rule for any season type, off unless the admin turns it on: Admin → Settings → Season Rules (Formal, Informal, Pickup) or Admin → 🏆 Tournament → 1 · Rules. At 3 outs, if anyone in the lineup hasn’t batted that inning, the bases clear, the outs start over and the same team keeps batting. The side is over once everyone has batted, or when the second set reaches its outs (Second set of outs: 1, 2 or 3, or No limit — the whole order bats and runners clear again every 3 outs). If everyone bats before the first 3 outs, play continues to 3 outs as usual. The Scorecard shows a 🔄 Keep batting pop-up and “Set 2 · 5 batters left”; End the half-inning is there if the umpire calls it. Runs, outs and stats count as usual.'},
+  {k:'scorekeeper pass code qr guest scorekeeper no account anonymous 6 digit key pass someone else keep score', q:'How do I let someone keep score without an account?', a:'Use a scorekeeper pass. On the Scorecard (or Schedule) tab, tap 🔑 Pass next to the game, then 🔑 Make pass. Show him the QR code, read him the 6-digit code, or tap Send by text. He opens the app, taps “Have a scorekeeper code?”, types the code and his name, and scores just that game — no sign-in. Either manager can make it before the game starts (it makes his team the scorekeeper); after the start, only the scorekeeping team’s manager or the admin. It ends when the game is final; Turn off or New code any time.'},
+  {k:'pass given by other manager scorekeeper pass turned off ended exit', q:'What does “Pass given by …” mean?', a:'The other team’s manager made a scorekeeper pass for this game, so his team keeps the official score. You follow along on Live Feed and can challenge a play. If a pass shows “turned off” or “game final”, the scorekeeper just taps Exit.'},
   {k:'designated runner dr courtesy runner pinch run base drag tap', q:'How do I use a designated runner?', a:'On the Scorecard, tap the ⠿ next to a player’s name in the scorecard, then tap the base he’s running for (on a computer you can also drag the name onto the base). The runner shows as “G.Bartok (DR)”. If he scores, the run counts for the batter he ran for. Picked the wrong one? Tap the right player — he replaces the DR on that base. The Designated runners table beside the scorecard shows each DR and how many times he ran; tap a name for the inning, who he ran for and the outcome.'},
   {k:'offline no internet signal no service field dead zone', q:'Does the app work with no internet at the field?', a:'Yes. When the signal drops, a thin 📴 Offline bar appears and scoring keeps working — plays are saved on the phone and upload by themselves when you’re back in range (the bar turns green: “Back online — 3 changes uploaded”). Live Feed, Chat, Challenges, notices and sign-in need internet. Before going to a field with poor signal, open the Scorecard while you still have internet and check “Ready for the field?”.'},
   {k:'field location directions address internet accessible map override import export template', q:'How do I add field locations?', a:'Enter a field’s location once and every game at that field shows it. On the Schedule tab, tap the field name (for example “Texas”) → enter the address or map link and Internet (Yes, Spotty or No) → Save for all Texas games. For one game at a different spot, tap that game’s field → Different location for this game only (it shows a “this game only” tag; ↩ Use the regular location puts it back). The Field locations list on the Schedule tab shows every saved field. Games at Spotty or No fields are highlighted. Anyone can tap a field for directions. The ⬇ Template and ⬇ Export files have Field, Field Address and Internet columns (Internet is a Yes/Spotty/No pick-list): fill the address once per field; a different address on a later row becomes a game-only location when you Import.'},
@@ -7269,6 +7560,9 @@ const FAQ_DATA = [
     { q:'Does the app work at a field with no internet?', a:'Yes — scoring keeps working and uploads when you’re back in range. Fields marked ⚠ on the Schedule have poor signal: sign in and open the app before you get there.' },
     { q:'Where is the field?', a:'Tap the field name on the Schedule tab for the address and a Get directions button.' },
     { q:'Why did my team keep batting after 3 outs?', a:'Your league uses “Everyone bats every inning”: after 3 outs the bases clear and the rest of the lineup bats. The side is over once everyone has batted (or at the second set’s outs). Your at-bats and runs count as usual.' },
+    { q:'What is a scorekeeper pass?', a:'A way for someone without an account to keep score for one game. A manager of either team (or the admin) taps 🔑 Pass next to the game on the Scorecard or Schedule tab and shares the QR code or 6-digit code (Send by text works too). The scorekeeper opens the app, taps “Have a scorekeeper code?”, types the code and his name — no sign-in. He sees only that game: lineups (with + Add guest) and the scorecard. The pass ends when the game is final, or when the manager or admin turns it off.' },
+    { q:'Who can make a scorekeeper pass?', a:'Either manager of the game, as long as nobody has made one yet — making it makes his team the scorekeeping team, and the other manager sees “Pass given by …”. Once the game has started, only the manager of the team keeping score (or the admin) can make one. The admin can always make one for either team, change the scorekeeping team, or turn a pass off. “New code” replaces the code; the old one stops working.' },
+    { q:'Is the pass scorekeeper recorded?', a:'Yes. His name is saved as the game’s scorekeeper, marked 🔑 scorekeeper pass, and shows on the Officials line, the Umpires & scorekeepers report and its Excel export. The admin can edit it.' },
     { q:'What does (DR) mean next to a runner?', a:'A designated runner is running for that batter. If he scores, the run counts for the batter, not the runner. Live Feed play-by-play shows who ran for whom.' },
     { q:'Can my manager set the lineup before the game?', a:'Yes. Managers set their team’s batting order and positions for upcoming games on the Lineup tab. The scorekeeper checks both lineups when starting the game on the Scorecard.' },
     { q:'Who keeps score?', a:'Only one team keeps the official scorecard for each game. Whoever starts the game picks Home or Away as scorekeeper in the Start game step; the league admin can change it. The other team watches on Live Feed.' },
