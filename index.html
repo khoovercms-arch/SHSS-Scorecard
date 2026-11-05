@@ -1598,7 +1598,7 @@ function rescopeTeams(){
 function tourneyTeams(sid){ return (S.allTeams||[]).filter(t=>t.tournamentSeasonId===sid); }
 function tourneyRoster(tid, sid){ return (S.allPlayersForFeed||[]).filter(p=>p.teamId===tid && p.seasonId===sid).sort((a,b)=>(a.order||99)-(b.order||99)); }
 // ---- run limit per half-inning ----
-function endHalfInning(game){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
+function endHalfInning(game){ game.outs=0; game.base={first:null,second:null,third:null}; game.ebSet=1; game.ebSetRuns=0; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
 // ---- tournament rules: run limits with open innings, and run rules (mercy), each by game length ----
 function tLimits(c){ c=c||{}; if(Array.isArray(c.limits)) return c.limits; if(+c.runLimit){ const n=+c.innings||7; return [{len:0,runs:+c.runLimit,open:c.openLast?[n]:[],openExtra:!!c.openLast}]; } return []; }
 function tMercy(c){ c=c||{}; return Array.isArray(c.mercyRules)?c.mercyRules:[]; }
@@ -1608,10 +1608,83 @@ function gameLen(game){ const c=rulesCfg(seasonById(game.seasonId))||{}; return 
 function ruleFor(list, len){ return list.find(r=>+r.len===len) || list.find(r=>!+r.len) || null; }
 function limitRowFor(game){ const c=rulesCfg(seasonById(game&&game.seasonId)); if(!c) return null; return ruleFor(tLimits(c), gameLen(game)); }
 function inningOpen(row, inning, len){ if(inning>len) return !!row.openExtra; return (row.open||[]).map(Number).includes(+inning); }
+/* ===================== EVERYONE BATS EVERY INNING =====================
+   Optional rule (Season Rules or Tournament Rules). At 3 outs, if anyone in the lineup hasn't batted this half-inning,
+   the bases clear, the outs start over and the same team keeps batting. The side is over once everyone has batted
+   (from the second set on) or when the second set reaches its outs (1, 2, 3 — or "no limit": clear again every 3 outs).
+   If everyone bats before the first 3 outs, play continues to 3 outs as usual. */
+function ebRule(game){
+  const sn=seasonById(game&&game.seasonId); if(!sn) return null;
+  const c=isTourneySeason(sn)?tourneyCfg(sn):(sn.seasonRules||null);
+  return c && c.everyoneBats ? c : null;
+}
+function ebSet2Outs(c){ const v=c&&c.ebOuts; return (v===0||v==='0')?0:(+v||3); }
+function ebLineupIds(game, side){ return ((game[side]&&game[side].players)||[]).filter(p=>p.name&&p.name.trim()).map(p=>p.id); }
+function ebRemaining(game){
+  const side=battingSide(game); const done=new Set((game.atbats||[]).filter(a=>a.side===side && a.inning===game.inning && a.half===game.half).map(a=>a.playerId));
+  return ebLineupIds(game, side).filter(id=>!done.has(id));
+}
+function ebOutLimit(game){ const c=ebRule(game); const s=game.ebSet||1; if(!c || s===1) return 3; const n=ebSet2Outs(c); return n===0?3:n; }
+// call when outs reach the limit; returns 'newSet' or 'over'
+function ebAtOutLimit(game){
+  const c=ebRule(game); const s=game.ebSet||1;
+  if(c){ const rem=ebRemaining(game); const n=ebSet2Outs(c);
+    if(rem.length && (s===1 || n===0)){ game.outs=0; game.base={first:null,second:null,third:null}; game.ebSet=s+1; game.ebSetRuns=(game.score[battingSide(game)]||{})[game.inning]||0; return 'newSet'; } }
+  endHalfInning(game); return 'over';
+}
+// after an at-bat in the second set or later: everyone has batted → side over
+function ebAllBattedCheck(game){
+  const c=ebRule(game); if(!c || (game.ebSet||1)<2) return false;
+  if(ebRemaining(game).length) return false;
+  endHalfInning(game); return true;
+}
+function ebNewSetAlert(game, side){
+  const rem=ebRemaining(game); const team=(game[side]||{}).name||'This team';
+  const next=((game[side]||{}).players||[]).filter(p=>p.name&&p.name.trim()).sort((a,b)=>(a.order||99)-(b.order||99)).find(p=>p.order===nextBatterOrderForSide(game,side));
+  const c=ebRule(game); const n=ebSet2Outs(c);
+  ruleAlert('#24332a','🔄','Keep batting', team+': '+rem.length+' player'+(rem.length===1?'':'s')+' still to bat',
+    h('div',{},['Bases are cleared and the outs start over. The side is over once everyone has batted'+(n===0?'.':' or at '+n+' more out'+(n===1?'':'s')+'.'),
+      h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin-top:8px;'},'“End the half-inning” is for when the umpire calls it.')]),
+    'OK — next batter'+(next?': '+playerInitialLast(next.name):''), async()=>{},
+    'End the half-inning', async()=>{ const last=(game.atbats||[]).filter(a=>a.side===side && a.inning===game.inning && a.half===game.half).slice(-1)[0]; if(last) last.ebEnd=true;
+      endHalfInning(game); await saveGame(game,{atbats:game.atbats,outs:game.outs,base:game.base,half:game.half,inning:game.inning,ebSet:game.ebSet||1}); toast('Half-inning over'); });
+}
+function ebLine(c){ const n=ebSet2Outs(c); return 'Everyone bats every inning'+(n===0?' (no out limit)':(n===3?'':' ('+n+'-out second set)')); }
+function ebEditor(c, save, opts){
+  opts=opts||{}; const on=!!c.everyoneBats; const wrap=h('div',{style:'margin-top:'+(opts.top||'14px')+';border-top:1px solid var(--line);padding-top:12px;'});
+  const sw=h('button',{type:'button',role:'switch','aria-checked':on?'true':'false','aria-label':'Everyone bats every inning',style:'flex:none;display:flex;align-items:center;width:112px;height:40px;border-radius:20px;border:none;cursor:pointer;position:relative;padding:0;background:'+(on?'var(--grass-1)':'#b9b9b0')+';',
+    onclick:async()=>{ await save({everyoneBats:!on}); toast(!on?'Everyone bats every inning — on':'Everyone bats every inning — off'); }},[
+    h('span',{style:'position:absolute;'+(on?'left:14px;':'right:14px;')+'color:#fff;font-weight:800;font-size:14px;'},on?'YES':'NO'),
+    h('span',{style:'position:absolute;top:4px;'+(on?'right:4px;':'left:4px;')+'width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);'})]);
+  wrap.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;'},[h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Everyone bats every inning'),
+    h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px;line-height:1.45;'},'After 3 outs the bases clear and the same team keeps batting until everyone has batted — or the second set’s outs.')]), sw]));
+  if(!on) return wrap;
+  const n=ebSet2Outs(c);
+  const s1=h('select',{style:'width:auto;'}); [['1','1 out'],['2','2 outs'],['3','3 outs'],['0','No limit']].forEach(([v,l])=>s1.appendChild(h('option',{value:v},l))); s1.value=String(n); s1.addEventListener('change',()=>save({ebOuts:+s1.value}));
+  wrap.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;padding:10px 0 0;'},[h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Second set of outs'),h('div',{style:'font-size:12px;color:var(--ink-soft);'},n===0?'No limit: the whole order bats; runners clear again every 3 outs.':'The side is over at this many outs in the second set, or once everyone has batted.')]),s1]));
+  if(tLimits(c).some(r=>+r.runs)){ const s2=h('select',{style:'width:auto;'}); [['inning','Whole inning (all sets)'],['set','Each set']].forEach(([v,l])=>s2.appendChild(h('option',{value:v},l))); s2.value=c.ebRunLimit||'inning'; s2.addEventListener('change',()=>save({ebRunLimit:s2.value}));
+    wrap.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;padding:10px 0 0;'},[h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Run limit counts'),h('div',{style:'font-size:12px;color:var(--ink-soft);'},'How the run limit per inning applies with more than one set.')]),s2])); }
+  // How it reads — an example with 10 batters
+  const seq=[['1','on'],['2','on'],['3','out'],['4','out'],['5','out'],['bases clear','clr']];
+  let text;
+  if(n===0){ seq.push(['6','on'],['7','out'],['8','out'],['9','out'],['bases clear','clr'],['10','on'],['side over','clr']); text='Batters 1–2 reach, 3–5 make 3 outs → runners clear. 6–10 keep batting; runners clear again every 3 outs. Once #10 has batted the side is over.'; }
+  else if(n===1){ seq.push(['6','on'],['7','out'],['side over','clr']); text='Batters 1–2 reach, 3–5 make 3 outs → runners clear. #6 reaches, #7 makes the 1 out of the second set → side over (8–10 lead off next inning).'; }
+  else if(n===2){ seq.push(['6','on'],['7','out'],['8','on'],['9','out'],['side over','clr']); text='Batters 1–2 reach, 3–5 make 3 outs → runners clear. 6–9 bat; 2 more outs → side over (#10 leads off next inning).'; }
+  else { seq.push(['6','on'],['7','on'],['8','out'],['9','on'],['10','last'],['side over','clr']); text='Batters 1–2 reach, 3–5 make 3 outs → runners clear, outs back to 0. 6–10 bat → once #10 has batted the side is over (or sooner, at 3 more outs).'; }
+  const col={on:'#1f7a3f',out:'#a8322a',clr:'#5f6b62',last:'#d9a53a'};
+  wrap.appendChild(h('div',{style:'background:#eef3ee;border-radius:10px;padding:10px 12px;font-size:12.5px;line-height:1.55;margin-top:12px;'},[
+    h('b',{style:'color:var(--grass-1);'},'How it reads — example with 10 batters:'),
+    h('div',{style:'display:flex;gap:4px;flex-wrap:wrap;margin:6px 0;'},seq.map(([t,k])=>h('span',{style:'min-width:26px;height:26px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:10.5px;font-weight:800;padding:0 6px;color:'+(k==='last'?'#24332a':'#fff')+';background:'+col[k]+';'},t))),
+    text+' If everyone bats before the first 3 outs, play continues to 3 outs as usual. Your real games use each game’s own lineup.']));
+  return wrap;
+}
+
 function runCapFor(game){
   const row=limitRowFor(game); if(!row||!+row.runs) return 0;
   if(game.capKeep && game.capKeep===game.inning+game.half) return 0;
-  return inningOpen(row, game.inning||1, gameLen(game)) ? 0 : +row.runs;
+  if(inningOpen(row, game.inning||1, gameLen(game))) return 0;
+  { const e=ebRule(game); if(e && e.ebRunLimit==='set' && (game.ebSet||1)>1) return +row.runs + (+game.ebSetRuns||0); }
+  return +row.runs;
 }
 function mercyRulesFor(game){ const c=rulesCfg(seasonById(game&&game.seasonId)); if(!c) return []; const len=gameLen(game); const all=tMercy(c); const exact=all.filter(r=>+r.len===len); return (exact.length?exact:all.filter(r=>!+r.len)).slice().sort((a,b)=>a.after-b.after); }
 function ordinal(n){ n=+n; const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
@@ -1620,6 +1693,7 @@ function limitText(row, len){ if(!row||!+row.runs) return ''; const open=(row.op
 function mercyText(list){ return list.length?'Run rule: '+list.map(r=>r.lead+' after '+r.after).join(', '):''; }
 function tourneyRulesLine(sn, game){
   const c=rulesCfg(sn)||{}; const len=game?gameLen(game):(+c.innings||7); const bits=[];
+  { const ec=isTourneySeason(sn)?tourneyCfg(sn):(sn&&sn.seasonRules); if(ec && ec.everyoneBats) bits.push(ebLine(ec)); }
   const row=ruleFor(tLimits(c),len); if(row&&+row.runs) bits.push(limitText(row,len));
   bits.push(len+' innings');
   if(+c.timeLimit) bits.push(c.timeLimit+'-min time limit');
@@ -1627,7 +1701,7 @@ function tourneyRulesLine(sn, game){
   return bits.join(' · ');
 }
 function tourneyRulesBanner(game){
-  const sn=seasonById(game&&game.seasonId); if(!rulesCfg(sn)) return null; const T=isTourneySeason(sn); const line=tourneyRulesLine(sn, game); if(!line) return null;
+  const sn=seasonById(game&&game.seasonId); if(!rulesCfg(sn) && !ebRule(game)) return null; const T=isTourneySeason(sn); const line=tourneyRulesLine(sn, game); if(!line) return null;
   const row=limitRowFor(game); const side=battingSide(game); const now=(game.score&&game.score[side]&&game.score[side][game.inning])||0; const cap=runCapFor(game);
   const hl=(game.half==='top'?'Top ':'Bot ')+game.inning;
   let pill=null;
@@ -1637,6 +1711,7 @@ function tourneyRulesBanner(game){
     else if(now>=cap-1) pill=h('span',{style:'font-weight:800;background:#ffe9b8;border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},'⚠ '+hl+' · '+now+' of '+cap+' — one run from the limit');
     else pill=h('span',{style:'font-weight:800;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},hl+' · this inning: '+now+' of '+cap);
   }
+  if(!game.completed && ebRule(game) && (game.ebSet||1)>1){ const left=ebRemaining(game).length; pill=h('span',{style:'display:inline-flex;gap:6px;flex-wrap:wrap;'},[pill, h('span',{style:'font-weight:800;background:#d9a53a;color:#24332a;border-radius:10px;padding:3px 9px;'},'Set '+(game.ebSet||1)+' · '+left+' batter'+(left===1?'':'s')+' left')]); }
   return h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:'+(T?'#fff6dc;border:1.5px solid var(--gold)':'#eef3ee;border:1.5px solid #8fb39a')+';border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;'},[h('b',{},T?'🏆 Tournament rules':'📋 Season rules'),h('span',{style:'flex:1;min-width:200px;'},line),pill]);
 }
 // ---- alerts ----
@@ -1655,7 +1730,7 @@ function runLimitAlert(game, side, cap){
     h('div',{},['The '+cap+'-run limit is reached, so ',h('b',{},'the side is retired'),'. Runners left on base don’t score. ',h('b',{},other),' bats next ('+nextHalf+').',
       h('div',{style:'font-size:12.5px;color:var(--ink-soft);margin-top:8px;'},'Keep playing lets this half-inning continue (for example, if the umpire rules otherwise). Mistakes can be fixed on the Scorecard.')]),
     'OK — next half-inning', async()=>{ const last=(game.atbats||[]).slice(-1)[0]; if(last && last.side===side && last.inning===inn) last.runLimitEnd=true; else { game.runnerOuts=(game.runnerOuts||[]); }
-      endHalfInning(game); await saveGame(game,{atbats:game.atbats,outs:game.outs,base:game.base,half:game.half,inning:game.inning,capKeep:null}); toast('🚩 Run limit — '+team+'’s half-inning is over ('+cap+' runs)'); setTimeout(()=>mercyCheck(game),400); },
+      endHalfInning(game); await saveGame(game,{atbats:game.atbats,outs:game.outs,base:game.base,half:game.half,inning:game.inning,capKeep:null,ebSet:1,ebSetRuns:0}); toast('🚩 Run limit — '+team+'’s half-inning is over ('+cap+' runs)'); setTimeout(()=>mercyCheck(game),400); },
     'Keep playing', async()=>{ await saveGame(game,{capKeep:inn+half}); toast('Run limit set aside for this half-inning'); });
 }
 function mercyCheck(game){
@@ -1766,6 +1841,7 @@ function tourneyView(root){
   rc.appendChild(row('Innings per game',sel(c.innings||7,[5,6,7,8,9].map(n=>[n,n+' innings']),v=>save({innings:+v}))));
   rc.appendChild(row('Time limit',sel(c.timeLimit||0,[[0,'None']].concat([45,50,55,60,65,70,75,90].map(n=>[n,n+' minutes'])),v=>save({timeLimit:+v})),'Shown on the Scorecard as a reminder.'));
   rc.appendChild(tourneyRulesEditor(c, save));
+  rc.appendChild(ebEditor(c, save));
   rc.appendChild(row('Tiebreaker: run differential cap',sel(c.rdCap||0,[[0,'No cap']].concat([5,7,10].map(n=>[n,'±'+n+' per game'])),v=>save({rdCap:+v})),'Ties in pool standings: win %, head-to-head, run differential, fewest runs allowed.'));
   root.appendChild(rc);
   // 2 — teams
@@ -3083,24 +3159,29 @@ async function recordAtBat(game, playerId, result, zone){
   game.atbats.push(atbat);
   game.score[side][game.inning] = (game.score[side][game.inning]||0) + scoredIds.length;
   game.outs += outsForResult(result);
-  const askLimit = capped && game.outs<3;
-  if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top'){ game.half='bottom'; } else { game.half='top'; game.inning+=1; } }
-  await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning });
+  const askLimit = capped && game.outs<ebOutLimit(game);
+  let ebEvent=null;
+  if(game.outs>=ebOutLimit(game)){ const wasSet=game.ebSet||1; ebEvent=ebAtOutLimit(game); if(ebEvent==='newSet') atbat.ebNewSet=ebRemaining(game).length; else if(wasSet>1) atbat.ebEnd=true; }
+  else if(ebAllBattedCheck(game)){ ebEvent='allBatted'; atbat.ebSideOver=true; }
+  await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning, ebSet:game.ebSet||1, ebSetRuns:game.ebSetRuns||0 });
+  if(ebEvent==='newSet') ebNewSetAlert(game, side); else if(ebEvent==='allBatted') toast('Everyone has batted — side over');
   { const drS=drBefore.filter(e=>scoredIds.includes(e.forId)); if(drS.length) setTimeout(()=>toast(drS.map(e=>'🏃 '+playerInitialLast(e.runnerName)+' (DR) scores — run credited to '+playerInitialLast(e.forName)).join(' · ')),900); }
-  if(askLimit) runLimitAlert(game, side, cap); else mercyCheck(game);
+  if(askLimit) runLimitAlert(game, side, cap); else if(ebEvent!=='newSet') mercyCheck(game);
 }
 
 function recomputeGameStateFromAtBats(game){
   const atbats = game.atbats;
-  game.base={first:null,second:null,third:null}; game.outs=0; game.inning=1; game.half='top';
+  game.base={first:null,second:null,third:null}; game.outs=0; game.inning=1; game.half='top'; game.ebSet=1; game.ebSetRuns=0;
   game.score={home:{},away:{}};
   atbats.forEach(ab=>{
     applyResult(game, ab.result, ab.playerId);
     const scoredCount = ab.scoredPlayerIds ? ab.scoredPlayerIds.length : (ab.runsScored||0);
     game.score[ab.side][ab.inning] = (game.score[ab.side][ab.inning]||0) + scoredCount;
     game.outs += outsForResult(ab.result) + (ab.extraOutsAtHome||0);
-    if(ab.runLimitEnd) endHalfInning(game);
-    else if(game.outs>=3){ game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
+    // replay follows what happened at the time (flags on the at-bat), not today's settings
+    if(ab.runLimitEnd || ab.ebEnd || ab.ebSideOver) endHalfInning(game);
+    else if(ab.ebNewSet){ game.outs=0; game.base={first:null,second:null,third:null}; game.ebSet=(game.ebSet||1)+1; game.ebSetRuns=game.score[ab.side][ab.inning]||0; }
+    else if(game.outs>=3) endHalfInning(game);
   });
   (game.manualScores||[]).forEach(ms=>{ game.score[ms.side][ms.inning]=(game.score[ms.side][ms.inning]||0)+1; });
 }
@@ -3109,12 +3190,12 @@ async function undoLastAtBat(game){
   if(!game.atbats.length) return;
   const last = game.atbats.pop();
   recomputeGameStateFromAtBats(game);
-  await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning });
+  await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning, ebSet:game.ebSet||1, ebSetRuns:game.ebSetRuns||0 });
 }
 async function deleteAtBat(game,id){
   game.atbats = game.atbats.filter(a=>a.id!==id);
   recomputeGameStateFromAtBats(game);
-  await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning });
+  await saveGame(game, { atbats:game.atbats, score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning, ebSet:game.ebSet||1, ebSetRuns:game.ebSetRuns||0 });
 }
 
 function scoredEntriesForInning(game, side, inning){
@@ -3138,10 +3219,11 @@ async function revertScoredRun(game, entry){
   }
   game.score[side][inning]=Math.max(0,(game.score[side][inning]||0)-1);
   game.outs+=1;
-  let inningOver=false;
-  if(game.outs>=3){ inningOver=true; game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
-  await saveGame(game,{ atbats:game.atbats, manualScores:game.manualScores||[], score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning });
+  let inningOver=false, ebNew=false; const sideB=battingSide(game);
+  if(game.outs>=ebOutLimit(game)){ if(ebAtOutLimit(game)==='newSet') ebNew=true; else inningOver=true; }
+  await saveGame(game,{ atbats:game.atbats, manualScores:game.manualScores||[], score:game.score, outs:game.outs, base:game.base, half:game.half, inning:game.inning, ebSet:game.ebSet||1, ebSetRuns:game.ebSetRuns||0 });
   toast('Run backed out'+(inningOver?' — inning over':''));
+  if(ebNew) ebNewSetAlert(game, sideB);
 }
 async function restoreScoredRunnerToBase(game, entry, baseKey){
   if(game.base[baseKey]){ toast('That base is already occupied'); return; }
@@ -3181,10 +3263,11 @@ async function tagOutRunner(game, base, playerId){
   const evt = { id:uid(), side:battingSide(game), playerId, base, inning:game.inning, half:game.half, ts:Date.now() };
   game.runnerOuts = (game.runnerOuts||[]).concat([evt]);
   game.base[base]=null; game.outs+=1;
-  let inningOver=false;
-  if(game.outs>=3){ inningOver=true; game.outs=0; game.base={first:null,second:null,third:null}; if(game.half==='top') game.half='bottom'; else { game.half='top'; game.inning+=1; } }
-  await saveGame(game,{base:game.base,outs:game.outs,half:game.half,inning:game.inning,runnerOuts:game.runnerOuts});
+  let inningOver=false, ebNew=false; const sideR=battingSide(game);
+  if(game.outs>=ebOutLimit(game)){ if(ebAtOutLimit(game)==='newSet'){ ebNew=true; evt.ebNewSet=ebRemaining(game).length; } else inningOver=true; }
+  await saveGame(game,{base:game.base,outs:game.outs,half:game.half,inning:game.inning,runnerOuts:game.runnerOuts,ebSet:game.ebSet||1,ebSetRuns:game.ebSetRuns||0});
   toast('Runner out'+(inningOver?' — inning over':''));
+  if(ebNew) ebNewSetAlert(game, sideR);
 }
 function allPlayersInGame(game){
   const list=[];
@@ -3735,7 +3818,7 @@ function liveDiamondCard(game, canEdit){
   const stage = h('div',{class:'diamondStage'},[tagOutBox, svg, scoredPanel]);
   return h('div',{class:'card diamondCard'},[
     h('div',{class:'diamondTopRow'},[
-      h('div',{},[ h('div',{class:'diamondTitle'},'Base Diagram'), h('div',{class:'diamondInningLbl'},(game.half==='top'?'Top':'Bottom')+' '+game.inning+'  ·  '+teamName+' batting') ]),
+      h('div',{},[ h('div',{class:'diamondTitle'},'Base Diagram'), h('div',{class:'diamondInningLbl'},(game.half==='top'?'Top':'Bottom')+' '+game.inning+'  ·  '+teamName+' batting'+(ebRule(game)&&(game.ebSet||1)>1?'  ·  Set '+(game.ebSet||1):'')) ]),
       h('div',{class:'diamondOuts'},[outPip(game.outs>=1),outPip(game.outs>=2),outPip(game.outs>=3)])
     ]),
     stage,
@@ -6471,7 +6554,7 @@ function playByPlayCard(game){
       return;
     }
     if(a.kind==='ro'){
-      text = name+' out at '+(baseWord[a.base]||a.base)+' (tag/force)';
+      text = name+' out at '+(baseWord[a.base]||a.base)+' (tag/force)'+(a.ebNewSet?' — outs reached, bases cleared · '+a.ebNewSet+' still to bat':'');
     } else {
       text = name+' '+(PLAY_VERB[a.result]||a.result)+zonePhrase(a.zone);
       if(a.runsScored>0){
@@ -6479,6 +6562,9 @@ function playByPlayCard(game){
         const scorers=ids.map(id=>{ const e=drForScore(game,id,a.ts,a.inning,a.half); if(e){ credited.push(playerInitialLast(e.forName)); return playerInitialLast(e.runnerName)+' (DR)'; } return playerInitialLast(playerName(game,id)); }).join(', ');
         text += ' — '+scorers+(ids.length>1?' score':' scores')+(credited.length?', run'+(credited.length>1?'s':'')+' credited to '+credited.join(', '):'');
       }
+      if(a.ebNewSet) text += ' — outs reached, bases cleared · '+a.ebNewSet+' still to bat';
+      if(a.ebSideOver) text += ' — everyone has batted, side over';
+      if(a.ebEnd) text += ' — half-inning ended';
     }
     card.appendChild(h('div',{style:'font-size:12.5px;padding:5px 2px;border-bottom:1px solid var(--line);line-height:1.4;'+(a.kind==='ro'?'color:var(--leather-2);':'')},text+'.'));
   });
@@ -7057,6 +7143,7 @@ const HELP_KB = [
   {k:'scored home actually out undo', q:'A runner auto-scored but was out at home', a:'Drag their chip from the “Scored” column back onto “Tag / Force Out.”'},
   {k:'undo last at-bat mistake', q:'How do I undo the last play?', a:'On the Scorecard, tap Undo next to “Record at-bat” to remove the most recent at-bat.'},
   {k:'lineup batting order positions sub substitute ahead before game upcoming', q:'How do I set a lineup?', a:'Lineup tab → Select Game. Pick an Upcoming game to set your lineup ahead of time (managers edit their own team; admins both) — drag ⠿ to reorder, set positions, check Sub for a fill-in. It saves for that game and is used automatically when the game starts. During a game, pick it under In progress to make changes.'},
+  {k:'everyone bats every inning bat around lineup second set outs bases clear', q:'How does “Everyone bats every inning” work?', a:'An optional rule for any season type, off unless the admin turns it on: Admin → Settings → Season Rules (Formal, Informal, Pickup) or Admin → 🏆 Tournament → 1 · Rules. At 3 outs, if anyone in the lineup hasn’t batted that inning, the bases clear, the outs start over and the same team keeps batting. The side is over once everyone has batted, or when the second set reaches its outs (Second set of outs: 1, 2 or 3, or No limit — the whole order bats and runners clear again every 3 outs). If everyone bats before the first 3 outs, play continues to 3 outs as usual. The Scorecard shows a 🔄 Keep batting pop-up and “Set 2 · 5 batters left”; End the half-inning is there if the umpire calls it. Runs, outs and stats count as usual.'},
   {k:'designated runner dr courtesy runner pinch run base drag tap', q:'How do I use a designated runner?', a:'On the Scorecard, tap the ⠿ next to a player’s name in the scorecard, then tap the base he’s running for (on a computer you can also drag the name onto the base). The runner shows as “G.Bartok (DR)”. If he scores, the run counts for the batter he ran for. Picked the wrong one? Tap the right player — he replaces the DR on that base. The Designated runners table beside the scorecard shows each DR and how many times he ran; tap a name for the inning, who he ran for and the outcome.'},
   {k:'offline no internet signal no service field dead zone', q:'Does the app work with no internet at the field?', a:'Yes. When the signal drops, a thin 📴 Offline bar appears and scoring keeps working — plays are saved on the phone and upload by themselves when you’re back in range (the bar turns green: “Back online — 3 changes uploaded”). Live Feed, Chat, Challenges, notices and sign-in need internet. Before going to a field with poor signal, open the Scorecard while you still have internet and check “Ready for the field?”.'},
   {k:'field location directions address internet accessible map override import export template', q:'How do I add field locations?', a:'Enter a field’s location once and every game at that field shows it. On the Schedule tab, tap the field name (for example “Texas”) → enter the address or map link and Internet (Yes, Spotty or No) → Save for all Texas games. For one game at a different spot, tap that game’s field → Different location for this game only (it shows a “this game only” tag; ↩ Use the regular location puts it back). The Field locations list on the Schedule tab shows every saved field. Games at Spotty or No fields are highlighted. Anyone can tap a field for directions. The ⬇ Template and ⬇ Export files have Field, Field Address and Internet columns (Internet is a Yes/Spotty/No pick-list): fill the address once per field; a different address on a later row becomes a game-only location when you Import.'},
@@ -7181,6 +7268,7 @@ const FAQ_DATA = [
     { q:'How do I get an account?', a:'Tap “New here? Join the league” on the sign-in page, fill in the one form (league, name, phone, email and a password) and tap Join the league. Your admin approves you; until then you’ll see “Waiting for approval.” After that, just Sign In with the same email and password — every season.' },
     { q:'Does the app work at a field with no internet?', a:'Yes — scoring keeps working and uploads when you’re back in range. Fields marked ⚠ on the Schedule have poor signal: sign in and open the app before you get there.' },
     { q:'Where is the field?', a:'Tap the field name on the Schedule tab for the address and a Get directions button.' },
+    { q:'Why did my team keep batting after 3 outs?', a:'Your league uses “Everyone bats every inning”: after 3 outs the bases clear and the rest of the lineup bats. The side is over once everyone has batted (or at the second set’s outs). Your at-bats and runs count as usual.' },
     { q:'What does (DR) mean next to a runner?', a:'A designated runner is running for that batter. If he scores, the run counts for the batter, not the runner. Live Feed play-by-play shows who ran for whom.' },
     { q:'Can my manager set the lineup before the game?', a:'Yes. Managers set their team’s batting order and positions for upcoming games on the Lineup tab. The scorekeeper checks both lineups when starting the game on the Scorecard.' },
     { q:'Who keeps score?', a:'Only one team keeps the official scorecard for each game. Whoever starts the game picks Home or Away as scorekeeper in the Start game step; the league admin can change it. The other team watches on Live Feed.' },
@@ -9187,7 +9275,9 @@ function seasonRulesCard(season){
   const card=h('div',{class:'card'}); const m=seasonMethod(season);
   card.appendChild(h('h3',{},['Season Rules ',h('span',{style:'display:inline-block;font-size:10.5px;font-weight:800;border-radius:8px;padding:2px 8px;background:#e7efe7;color:var(--grass-1);vertical-align:2px;font-family:var(--font-body,inherit);'},(season.name||'This season')+' · '+methodShort(m))]));
   if(isTourneySeason(season)){ card.appendChild(h('p',{style:'font-size:13px;margin:0 0 8px;'},'🏆 This is a tournament — its rules are set in Admin → 🏆 Tournament → 1 · Rules.')); card.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ adminSub='tourney'; renderShell(); }},'Open Tournament')); return card; }
-  if(m==='pickup'){ card.appendChild(h('p',{style:'font-size:13px;margin:0;'},'🧢 Pickup season — Season Rules don’t apply, since rules can change from game to game.')); return card; }
+  if(m==='pickup'){ card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 4px;line-height:1.45;'},'🧢 Pickup season — run limits and run rules don’t apply, since rules can change from game to game. You can still have everyone bat every inning.'));
+    const pc=Object.assign({},season.seasonRules||{}); const psave=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
+    card.appendChild(ebEditor(pc, psave, {top:'8px'})); return card; }
   card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},['Game rules the Scorecard enforces for this season. Separate from ',h('b',{},'League Rules'),' (the bylaws document) and from tournament rules (Admin → 🏆 Tournament).']));
   const c=Object.assign({innings:9},season.seasonRules||{}); const on=!!c.on;
   const save=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
@@ -9197,13 +9287,14 @@ function seasonRulesCard(season){
     h('span',{style:'position:absolute;top:4px;'+(on?'right:4px;':'left:4px;')+'width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);'})]);
   card.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;padding:4px 0 10px;border-bottom:1px solid var(--line);'},[
     h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Use season rules'),h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px;'},on?'On: Formal and Informal games this season show the 📋 Season rules strip, run limit warnings and run rule prompts.':'Off: games are scored with no run limit or run rule.')]), sw]));
-  if(!on) return card;
+  if(!on){ card.appendChild(ebEditor(c, save)); return card; }
   const inn=h('select',{style:'width:auto;'}); [5,6,7,8,9].forEach(n=>inn.appendChild(h('option',{value:String(n)},n+' innings'))); inn.value=String(+c.innings||9); inn.addEventListener('change',()=>save({innings:+inn.value}));
   card.appendChild(h('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:8px;'},[h('div',{},[h('div',{style:'font-weight:700;font-size:14px;'},'Innings per game'),h('div',{style:'font-size:12px;color:var(--ink-soft);'},'Used for new games this season.')]),inn]));
   card.appendChild(tourneyRulesEditor(c, save));
   const others=(S.seasons||[]).filter(x=>x.id!==season.id && x.seasonRules && (tLimits(x.seasonRules).length||tMercy(x.seasonRules).length));
   if(others.length){ const cs=h('select',{style:'width:auto;'}); others.forEach(x=>cs.appendChild(h('option',{value:x.id},(x.name||x.id)+' ('+methodShort(seasonMethod(x))+')')));
     card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--ink-soft);'},['Copy from:',cs,h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ const src=others.find(x=>x.id===cs.value); if(!src) return; confirmModal('Copy season rules?','Replaces this season’s run limits and run rules with the ones from '+(src.name||'that season')+'.',async()=>{ const r=src.seasonRules; await save({innings:+r.innings||9,limits:tLimits(r),mercyRules:tMercy(r)}); toast('Season rules copied'); }); }},'Copy')])); }
+  card.appendChild(ebEditor(c, save));
   return card;
 }
 function scoringOptionsCard(){
