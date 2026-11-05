@@ -508,6 +508,17 @@ table.zoneTable{margin-bottom:14px;width:100%;} table.zoneTable td,table.zoneTab
 .drDetail th{text-align:left;font-size:10.5px;color:var(--ink-soft);padding:3px 2px;}
 .drDetail td{padding:3px 2px;border-top:1px solid #f0ead9;}
 .drTableHint{font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.4;}
+.cntStrip{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:7px 9px;margin:0 0 10px;}
+.cntDots{display:flex;flex-direction:column;gap:3px;font-family:var(--font-mono);font-size:12px;font-weight:800;min-width:58px;}
+.cntDot{display:inline-block;width:10px;height:10px;border-radius:50%;border:1.5px solid #9a9a90;margin-left:3px;vertical-align:-1px;}
+.cntDot.b{background:#2e8b57;border-color:#2e8b57;}.cntDot.s{background:#a8322a;border-color:#a8322a;}
+.cntNum{font-family:var(--font-mono);font-weight:900;font-size:15px;min-width:30px;text-align:center;}
+.cntBtn{flex:1;border:none;border-radius:11px;padding:11px 0;font-weight:900;font-size:15px;color:#fff;cursor:pointer;min-width:0;}
+.cntBall{background:#2e8b57;}.cntStrike{background:#a8322a;}.cntFoul{background:#fff;color:var(--ink);border:1.5px solid var(--line);}
+.cntPill{display:inline-block;font-family:var(--font-mono);font-size:11.5px;font-weight:800;background:#24332a;color:#fff;border-radius:8px;padding:2px 8px;margin:0 6px;letter-spacing:.02em;}
+.cntSeg{display:flex;border:1.5px solid var(--line);border-radius:10px;overflow:hidden;flex:none;}
+.cntSeg button{border:none;background:#fff;padding:6px 11px;font-size:13px;font-weight:700;cursor:pointer;color:var(--ink);}
+.cntSeg button.on{background:var(--grass-1);color:#fff;}
 .passBtn{border:1.5px solid var(--gold);background:#fff8e6;color:#7a5a00;border-radius:14px;padding:3px 10px;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;}
 .passBtn.on{background:var(--gold);color:#2a1f05;}
 .passBtn.sm{font-size:10.5px;padding:2px 7px;margin-left:6px;}
@@ -1697,6 +1708,73 @@ function ebEditor(c, save, opts){
   return wrap;
 }
 
+/* ===================== BALLS & STRIKES (optional, Season Rules / Tournament rules) =====================
+   Off by default. When on, the Scorecard shows one strip: count dots + Ball / Strike / Foul.
+   The count lives on the game as game.pitch = {n:<at-bats so far>, inning, half, log:['B','S','F']}; any new at-bat makes it stale = fresh count. */
+function countRule(game){
+  const sn=seasonById(game&&game.seasonId)||currentSeason(); if(!sn) return null;
+  const c=isTourneySeason(sn)?tourneyCfg(sn):(sn.seasonRules||null);
+  return c && c.countOn ? c : null;
+}
+function countState(game){
+  const c=countRule(game); if(!c) return null;
+  const one=c.countStart==='1-1'; const B=+c.countBalls||4, K=+c.countStrikes||3;
+  const p=game.pitch; const log=(p && p.n===(game.atbats||[]).length && p.inning===game.inning && p.half===game.half)?(p.log||[]).slice():[];
+  let b=one?1:0, s=one?1:0, foulOut=false;
+  log.forEach(x=>{ if(x==='B') b++; else if(x==='S') s++; else if(x==='F'){ if(s<K-1) s++; else if(c.countFoul2==='out'){ s=K; foulOut=true; } } });
+  return {b:Math.min(b,B), s:Math.min(s,K), B, K, log, foulOut, c};
+}
+function countPill(game){ const st=countState(game); return st?h('span',{class:'cntPill'},'Count '+st.b+'–'+st.s):null; }
+function countBatter(game){ const side=battingSide(game); const order=nextBatterOrderForSide(game,side); return ((game[side]||{}).players||[]).find(p=>p.order===order && p.name)||null; }
+function countSetLog(game, log){ game.pitch={n:(game.atbats||[]).length, inning:game.inning, half:game.half, log}; renderShell(); return saveGame(game,{pitch:game.pitch}); }
+async function pitchTap(game, x){
+  const st=countState(game); if(!st) return;
+  if(st.b>=st.B || st.s>=st.K){ countLimitAlert(game); return; }
+  await countSetLog(game, st.log.concat([x]));
+  const ns=countState(game); if(ns.b>=ns.B || ns.s>=ns.K) countLimitAlert(game);
+}
+let countAlertOpen=false;
+function countLimitAlert(game){
+  if(countAlertOpen || document.querySelector('.modalOverlay')) return;
+  const st=countState(game); if(!st) return; const p=countBatter(game); const nm=p?p.name:'The batter'; const n0=(game.atbats||[]).length;
+  countAlertOpen=true; setTimeout(()=>{ countAlertOpen=false; },400);
+  const notYet=async()=>{ if((game.atbats||[]).length!==n0) return; await countSetLog(game, st.log.slice(0,-1)); };
+  if(st.b>=st.B){
+    const forced=[]; if(game.base.first){ forced.push(playerInitialLast(playerName(game,game.base.first))+' to second'); if(game.base.second){ forced.push(playerInitialLast(playerName(game,game.base.second))+' to third'); if(game.base.third) forced.push(playerInitialLast(playerName(game,game.base.third))+' scores'); } }
+    ruleAlert('#1f7a3f','🚶','Ball '+(st.B===3?'three':'four'),'Walk', h('div',{},nm+' to first'+(forced.length?' · '+forced.join(' · '):'')+'.'),
+      'OK — record walk', async()=>{ if(!p){ openAtBatModal(game); return; } await recordAtBat(game,p.id,'BB',null); renderShell(); }, 'Not yet', notYet);
+  } else {
+    ruleAlert('#a8322a','⚾', st.foulOut?'Foul with 2 strikes':'Strike '+(st.K===2?'two':'three'),'Strikeout', h('div',{},nm+' is out'+(st.foulOut?' — foul with 2 strikes is an out in this league.':'.')),
+      'OK — record strikeout', async()=>{ if(!p){ openAtBatModal(game); return; } await recordAtBat(game,p.id,'SO',null); renderShell(); }, 'Not yet', notYet);
+  }
+}
+function countStrip(game){
+  const st=countState(game); if(!st) return null;
+  const dots=(n,max,cls)=>Array.from({length:max-(cls==='b'?1:1)},(_,i)=>h('span',{class:'cntDot'+(i<n?' '+cls:'')}));
+  return h('div',{class:'cntStrip'},[
+    h('div',{class:'cntDots'},[h('div',{},['B',...dots(st.b,st.B,'b')]),h('div',{},['S',...dots(st.s,st.K,'s')])]),
+    h('div',{class:'cntNum'},st.b+'–'+st.s),
+    h('button',{class:'cntBtn cntBall',onclick:()=>pitchTap(game,'B')},'Ball'),
+    h('button',{class:'cntBtn cntStrike',onclick:()=>pitchTap(game,'S')},'Strike'),
+    h('button',{class:'cntBtn cntFoul',onclick:()=>pitchTap(game,'F')},'Foul')]);
+}
+function countEditor(c, save, opts){
+  opts=opts||{}; const on=!!c.countOn; const wrap=h('div',{style:'margin-top:14px;border-top:1px solid var(--line);padding-top:12px;'});
+  const sw=h('button',{type:'button',role:'switch','aria-checked':on?'true':'false','aria-label':'Keep balls and strikes',style:'flex:none;display:flex;align-items:center;width:112px;height:40px;border-radius:20px;border:none;cursor:pointer;position:relative;padding:0;background:'+(on?'var(--grass-1)':'#b9b9b0')+';',
+    onclick:async()=>{ const patch={countOn:!on}; if(!on && !c.countBalls) Object.assign(patch,{countStart:'0-0',countBalls:4,countStrikes:3,countFoul2:'stay'}); await save(patch); toast(!on?'Balls & strikes — on':'Balls & strikes — off'); }},[
+    h('span',{style:'position:absolute;'+(on?'left:14px;':'right:14px;')+'color:#fff;font-weight:800;font-size:14px;'},on?'YES':'NO'),
+    h('span',{style:'position:absolute;top:4px;'+(on?'right:4px;':'left:4px;')+'width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);'})]);
+  wrap.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;'},[h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'⚾ Keep balls & strikes'),
+    h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px;line-height:1.45;'},on?'The Scorecard shows a Ball / Strike / Foul strip. Ball four or strike three asks to record the walk or strikeout.':'Off: the Scorecard looks the same as always.')]), sw]));
+  if(!on) return wrap;
+  const seg=(label,sub,key,val,opts2)=>{ const s=h('div',{class:'cntSeg'}); opts2.forEach(([v,l])=>s.appendChild(h('button',{type:'button',class:String(val)===String(v)?'on':'',onclick:()=>save({[key]:v})},l)));
+    return h('div',{style:'display:flex;align-items:center;gap:12px;padding:10px 0 0;'},[h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},label),sub?h('div',{style:'font-size:12px;color:var(--ink-soft);'},sub):null]),s]); };
+  wrap.appendChild(seg('Count starts at','', 'countStart', c.countStart||'0-0', [['0-0','0–0'],['1-1','1–1']]));
+  wrap.appendChild(seg('Walk on','', 'countBalls', +c.countBalls||4, [[3,'3 balls'],[4,'4 balls']]));
+  wrap.appendChild(seg('Strikeout on','', 'countStrikes', +c.countStrikes||3, [[2,'2 strikes'],[3,'3 strikes']]));
+  wrap.appendChild(seg('Foul with 2 strikes','Many senior leagues: a foul on the last strike is an out', 'countFoul2', c.countFoul2||'stay', [['stay','Stays 2'],['out','Is out']]));
+  return wrap;
+}
 function runCapFor(game){
   const row=limitRowFor(game); if(!row||!+row.runs) return 0;
   if(game.capKeep && game.capKeep===game.inning+game.half) return 0;
@@ -1860,6 +1938,7 @@ function tourneyView(root){
   rc.appendChild(row('Time limit',sel(c.timeLimit||0,[[0,'None']].concat([45,50,55,60,65,70,75,90].map(n=>[n,n+' minutes'])),v=>save({timeLimit:+v})),'Shown on the Scorecard as a reminder.'));
   rc.appendChild(tourneyRulesEditor(c, save));
   rc.appendChild(ebEditor(c, save));
+  rc.appendChild(countEditor(c, save));
   rc.appendChild(row('Tiebreaker: run differential cap',sel(c.rdCap||0,[[0,'No cap']].concat([5,7,10].map(n=>[n,'±'+n+' per game'])),v=>save({rdCap:+v})),'Ties in pool standings: win %, head-to-head, run differential, fewest runs allowed.'));
   root.appendChild(rc);
   // 2 — teams
@@ -4005,6 +4084,7 @@ Router.register('scorecard', (root)=>{
   root.appendChild(gameIntegrityCard(game));
 
   root.appendChild(liveDiamondCard(game, canEdit));
+  if(canEdit && !game.completed){ const cs=countStrip(game); if(cs) root.appendChild(cs); }
   if(canEdit){
     root.appendChild(h('div',{style:'display:flex;gap:8px;margin-bottom:14px;'},[
       h('button',{class:'btn btn-gold',style:'flex:1;',onclick:()=>openAtBatModal(game)},'Record at-bat'),
@@ -4153,6 +4233,7 @@ function tagOutPickerModal(game, occupiedBases){
   overlay.appendChild(sheet); document.body.appendChild(overlay);
 }
 function undoConfirm(game){
+  { const st=countState(game); if(st && st.log.length){ const x=st.log[st.log.length-1]; countSetLog(game, st.log.slice(0,-1)); toast('Last pitch undone ('+({B:'ball',S:'strike',F:'foul'}[x])+')'); return; } }
   if(!game.atbats.length){ toast('No at-bats to undo'); return; }
   const last=game.atbats[game.atbats.length-1];
   confirmModal('Undo last at-bat?', 'This undoes just the most recent at-bat — '+playerName(game,last.playerId)+', Inning '+last.inning+': '+RESULTS[last.result].label+'.', ()=>undoLastAtBat(game).then(()=>{toast('Last at-bat undone');renderShell();}), {danger:true, confirmLabel:'Undo'});
@@ -6638,7 +6719,7 @@ function atBatPlayerCard(game){
   if(!b) return null;
   const pc=playerCardFor(b)||{}; const today=pcTodayLine(game,b.id), season=seasonStatsForPlayer(b.id, game.seasonId), streak=pcHitStreak(game,b.id);
   const card=h('div',{class:'card pcCard'});
-  card.appendChild(h('div',{class:'pcHead'},[h('span',{class:'pcAtBat'},'AT BAT'), h('span',{class:'pcTeam'},team.name)]));
+  card.appendChild(h('div',{class:'pcHead'},[h('span',{class:'pcAtBat'},'AT BAT'), countPill(game), h('span',{class:'pcTeam'},team.name)]));
   const photo=pc.photo || testAvatar(b.name||b.id);
   const pic=h('div',{class:'pcPic'},[h('img',{src:photo,alt:b.name}), b.number?h('span',{class:'pcNum'},'#'+b.number):null]);
   if(pc.photo) pic.addEventListener('click',()=>openPhotoView(pc.photo));
@@ -6769,7 +6850,7 @@ function atBatCard(game){
   const order = nextBatterOrderForSide(game, side);
   const batter = (team.players||[]).find(p=>p.order===order && p.name && p.name.trim()) || (team.players||[]).filter(p=>p.name&&p.name.trim()).sort((a,b)=>(a.order||99)-(b.order||99))[0];
   const card = h('div',{class:'card'});
-  card.appendChild(h('h3',{},['Now Batting', h('span',{style:'font-size:11px;color:var(--ink-soft);font-weight:600;'},team.name)]));
+  card.appendChild(h('h3',{},['Now Batting', countPill(game), h('span',{style:'font-size:11px;color:var(--ink-soft);font-weight:600;'},team.name)]));
   if(!batter){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'Lineup not set for this side yet.')); return card; }
   card.appendChild(h('div',{style:'display:flex;align-items:center;gap:10px;margin-bottom:12px;'},[
     h('div',{class:'orderBadge',style:'width:30px;height:30px;font-size:13px;'},String(batter.order||'')),
@@ -7433,6 +7514,7 @@ const HELP_KB = [
   {k:'undo last at-bat mistake', q:'How do I undo the last play?', a:'On the Scorecard, tap Undo next to “Record at-bat” to remove the most recent at-bat.'},
   {k:'lineup batting order positions sub substitute ahead before game upcoming', q:'How do I set a lineup?', a:'Lineup tab → Select Game. Pick an Upcoming game to set your lineup ahead of time (managers edit their own team; admins both) — drag ⠿ to reorder, set positions, check Sub for a fill-in. It saves for that game and is used automatically when the game starts. During a game, pick it under In progress to make changes.'},
   {k:'everyone bats every inning bat around lineup second set outs bases clear', q:'How does “Everyone bats every inning” work?', a:'An optional rule for any season type, off unless the admin turns it on: Admin → Settings → Season Rules (Formal, Informal, Pickup) or Admin → 🏆 Tournament → 1 · Rules. At 3 outs, if anyone in the lineup hasn’t batted that inning, the bases clear, the outs start over and the same team keeps batting. The side is over once everyone has batted, or when the second set reaches its outs (Second set of outs: 1, 2 or 3, or No limit — the whole order bats and runners clear again every 3 outs). If everyone bats before the first 3 outs, play continues to 3 outs as usual. The Scorecard shows a 🔄 Keep batting pop-up and “Set 2 · 5 batters left”; End the half-inning is there if the umpire calls it. Runs, outs and stats count as usual.'},
+  {k:'balls strikes count pitch walk strikeout foul ball strike 1-1 two strike foul out', q:'How do balls and strikes work?', a:'It’s a league option, off by default: Admin → Settings → Season Rules → ⚾ Keep balls & strikes (tournaments: Tournament → 1 · Rules). Pick the starting count (0–0 or 1–1), walk on 3 or 4 balls, strikeout on 2 or 3 strikes, and whether a foul with 2 strikes is an out. On the Scorecard tap Ball, Strike or Foul for each pitch. At ball four or strike three a pop-up asks to record the walk or strikeout. Undo takes back the last pitch. The count starts fresh for every batter.'},
   {k:'scorekeeper pass code qr guest scorekeeper no account anonymous 6 digit key pass someone else keep score', q:'How do I let someone keep score without an account?', a:'Use a scorekeeper pass. On the Scorecard (or Schedule) tab, tap 🔑 Pass next to the game, then 🔑 Make pass. Show him the QR code, read him the 6-digit code, or tap Send by text. He opens the app, taps “Have a scorekeeper code?”, types the code and his name, and scores just that game — no sign-in. Either manager can make it before the game starts (it makes his team the scorekeeper); after the start, only the scorekeeping team’s manager or the admin. It ends when the game is final; Turn off or New code any time.'},
   {k:'pass given by other manager scorekeeper pass turned off ended exit', q:'What does “Pass given by …” mean?', a:'The other team’s manager made a scorekeeper pass for this game, so his team keeps the official score. You follow along on Live Feed and can challenge a play. If a pass shows “turned off” or “game final”, the scorekeeper just taps Exit.'},
   {k:'designated runner dr courtesy runner pinch run base drag tap', q:'How do I use a designated runner?', a:'On the Scorecard, tap the ⠿ next to a player’s name in the scorecard, then tap the base he’s running for (on a computer you can also drag the name onto the base). The runner shows as “G.Bartok (DR)”. If he scores, the run counts for the batter he ran for. Picked the wrong one? Tap the right player — he replaces the DR on that base. The Designated runners table beside the scorecard shows each DR and how many times he ran; tap a name for the inning, who he ran for and the outcome.'},
@@ -7560,6 +7642,7 @@ const FAQ_DATA = [
     { q:'Does the app work at a field with no internet?', a:'Yes — scoring keeps working and uploads when you’re back in range. Fields marked ⚠ on the Schedule have poor signal: sign in and open the app before you get there.' },
     { q:'Where is the field?', a:'Tap the field name on the Schedule tab for the address and a Get directions button.' },
     { q:'Why did my team keep batting after 3 outs?', a:'Your league uses “Everyone bats every inning”: after 3 outs the bases clear and the rest of the lineup bats. The side is over once everyone has batted (or at the second set’s outs). Your at-bats and runs count as usual.' },
+    { q:'Can the scorekeeper keep balls and strikes?', a:'Yes, if your league turns it on (Admin → Settings → Season Rules, or Tournament → Rules). It’s off by default. When on, the Scorecard shows one strip under the diamond: the count and Ball / Strike / Foul buttons. Ball four or strike three asks to record the walk or strikeout — tap OK, or Not yet if it was a mis-tap. Undo takes back the last pitch first. Live Feed shows the count beside the batter. The count is optional — Record at-bat works the same either way.' },
     { q:'What is a scorekeeper pass?', a:'A way for someone without an account to keep score for one game. A manager of either team (or the admin) taps 🔑 Pass next to the game on the Scorecard or Schedule tab and shares the QR code or 6-digit code (Send by text works too). The scorekeeper opens the app, taps “Have a scorekeeper code?”, types the code and his name — no sign-in. He sees only that game: lineups (with + Add guest) and the scorecard. The pass ends when the game is final, or when the manager or admin turns it off.' },
     { q:'Who can make a scorekeeper pass?', a:'Either manager of the game, as long as nobody has made one yet — making it makes his team the scorekeeping team, and the other manager sees “Pass given by …”. Once the game has started, only the manager of the team keeping score (or the admin) can make one. The admin can always make one for either team, change the scorekeeping team, or turn a pass off. “New code” replaces the code; the old one stops working.' },
     { q:'Is the pass scorekeeper recorded?', a:'Yes. His name is saved as the game’s scorekeeper, marked 🔑 scorekeeper pass, and shows on the Officials line, the Umpires & scorekeepers report and its Excel export. The admin can edit it.' },
@@ -9571,7 +9654,7 @@ function seasonRulesCard(season){
   if(isTourneySeason(season)){ card.appendChild(h('p',{style:'font-size:13px;margin:0 0 8px;'},'🏆 This is a tournament — its rules are set in Admin → 🏆 Tournament → 1 · Rules.')); card.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ adminSub='tourney'; renderShell(); }},'Open Tournament')); return card; }
   if(m==='pickup'){ card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 4px;line-height:1.45;'},'🧢 Pickup season — run limits and run rules don’t apply, since rules can change from game to game. You can still have everyone bat every inning.'));
     const pc=Object.assign({},season.seasonRules||{}); const psave=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
-    card.appendChild(ebEditor(pc, psave, {top:'8px'})); return card; }
+    card.appendChild(ebEditor(pc, psave, {top:'8px'})); card.appendChild(countEditor(pc, psave)); return card; }
   card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},['Game rules the Scorecard enforces for this season. Separate from ',h('b',{},'League Rules'),' (the bylaws document) and from tournament rules (Admin → 🏆 Tournament).']));
   const c=Object.assign({innings:9},season.seasonRules||{}); const on=!!c.on;
   const save=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
@@ -9581,7 +9664,7 @@ function seasonRulesCard(season){
     h('span',{style:'position:absolute;top:4px;'+(on?'right:4px;':'left:4px;')+'width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);'})]);
   card.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;padding:4px 0 10px;border-bottom:1px solid var(--line);'},[
     h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Use season rules'),h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px;'},on?'On: Formal and Informal games this season show the 📋 Season rules strip, run limit warnings and run rule prompts.':'Off: games are scored with no run limit or run rule.')]), sw]));
-  if(!on){ card.appendChild(ebEditor(c, save)); return card; }
+  if(!on){ card.appendChild(ebEditor(c, save)); card.appendChild(countEditor(c, save)); return card; }
   const inn=h('select',{style:'width:auto;'}); [5,6,7,8,9].forEach(n=>inn.appendChild(h('option',{value:String(n)},n+' innings'))); inn.value=String(+c.innings||9); inn.addEventListener('change',()=>save({innings:+inn.value}));
   card.appendChild(h('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:8px;'},[h('div',{},[h('div',{style:'font-weight:700;font-size:14px;'},'Innings per game'),h('div',{style:'font-size:12px;color:var(--ink-soft);'},'Used for new games this season.')]),inn]));
   card.appendChild(tourneyRulesEditor(c, save));
@@ -9589,6 +9672,7 @@ function seasonRulesCard(season){
   if(others.length){ const cs=h('select',{style:'width:auto;'}); others.forEach(x=>cs.appendChild(h('option',{value:x.id},(x.name||x.id)+' ('+methodShort(seasonMethod(x))+')')));
     card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--ink-soft);'},['Copy from:',cs,h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ const src=others.find(x=>x.id===cs.value); if(!src) return; confirmModal('Copy season rules?','Replaces this season’s run limits and run rules with the ones from '+(src.name||'that season')+'.',async()=>{ const r=src.seasonRules; await save({innings:+r.innings||9,limits:tLimits(r),mercyRules:tMercy(r)}); toast('Season rules copied'); }); }},'Copy')])); }
   card.appendChild(ebEditor(c, save));
+  card.appendChild(countEditor(c, save));
   return card;
 }
 function scoringOptionsCard(){
