@@ -508,6 +508,22 @@ table.zoneTable{margin-bottom:14px;width:100%;} table.zoneTable td,table.zoneTab
 .drDetail th{text-align:left;font-size:10.5px;color:var(--ink-soft);padding:3px 2px;}
 .drDetail td{padding:3px 2px;border-top:1px solid #f0ead9;}
 .drTableHint{font-size:11px;color:var(--ink-soft);margin-top:6px;line-height:1.4;}
+.srSec{display:flex;align-items:center;gap:8px;font-size:11.5px;font-weight:900;letter-spacing:.08em;text-transform:uppercase;color:var(--grass-1);margin:16px 0 2px;padding-top:12px;border-top:2px solid var(--line);}
+.srNum{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--grass-1);color:#fff;font-size:11.5px;font-weight:900;letter-spacing:0;}
+.srSwitch{flex:none;display:flex;align-items:center;width:112px;height:40px;border-radius:20px;border:none;cursor:pointer;position:relative;padding:0;background:#b9b9b0;}
+.srSwitch.on{background:var(--grass-1);}
+.srSwTxt{position:absolute;right:14px;color:#fff;font-weight:800;font-size:14px;}.srSwitch.on .srSwTxt{right:auto;left:14px;}
+.srKnob{position:absolute;top:4px;left:4px;width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);}.srSwitch.on .srKnob{left:auto;right:4px;}
+.poTag{display:inline-block;font-size:10.5px;font-weight:900;border-radius:7px;padding:1px 7px;background:#fff3cf;color:#7a5a00;white-space:nowrap;}
+.poSeed{display:inline-block;font-size:11.5px;font-weight:800;border:1.5px dashed #c9b98f;border-radius:7px;padding:0 6px;color:#7a5a00;background:#fffaf0;}
+.poChip{border:1.5px solid var(--line);background:#fff;border-radius:14px;padding:4px 10px;font-size:12px;font-weight:800;cursor:pointer;color:var(--ink);}
+.poChip.on{background:var(--grass-1);border-color:var(--grass-1);color:#fff;}
+.poFilter{border-radius:14px;padding:5px 11px;font-size:12px;font-weight:800;cursor:pointer;border:1.5px solid var(--gold);background:#fff8e6;color:#7a5a00;}
+.poFilter.on{background:var(--gold);color:#2a1f05;}
+.poRibbonRow td{background:linear-gradient(90deg,#f3d27a,#fff3cf);color:#5a4100;border-left:5px solid var(--gold);font-weight:900;font-size:12px;letter-spacing:.05em;}
+tr.poRow td{background:#fffcf3;}
+.poPlanTbl td,.poPlanTbl th{vertical-align:middle;font-size:12.5px;}
+.poPlanTbl .schedIn{width:auto;}
 .cntStrip{display:flex;align-items:center;gap:8px;background:#fff;border:1.5px solid var(--line);border-radius:14px;padding:7px 9px;margin:0 0 10px;}
 .cntDots{display:flex;flex-direction:column;gap:3px;font-family:var(--font-mono);font-size:12px;font-weight:800;min-width:58px;}
 .cntDot{display:inline-block;width:10px;height:10px;border-radius:50%;border:1.5px solid #9a9a90;margin-left:3px;vertical-align:-1px;}
@@ -1561,6 +1577,9 @@ function statsSeasonChips(){
   wrap.appendChild(h('span',{style:'font-size:11px;font-weight:800;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.04em;margin-right:2px;'},'Stats for'));
   list.forEach(x=>{ const on=x.id===S.currentSeasonId; const m=seasonMethod(x);
     wrap.appendChild(h('button',{style:'border-radius:14px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '+(on?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ if(on) return; S.currentSeasonId=x.id; S.activeGameId=null; switchSeasonListeners(); renderShell(); }},[x.name, h('span',{style:'font-size:9.5px;font-weight:800;margin-left:5px;opacity:.75;'},methodShort(m))])); });
+  if((S.allGamesForFeed||[]).some(g=>g.playoff && g.seasonId===S.currentSeasonId)){ const ph=S.statsPhase||'all';
+    wrap.appendChild(h('span',{style:'width:1px;height:20px;background:var(--line);margin:0 4px;'}));
+    [['reg','Regular season'],['po','🏆 Playoffs'],['all','All']].forEach(([id,l])=>{ const on=ph===id; wrap.appendChild(h('button',{style:'border-radius:14px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '+(on?'var(--gold);background:var(--gold);color:#2a1f05;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ S.statsPhase=id; renderShell(); }},l)); }); }
   return wrap;
 }
 function leagueSchedule(){
@@ -1605,10 +1624,10 @@ function switchTeamListeners(){
 function cleanupSeasonListeners(){ unsub.season.forEach(fn=>fn()); unsub.season=[]; }
 function switchSeasonListeners(){
   cleanupSeasonListeners(); rescopeTeams();
-  currentPlayoff = null;
+  currentPlayoff = null; rawPlayoff = null;
   if(!S.currentSeasonId) return;
   unsub.season.push(onSnapshot(doc(db,'draftStates',S.currentSeasonId), snap=>{ S.draft = snap.exists()?snap.data():null; renderShell(); }));
-  unsub.season.push(onSnapshot(doc(db,'playoffs',S.currentSeasonId), snap=>{ currentPlayoff = snap.exists()?snap.data():null; renderShell(); }));
+  unsub.season.push(onSnapshot(doc(db,'playoffs',S.currentSeasonId), snap=>{ rawPlayoff = snap.exists()?snap.data():null; currentPlayoff = (rawPlayoff && rawPlayoff.v===2) ? poDerive(rawPlayoff) : rawPlayoff; renderShell(); }));
   syncPoolTeam();
 }
 /* ===================== TOURNAMENT MODE =====================
@@ -1633,9 +1652,9 @@ function tLimits(c){ c=c||{}; if(Array.isArray(c.limits)) return c.limits; if(+c
 function tMercy(c){ c=c||{}; return Array.isArray(c.mercyRules)?c.mercyRules:[]; }
 function seasonRulesOn(sn){ return !!(sn && !isTourneySeason(sn) && ['draft','informal'].includes(seasonMethod(sn)) && sn.seasonRules && sn.seasonRules.on); }
 function rulesCfg(sn){ if(!sn) return null; if(isTourneySeason(sn)) return tourneyCfg(sn); return seasonRulesOn(sn)?sn.seasonRules:null; }
-function gameLen(game){ const c=rulesCfg(seasonById(game.seasonId))||{}; return +game.inningsPlanned || +c.innings || 7; }
+function gameLen(game){ const c=gameCfg(game)||{}; return +game.inningsPlanned || +c.innings || 7; }
 function ruleFor(list, len){ return list.find(r=>+r.len===len) || list.find(r=>!+r.len) || null; }
-function limitRowFor(game){ const c=rulesCfg(seasonById(game&&game.seasonId)); if(!c) return null; return ruleFor(tLimits(c), gameLen(game)); }
+function limitRowFor(game){ const c=gameCfg(game); if(!c) return null; return ruleFor(tLimits(c), gameLen(game)); }
 function inningOpen(row, inning, len){ if(inning>len) return !!row.openExtra; return (row.open||[]).map(Number).includes(+inning); }
 /* ===================== EVERYONE BATS EVERY INNING =====================
    Optional rule (Season Rules or Tournament Rules). At 3 outs, if anyone in the lineup hasn't batted this half-inning,
@@ -1782,13 +1801,13 @@ function runCapFor(game){
   { const e=ebRule(game); if(e && e.ebRunLimit==='set' && (game.ebSet||1)>1) return +row.runs + (+game.ebSetRuns||0); }
   return +row.runs;
 }
-function mercyRulesFor(game){ const c=rulesCfg(seasonById(game&&game.seasonId)); if(!c) return []; const len=gameLen(game); const all=tMercy(c); const exact=all.filter(r=>+r.len===len); return (exact.length?exact:all.filter(r=>!+r.len)).slice().sort((a,b)=>a.after-b.after); }
+function mercyRulesFor(game){ const c=gameCfg(game); if(!c) return []; const len=gameLen(game); const all=tMercy(c); const exact=all.filter(r=>+r.len===len); return (exact.length?exact:all.filter(r=>!+r.len)).slice().sort((a,b)=>a.after-b.after); }
 function ordinal(n){ n=+n; const s=['th','st','nd','rd'], v=n%100; return n+(s[(v-20)%10]||s[v]||s[0]); }
 function limitText(row, len){ if(!row||!+row.runs) return ''; const open=(row.open||[]).map(Number).filter(i=>i<=len).sort((a,b)=>a-b); const parts=open.map(ordinal); if(row.openExtra) parts.push('extras');
   return 'Max '+row.runs+' runs per inning'+(parts.length?' ('+parts.join(', ').replace(/, ([^,]*)$/,' & $1')+' open)':''); }
 function mercyText(list){ return list.length?'Run rule: '+list.map(r=>r.lead+' after '+r.after).join(', '):''; }
 function tourneyRulesLine(sn, game){
-  const c=rulesCfg(sn)||{}; const len=game?gameLen(game):(+c.innings||7); const bits=[];
+  const c=(game?gameCfg(game):rulesCfg(sn))||{}; const len=game?gameLen(game):(+c.innings||7); const bits=[];
   { const ec=isTourneySeason(sn)?tourneyCfg(sn):(sn&&sn.seasonRules); if(ec && ec.everyoneBats) bits.push(ebLine(ec)); }
   const row=ruleFor(tLimits(c),len); if(row&&+row.runs) bits.push(limitText(row,len));
   bits.push(len+' innings');
@@ -1797,7 +1816,7 @@ function tourneyRulesLine(sn, game){
   return bits.join(' · ');
 }
 function tourneyRulesBanner(game){
-  const sn=seasonById(game&&game.seasonId); if(!rulesCfg(sn) && !ebRule(game)) return null; const T=isTourneySeason(sn); const line=tourneyRulesLine(sn, game); if(!line) return null;
+  const sn=seasonById(game&&game.seasonId); if(!gameCfg(game) && !ebRule(game)) return null; const T=isTourneySeason(sn); const line=tourneyRulesLine(sn, game); if(!line) return null;
   const row=limitRowFor(game); const side=battingSide(game); const now=(game.score&&game.score[side]&&game.score[side][game.inning])||0; const cap=runCapFor(game);
   const hl=(game.half==='top'?'Top ':'Bot ')+game.inning;
   let pill=null;
@@ -1808,7 +1827,7 @@ function tourneyRulesBanner(game){
     else pill=h('span',{style:'font-weight:800;background:#fff;border:1px solid var(--line);border-radius:10px;padding:3px 9px;'},hl+' · this inning: '+now+' of '+cap);
   }
   if(!game.completed && ebRule(game) && (game.ebSet||1)>1){ const left=ebRemaining(game).length; pill=h('span',{style:'display:inline-flex;gap:6px;flex-wrap:wrap;'},[pill, h('span',{style:'font-weight:800;background:#d9a53a;color:#24332a;border-radius:10px;padding:3px 9px;'},'Set '+(game.ebSet||1)+' · '+left+' batter'+(left===1?'':'s')+' left')]); }
-  return h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:'+(T?'#fff6dc;border:1.5px solid var(--gold)':'#eef3ee;border:1.5px solid #8fb39a')+';border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;'},[h('b',{},T?'🏆 Tournament rules':'📋 Season rules'),h('span',{style:'flex:1;min-width:200px;'},line),pill]);
+  return h('div',{style:'display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:'+(T?'#fff6dc;border:1.5px solid var(--gold)':'#eef3ee;border:1.5px solid #8fb39a')+';border-radius:12px;padding:9px 12px;margin-bottom:12px;font-size:13px;'},[h('b',{},T?'🏆 Tournament rules':(poRulesOn(game)?'🏆 Playoff rules':(game&&game.playoff?'🏆 Playoffs · 📋 Season rules':'📋 Season rules'))),h('span',{style:'flex:1;min-width:200px;'},line),pill]);
 }
 // ---- alerts ----
 function ruleAlert(color, icon, title, big, body, okLabel, onOk, keepLabel, onKeep){
@@ -2435,6 +2454,7 @@ function flushTabUsage(){
 window.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='hidden'){ flushTabUsage(); tabSessionStart=Date.now(); } else { tabSessionStart=Date.now(); } });
 window.addEventListener('pagehide', flushTabUsage);
 function renderShell(){
+  try{ refreshPlayoff(); }catch(e){ console.warn('playoffs',e); }
   { const spOn=!!(S.user && S.profile && S.profile.role==='sponsor' && !isSuperAdmin()); const spw=document.getElementById('sponsorWrap'); if(spw && !spOn) spw.remove();
     if(spOn){ ['authWrap','pendingWrap','mainUI'].forEach(id=>{ const e=document.getElementById(id); if(e) e.classList.add('hidden'); }); const dr=document.getElementById('drawerRoot'); if(dr) dr.remove(); ['helpFab','helpPanel','appMark','geezerSpeaker','geezerPicker'].forEach(id=>{ const e=document.getElementById(id); if(e) e.remove(); }); renderSponsorPortal(); return; } }
   if(S.activeTab==='history'){ S.activeTab='report'; reportView='batting'; } // Batting History merged into Report
@@ -2612,7 +2632,8 @@ function renderShell(){
     }
   }
   const fn = Router.tabs[S.activeTab];
-  if(fn) fn(content); else content.appendChild(h('p',{},'Not available.'));
+  if(fn){ const ph=S.statsPhase; if(ph && ph!=='all' && ['report','hitzone'].includes(S.activeTab)){ const all=S.allGamesForFeed; S.allGamesForFeed=all.filter(g=>ph==='po'?!!g.playoff:!g.playoff); try{ fn(content); } finally { S.allGamesForFeed=all; } } else fn(content); }
+  else content.appendChild(h('p',{},'Not available.'));
   { const ad=geezerAdBox(S.activeTab, S.activeTab==='chat'?{preferNonGold:true}:null); if(ad) content.appendChild(ad); }
   content.appendChild(h('p',{class:'copyright'},'\u00a9 '+new Date().getFullYear()+' Geezer Ball Scorecard. All rights reserved.'));
   const oldMark=document.getElementById('appMark'); if(oldMark) oldMark.remove();
@@ -3449,7 +3470,7 @@ function schedSides(sched){
 function schedWhen(s){ return formatDate(s.date)+(s.time?' · '+fmtSchedTime(s.time):'')+(s.location?' · '+s.location:''); }
 function fmtSchedTime(t){ const m=/^(\d{1,2}):(\d{2})$/.exec(t||''); if(!m) return t||''; let hh=+m[1]; const ap=hh>=12?'PM':'AM'; hh=hh%12||12; return hh+':'+m[2]+' '+ap; }
 function upcomingSchedForLineup(){
-  const list=(isAdmin()?leagueSchedule():seasonSchedule()).filter(s=>!s.completed && !s.pickup && s.matchupId && (s.date||'')>=(()=>{ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })() && !(S.allGamesForFeed||[]).some(g=>g.matchupId===s.matchupId));
+  const list=(isAdmin()?leagueSchedule():seasonSchedule()).concat(S.passMode?[]:poReadyRows(!isAdmin())).filter(s=>!s.completed && !s.pickup && s.matchupId && (s.date||'')>=(()=>{ const d=new Date(); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })() && !(S.allGamesForFeed||[]).some(g=>g.matchupId===s.matchupId));
   return list.sort((a,b)=>((a.date||'')+(a.time||'')).localeCompare((b.date||'')+(b.time||'')));
 }
 async function sideLineupPlayers(matchupId, teamId){
@@ -3543,6 +3564,7 @@ async function createGameFromWizard(sched, sd, L, keeper, pickup){
   const pad=list=>{ const out=list.map((p,i)=>({id:p.id||uid(),name:p.name||'',number:p.number||'',position:p.position||'',order:i+1,isSub:!!p.isSub,subTeamName:p.subTeamName||''})); while(out.length<14) out.push({id:uid(),name:'',number:'',position:'',order:out.length+1,isSub:false,subTeamName:''}); return out; };
   const ordered=side=>(L[side].players||[]).slice().sort((a,b)=>(a.order||99)-(b.order||99));
   const base={date:sched.date, seasonId:S.currentSeasonId, matchupId:sched.matchupId||null, location:sched.location||'', scorekeeperSide:keeper, scorekeeperSetBy:(S.user&&S.user.email)||null, scorekeeperSetAt:Date.now(), challenges:[], ackedIssues:[], atbats:[], manualScores:[], score:{home:{},away:{}}, base:{first:null,second:null,third:null}, outs:0, inning:1, half:'top', completed:false, leagueNote:''};
+  if(sched.playoff){ base.playoff=true; base.poKey=sched.poKey; base.poLabel=sched.poLabel; }
   if(S.passMode){ base.scorekeeperName=S.passMode.name+PASS_TAG; base.scorekeeperPass=S.passMode.code; base.scorekeeperSetBy='scorekeeper pass'; }
   if(pickup){
     if(sched.teamId && S.selectedTeamId!==sched.teamId){ S.selectedTeamId=sched.teamId; switchTeamListeners(); }
@@ -3554,7 +3576,8 @@ async function createGameFromWizard(sched, sd, L, keeper, pickup){
     try{ const os=await getDocsNet(collection(db,'teams',sched.opponentTeamId,'games')); const d=os.docs.find(x=>x.data().matchupId===sched.matchupId);
       if(d){ toast('The other team already started this game — opening it'); useGame({id:d.id, teamId:sched.opponentTeamId, ...d.data()}); return; } }catch(e){}
   }
-  const innings=isTourneySeason()?(+tourneyCfg().innings||7):(seasonRulesOn(currentSeason())&&+currentSeason().seasonRules.innings?+currentSeason().seasonRules.innings:9);
+  let innings=isTourneySeason()?(+tourneyCfg().innings||7):(seasonRulesOn(currentSeason())&&+currentSeason().seasonRules.innings?+currentSeason().seasonRules.innings:9);
+  if(sched.playoff){ const pc=gameCfg({playoff:true, seasonId:S.currentSeasonId}); if(pc && +pc.innings) innings=+pc.innings; }
   const ref=doc(collection(db,'teams',sched.teamId||S.selectedTeamId,'games')); await netWrite(setDoc(ref,Object.assign(base,{opponent:sched.opponent, opponentTeamId:sched.opponentTeamId||null, homeAway:sched.homeAway,
     home:{name:sd.home.name,coach:'',players:pad(ordered('home'))}, away:{name:sd.away.name,coach:'',players:pad(ordered('away'))}, inningsPlanned:innings})));
   S.activeGameId=ref.id; S.activeTab='scorecard'; renderShell();
@@ -3579,6 +3602,7 @@ function passMySide(sched){ const t=myTeamId(); if(!t) return null; const s=pass
 function passStartedGame(sched){ return (S.allGamesForFeed||[]).find(g=>g.matchupId && g.matchupId===sched.matchupId)||null; }
 function canMakePassFor(sched){
   if(S.passMode || !sched || !sched.matchupId || sched.completed) return false;
+  if(sched.playoff && !(sched.teamId && sched.opponentTeamId)) return false;
   const g=passStartedGame(sched); if(g && g.completed) return false;
   if(isAdmin()) return true;
   if(!isManager()) return false;
@@ -3609,7 +3633,7 @@ async function createPass(sched, side, old){
   const data={ code, active:true, leagueId:S.currentLeagueId||null, seasonId:sched.seasonId||S.currentSeasonId||null, matchupId:sched.matchupId,
     schedTeamId:sched.teamId||S.selectedTeamId||null, pickup:!!sched.pickup, side, homeTeamId:sides.home, awayTeamId:sides.away,
     homeName:sd.home.name||'Home', awayName:sd.away.name||'Away', teamName:(sd[side]||{}).name||'', date:sched.date||'', time:sched.time||'', location:sched.location||'',
-    createdBy:(S.user&&S.user.uid)||null, createdByName:(S.profile&&S.profile.displayName)||'', createdByEmail:(S.user&&S.user.email)||null, createdAt:Date.now() };
+    playoff:!!sched.playoff, poKey:sched.poKey||null, poLabel:sched.poLabel||null, createdBy:(S.user&&S.user.uid)||null, createdByName:(S.profile&&S.profile.displayName)||'', createdByEmail:(S.user&&S.user.email)||null, createdAt:Date.now() };
   if(sched.pickup) data.poolNames=pickupPool(sched.seasonId||S.currentSeasonId).map(x=>({id:x.id,name:x.name||'',pos:x.pos||''}));   // names only — no contact details
   await setDoc(doc(db,'scorePasses',code), data);
   if(old) try{ await updateDoc(doc(db,'scorePasses',old.code),{active:false, endedAt:Date.now(), endedBy:(S.user&&S.user.email)||null, replacedBy:code}); }catch(e){}
@@ -3738,7 +3762,7 @@ async function loadPassData(){
   const sc=P.schedTeamId?await opt(getDocs(query(collection(db,'teams',P.schedTeamId,'schedule'),where('matchupId','==',P.matchupId)))):null;
   let rows=sc?sc.docs.map(d=>({id:d.id, teamId:P.schedTeamId, ...d.data()})).filter(r=>r.matchupId===P.matchupId):[];
   if(!rows.length) rows=[{id:'pass_'+P.matchupId, teamId:P.schedTeamId, matchupId:P.matchupId, seasonId:P.seasonId, date:P.date, time:P.time, location:P.location, pickup:!!P.pickup, homeName:P.homeName, awayName:P.awayName,
-    homeAway:P.schedTeamId===P.awayTeamId?'away':'home', opponent:P.schedTeamId===P.awayTeamId?P.homeName:P.awayName, opponentTeamId:P.schedTeamId===P.awayTeamId?P.homeTeamId:P.awayTeamId, completed:false}];
+    playoff:!!P.playoff, poKey:P.poKey||undefined, poLabel:P.poLabel||undefined, homeAway:P.schedTeamId===P.awayTeamId?'away':'home', opponent:P.schedTeamId===P.awayTeamId?P.homeName:P.awayName, opponentTeamId:P.schedTeamId===P.awayTeamId?P.homeTeamId:P.awayTeamId, completed:false}];
   S.schedule=rows; S.allScheduleForFeed=rows;
   const pl=[]; for(const t of [P.homeTeamId,P.awayTeamId].filter(Boolean)){ const d=await opt(getDocs(collection(db,'teams',t,'players'))); if(d) d.docs.forEach(x=>pl.push({id:x.id, teamId:t, ...x.data()})); }
   S.allPlayersForFeed=pl; S.players=pl.filter(p=>p.teamId===P.schedTeamId);
@@ -4054,7 +4078,7 @@ Router.register('scorecard', (root)=>{
 
   if(!game){
     const admin = isAdmin() || !!S.passMode;
-    const upcoming = (admin ? leagueSchedule() : seasonSchedule()).filter(g=>!g.completed).sort((a,b)=>new Date(a.date)-new Date(b.date));
+    const upcoming = (admin ? leagueSchedule() : seasonSchedule()).concat(S.passMode?[]:poReadyRows(!isAdmin())).filter(g=>!g.completed).sort((a,b)=>new Date(a.date||'2999-01-01')-new Date(b.date||'2999-01-01'));
     if(!S.passMode){ const rc=readyForFieldCard(upcoming); if(rc) root.appendChild(rc); }
     const card = h('div',{class:'card'}); card.appendChild(h('h3',{}, S.passMode ? 'Your game' : admin ? 'Scheduled Games (league)' : 'Scheduled Games'));
     if(!upcoming.length){
@@ -4062,7 +4086,7 @@ Router.register('scorecard', (root)=>{
     } else {
       upcoming.forEach(sched=>{
         const started = S.allGamesForFeed.find(g=>g.matchupId && g.matchupId===sched.matchupId && !g.completed);
-        const label = sched.pickup ? schedLabel(sched, admin) : (admin ? ((sched.homeAway==='away'?sched.opponent:teamNameById(sched.teamId))+' vs '+(sched.homeAway==='away'?teamNameById(sched.teamId):sched.opponent))
+        const label = sched.playoff ? ['🏆 ',h('span',{class:'poTag'},sched.poLabel),' ',teamNameAny(sched.opponentTeamId)+' at '+teamNameAny(sched.teamId)] : sched.pickup ? schedLabel(sched, admin) : (admin ? ((sched.homeAway==='away'?sched.opponent:teamNameById(sched.teamId))+' vs '+(sched.homeAway==='away'?teamNameById(sched.teamId):sched.opponent))
                             : ((sched.homeAway==='away' ? '@ ' : 'vs ')+sched.opponent));
         const rowEdit = admin || canEdit;
         card.appendChild(h('div',{class:'gameListRow', onclick: rowEdit ? ()=>findOrCreateGameFromSchedule(sched) : null, style: rowEdit?'cursor:pointer;':''},[
@@ -4109,7 +4133,7 @@ Router.register('scorecard', (root)=>{
     root.appendChild(h('div',{class:'card'},[
       h('h3',{},'Finish game'),
       h('p',{style:'font-size:13px;color:var(--ink-soft);margin:0 0 12px;line-height:1.5;'},'Marks this game final and moves it into History.'),
-      h('button',{class:'btn btn-primary btn-block',onclick:()=>confirmModal('Save & archive this game?','This marks the game Final and moves it to History.',async()=>{ await saveGame(game,{completed:true}); toast('Game archived'); })},'Save & archive game')
+      h('button',{class:'btn btn-primary btn-block',onclick:()=>poTieCheck(game) || confirmModal('Save & archive this game?','This marks the game Final and moves it to History.',async()=>{ await saveGame(game,{completed:true}); toast('Game archived'); })},'Save & archive game')
     ]));
   }
 });
@@ -4422,7 +4446,7 @@ function openAtBatModal(game, presetPlayer, presetInning, presetSide){
   sheet.appendChild(batterSel);
   sheet.appendChild(h('div',{class:'fieldRow',style:'margin-top:10px;'},[h('label',{},'Result')]));
   const chipWrap=h('div',{class:'resultChipGrid'});
-  const HIDDEN=leagueErrSacFly()?['HBP']:['E','SF','HBP'];
+  const HIDDEN=gameErrSacFly(game)?['HBP']:['E','SF','HBP'];
   Object.keys(RESULTS).forEach(code=>{
     if(HIDDEN.includes(code)) return;
     const chip=h('button',{class:'resultChip '+resultClass(code)},[h('span',{class:'rcCode'},code), h('span',{class:'rcLabel'},RESULTS[code].label)]);
@@ -4753,11 +4777,12 @@ function isMyGame(g){ const t=myTeamId(); if(g.pickup) return true; if(!t) retur
 let scheduleEditing=false, scheduleAdd=null;
 function schedPlayed(g){ return S.allGamesForFeed.find(x=>x.matchupId && x.matchupId===g.matchupId) || null; }
 function schedStatus(g){ const p=schedPlayed(g); const t=todayISO();
+  if(g.virtualPo && !p){ if(!g.ready) return g.started?{label:'Waiting',bg:'#fff3cf',fg:'#7a5a00'}:{label:'Seeds at start',bg:'#fff3cf',fg:'#7a5a00'}; if(!g.date) return {label:'Date not set',bg:'#eee',fg:'#777'}; }
   if(p && p.completed) return {label:'Final',bg:'#dfe9e1',fg:'var(--grass-1)'};
   if(p) return {label:'● Active',bg:'var(--leather-2)',fg:'#fff'};
   if(g.date && g.date<t) return {label:'Not played',bg:'#eee',fg:'#777'};
   return {label:'Upcoming',bg:'#fff3cf',fg:'#7a5a00'}; }
-function schedTeams(g){ if(g.pickup){ return {away:g.homeName||'Home', home:g.awayName||'Away', sep:'vs'}; }
+function schedTeams(g){ if(g.playoff && g.virtualPo){ const t=poSchedTeams(g); return {away:t.away, home:t.home, sep:'at', awayTbd:t.awayTbd, homeTbd:t.homeTbd}; } if(g.pickup){ return {away:g.homeName||'Home', home:g.awayName||'Away', sep:'vs'}; }
   const own=teamNameById(g.teamId||S.selectedTeamId); const home=g.homeAway==='away'?g.opponent:own, away=g.homeAway==='away'?own:g.opponent; return {away, home, sep:'at'}; }
 function schedHomeAwayIds(g){ return g.homeAway==='away' ? {home:g.opponentTeamId, away:g.teamId} : {home:g.teamId, away:g.opponentTeamId}; }
 async function schedDeleteGame(g){ const ownerId=g.teamId||S.selectedTeamId; await deleteDoc(doc(db,'teams',ownerId,'schedule',g.id)); if(g.linkedScheduleId && g.opponentTeamId){ try{ await deleteDoc(doc(db,'teams',g.opponentTeamId,'schedule',g.linkedScheduleId)); }catch(e){} } }
@@ -4785,14 +4810,15 @@ Router.register('schedule', (root)=>{
   const lg=(S.leagues||[]).find(l=>l.id===S.currentLeagueId)||{};
   const mgrEdit=!admin && isManager() && lg.schedManagerEdit===true; // admin's "Manager access" switch
   if(!admin && !mgrEdit) scheduleEditing=false;
-  const all=allLeagueSchedule();
+  const all=allLeagueSchedule().concat(...S.seasons.map(sn=>poSchedRows(sn)));
   const withGames=new Set(all.map(g=>g.seasonId));
   const chipSeasons=S.seasons.filter(x=>withGames.has(x.id)||x.status!=='ended').sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
-  if(!['all','mine','upcoming','played'].includes(scheduleSeasonFilter) && !S.seasons.some(x=>x.id===scheduleSeasonFilter)) scheduleSeasonFilter='all';
+  if(!['all','mine','upcoming','played','playoffs'].includes(scheduleSeasonFilter) && !S.seasons.some(x=>x.id===scheduleSeasonFilter)) scheduleSeasonFilter='all';
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Schedule'),h('p',{},'Every game'+(lg.name?' in '+lg.name:'')+' — by season, then date.')]));
   const chip=(id,txt)=>h('button',{style:'border-radius:14px;padding:5px 11px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '+(scheduleSeasonFilter===id?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ scheduleSeasonFilter=id; renderShell(); }},txt);
   const chips=[chip('all','All seasons')].concat(chipSeasons.map(x=>chip(x.id,x.name))).concat([chip('upcoming','Upcoming'),chip('played','Played')]);
   if(!admin) chips.push(chip('mine','My games'));
+  if(all.some(g=>g.playoff)) chips.push(h('button',{class:'poFilter'+(scheduleSeasonFilter==='playoffs'?' on':''),onclick:()=>{ scheduleSeasonFilter='playoffs'; renderShell(); }},'🏆 Playoffs'));
   root.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;'},chips));
   // admin strip
   if(admin){
@@ -4823,7 +4849,7 @@ Router.register('schedule', (root)=>{
                       : h('button',{class:'btn btn-outline btn-sm',style:'border:2px solid var(--grass-1);color:var(--grass-1);font-size:13px;padding:6px 12px;',onclick:()=>{ scheduleEditing=true; scheduleSeasonFilter='mine'; renderShell(); }},'\u270e Change my games')]));
   }
   const t=todayISO();
-  let rows=all.filter(g=>{ if(scheduleSeasonFilter==='all') return true; if(scheduleSeasonFilter==='mine') return isMyGame(g); if(scheduleSeasonFilter==='upcoming'){ const p=schedPlayed(g); return !(p&&p.completed) && (!g.date||g.date>=t); } if(scheduleSeasonFilter==='played'){ const p=schedPlayed(g); return !!p || (g.date&&g.date<t); } return g.seasonId===scheduleSeasonFilter; });
+  let rows=all.filter(g=>{ if(scheduleSeasonFilter==='all') return true; if(scheduleSeasonFilter==='playoffs') return !!g.playoff; if(scheduleSeasonFilter==='mine') return isMyGame(g); if(scheduleSeasonFilter==='upcoming'){ const p=schedPlayed(g); return !(p&&p.completed) && (!g.date||g.date>=t); } if(scheduleSeasonFilter==='played'){ const p=schedPlayed(g); return !!p || (g.date&&g.date<t); } return g.seasonId===scheduleSeasonFilter; });
   const card=h('div',{class:'card',style:'padding:0;overflow:hidden;'});
   const tbl=h('table',{class:'schedTable'});
   tbl.appendChild(h('tr',{},[h('th',{},'Date'),h('th',{class:'schedTime'},'Time'),h('th',{},'Teams'),h('th',{class:'schedField'},'Field'),h('th',{},'Internet'),h('th',{},'Score'),h('th',{},'Status'), scheduleEditing?h('th',{}):null]));
@@ -4838,40 +4864,48 @@ Router.register('schedule', (root)=>{
     const m=sn?seasonMethod(sn):null; const nT=S.teams.filter(x=>x.active!==false).length;
     const meta=sn?[ROSTER_METHODS[m].label, m==='pickup'?null:(nT+' teams'), games.length+' game'+(games.length===1?'':'s')].filter(Boolean).join(' · '):'Not filed under a season';
     tbl.appendChild(h('tr',{class:'schedRibbon'},h('td',{colspan:String(cols),style:'background:'+hexTint(color,0.13)+';border-left:5px solid '+color+';color:'+color+';'},[h('span',{style:'display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;background:'+color+';'}), (sn?sn.name:'No season').toUpperCase(), h('span',{class:'schedMeta'},meta)])));
-    games.forEach(g=>{
+    const renderRow=(g)=>{
       const st=schedStatus(g); const p=schedPlayed(g); const tm=schedTeams(g);
       const score=p?(totalRuns(p,'away')+'–'+totalRuns(p,'home')):'—';
       let dl=g.date||'—'; try{ if(g.date) dl=new Date(g.date+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'numeric',day:'numeric'}); }catch(e){}
       const past=(p&&p.completed)||(g.date&&g.date<t);
       const fi=gameFieldInfo(g); const caution=!past && fi && fi.internet && fi.internet!=='yes';
-      const tr=h('tr',{class:(past?'schedPast':'')+(caution?' schedCaution':''),style:(!scheduleEditing&&p?'cursor:pointer;':'')});
+      const tr=h('tr',{class:(past?'schedPast':'')+(caution?' schedCaution':'')+(g.playoff?' poRow':''),style:(!scheduleEditing&&p?'cursor:pointer;':'')});
       const stripe='border-left:5px solid '+hexTint(color,0.35)+';';
-      const rowEdit = scheduleEditing && (admin || isMyGame(g));
+      const rowEdit = scheduleEditing && (admin || isMyGame(g)) && !(g.virtualPo && !admin);
+      const upd=(gg,patch)=>gg.virtualPo ? poSlotUpdate(gg, patch) : updateScheduledGame(gg, patch);
       if(rowEdit){
         const ids=schedHomeAwayIds(g);
-        tr.appendChild(h('td',{style:stripe},inp('date',g.date,'',v=>updateScheduledGame(g,{date:v}))));
-        tr.appendChild(h('td',{class:'schedTime'},inp('time',g.time,'',v=>updateScheduledGame(g,{time:v}))));
+        tr.appendChild(h('td',{style:stripe},inp('date',g.date,'',v=>upd(g,{date:v}))));
+        tr.appendChild(h('td',{class:'schedTime'},inp('time',g.time,'',v=>upd(g,{time:v}))));
         if(g.pickup) tr.appendChild(h('td',{style:'white-space:nowrap;'},[inp('text',g.homeName,'Home',v=>updateScheduledGame(g,{homeName:v.trim()}),{style:'width:100px;'}),' vs ',inp('text',g.awayName,'Away',v=>updateScheduledGame(g,{awayName:v.trim(),opponent:v.trim()||'Away'}),{style:'width:100px;'})]));
+        else if(g.playoff) tr.appendChild(h('td',{title:'Playoff teams come from the bracket'},[h('span',{class:'poTag'},g.poLabel),h('br'),tm.away,' at ',tm.home]));
         else if(p) tr.appendChild(h('td',{title:'Teams can’t change once the game has been scored'},[tm.away,' at ',tm.home]));
         else if(!admin) tr.appendChild(h('td',{title:'Only an admin can change the teams'},[tm.away,' at ',tm.home]));
         else { let hId=ids.home, aId=ids.away; tr.appendChild(h('td',{style:'white-space:nowrap;'},[teamSel(aId,v=>{ aId=v; schedChangeTeams(g,hId,aId); }),' at ',teamSel(hId,v=>{ hId=v; schedChangeTeams(g,hId,aId); })])); }
-        tr.appendChild(h('td',{class:'schedField'},fieldPicker(g.location,v=>updateScheduledGame(g,{location:v}))));
+        tr.appendChild(h('td',{class:'schedField'},fieldPicker(g.location,v=>upd(g,{location:v}))));
       } else {
         tr.appendChild(h('td',{style:stripe+'white-space:nowrap;'},[dl, h('small',{class:'schedPhoneOnly'},fmtTime(g.time)||'')]));
         tr.appendChild(h('td',{class:'schedTime',style:'white-space:nowrap;'},fmtTime(g.time)||'—'));
-        const fLink=nm=>nm?h('span',{class:'fieldLink',onclick:ev=>{ ev.stopPropagation(); if(admin && !g.pickup) fieldAdminModal(nm,g); else fieldInfoModal(nm,g); }},nm):'—';
+        const fLink=nm=>nm?h('span',{class:'fieldLink',onclick:ev=>{ ev.stopPropagation(); if(admin && !g.pickup && !g.virtualPo) fieldAdminModal(nm,g); else fieldInfoModal(nm,g); }},nm):'—';
         const fAddr=fi&&fi.address&&!/^https?:/i.test(fi.address)?h('span',{class:'fieldAddr'},fi.address):null; const fTag=fi&&fi.override?h('span',{class:'fieldOv'},'this game only'):null;
-        tr.appendChild(h('td',{},[tm.away+' '+tm.sep+' '+tm.home, h('small',{class:'schedPhoneOnly'},fLink(g.location))]));
+        tr.appendChild(h('td',{},[g.playoff?h('span',{class:'poTag'},g.poLabel):null, g.playoff?h('br'):null, g.playoff?h('span',{},[tm.awayTbd?h('span',{class:'poSeed'},tm.away):tm.away,' at ',tm.homeTbd?h('span',{class:'poSeed'},tm.home):tm.home]):tm.away+' '+tm.sep+' '+tm.home, h('small',{class:'schedPhoneOnly'},fLink(g.location))]));
         tr.appendChild(h('td',{class:'schedField'},[fLink(g.location), fTag, fAddr]));
       }
       tr.appendChild(h('td',{style:'white-space:nowrap;'},[internetBadge(fi), caution?h('div',{class:'netNote'},'Sign in & open the app before you get there'):null]));
       tr.appendChild(h('td',{style:'font-family:var(--font-mono);font-weight:800;white-space:nowrap;'},score));
       tr.appendChild(h('td',{style:'white-space:nowrap;'},[h('span',{style:'font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:10px;white-space:nowrap;background:'+st.bg+';color:'+st.fg+';'},st.label), scheduleEditing?null:passButton(g,true)]));
       if(scheduleEditing && !admin) tr.appendChild(h('td',{}));
-      if(scheduleEditing && admin) tr.appendChild(h('td',{},h('button',{title:'Remove game',style:'background:none;border:none;color:var(--leather-2);font-weight:900;font-size:15px;cursor:pointer;',onclick:()=>confirmModal('Remove this game?',dl+' · '+tm.away+' '+tm.sep+' '+tm.home+(p?' — it has already been scored; the scorecard stays, only the schedule entry is removed.':''),()=>schedDeleteGame(g),{danger:true})},'✕')));
+      if(scheduleEditing && admin && g.virtualPo) tr.appendChild(h('td',{}));
+      else if(scheduleEditing && admin) tr.appendChild(h('td',{},h('button',{title:'Remove game',style:'background:none;border:none;color:var(--leather-2);font-weight:900;font-size:15px;cursor:pointer;',onclick:()=>confirmModal('Remove this game?',dl+' · '+tm.away+' '+tm.sep+' '+tm.home+(p?' — it has already been scored; the scorecard stays, only the schedule entry is removed.':''),()=>schedDeleteGame(g),{danger:true})},'✕')));
       if(!scheduleEditing && p) tr.addEventListener('click',()=>{ liveFeedGameId=p.id; S.activeTab='feed'; renderShell(); });
       tbl.appendChild(tr);
-    });
+    };
+    games.filter(g=>!g.playoff).forEach(renderRow);
+    const po=games.filter(g=>g.playoff).sort((a,b)=>((a.date||'9')+(a.time||'')).localeCompare((b.date||'9')+(b.time||''))||a.poG-b.poG);
+    if(po.length){ const days=[...new Set(po.map(g=>g.date).filter(Boolean))]; let dl=''; try{ dl=days.map(d=>new Date(d+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'numeric',day:'numeric'})).join(' & '); }catch(e){}
+      tbl.appendChild(h('tr',{class:'poRibbonRow'},h('td',{colspan:String(cols)},'🏆 '+((sn&&sn.name)||'').toUpperCase()+' PLAYOFFS'+(dl?' · '+dl.toUpperCase():''))));
+      po.forEach(renderRow); }
   });
   // new-game row (admin)
   if(admin && scheduleAdd && !scheduleEditing){
@@ -5663,19 +5697,19 @@ function dedupeByMatchup(games){
 }
 function teamGameLog(teamId){
   const seasonId = S.currentSeasonId;
-  const games = dedupeByMatchup(S.allGamesForFeed.filter(g=>(!seasonId||g.seasonId===seasonId||!g.seasonId) && (g.teamId===teamId || g.opponentTeamId===teamId)));
+  const games = dedupeByMatchup(S.allGamesForFeed.filter(g=>(!seasonId||g.seasonId===seasonId||!g.seasonId) && (g.teamId===teamId || g.opponentTeamId===teamId)));   // playoff games are listed but not counted in W–L
   return games.map(g=>{
     const oSide = ownerSideOf(g); const otherSide = oSide==='home'?'away':'home';
     const isOwner = g.teamId===teamId;
     const mySide = isOwner ? oSide : otherSide;
     const oppSide = mySide==='home' ? 'away' : 'home';
     const opponent = isOwner ? (g.opponent || g[oppSide].name) : (teamNameById(g.teamId) || g[oppSide].name);
-    return { date:g.date, opponent, location:g.location||'', homeAway: mySide==='home'?'Home':'Away', myRuns: totalRuns(g,mySide), oppRuns: totalRuns(g,oppSide), result: resultForSide(g, mySide), completed:g.completed };
+    return { playoff:!!g.playoff, date:g.date, opponent:(g.playoff?'🏆 ':'')+opponent, location:g.location||'', homeAway: mySide==='home'?'Home':'Away', myRuns: totalRuns(g,mySide), oppRuns: totalRuns(g,oppSide), result: resultForSide(g, mySide), completed:g.completed };
   }).sort((a,b)=>(a.date||'').localeCompare(b.date||''));
 }
 function leagueStandings(){
   const seasonId = S.currentSeasonId;
-  const games = dedupeByMatchup(S.allGamesForFeed.filter(g=>!seasonId||g.seasonId===seasonId||!g.seasonId));
+  const games = dedupeByMatchup(S.allGamesForFeed.filter(g=>(!seasonId||g.seasonId===seasonId||!g.seasonId) && !g.playoff));
   const byTeam={};
   S.teams.forEach(t=>byTeam[t.id]={teamId:t.id,name:t.name,W:0,L:0,T:0});
   const credit=(tid,r)=>{ if(!tid||!r) return; if(!byTeam[tid]) byTeam[tid]={teamId:tid,name:teamNameById(tid),W:0,L:0,T:0}; byTeam[tid][r]++; };
@@ -5761,6 +5795,199 @@ function advancePlayoffs(p){
 }
 async function savePlayoff(p){ await setDoc(playoffRef(), p); }
 
+/* ===================== PLAYOFFS AS REAL GAMES (season playoffs, v2) =====================
+   The admin plans the playoff games ahead (date, time, field per bracket game) in Season Rules → Playoffs.
+   Start playoffs saves the seeds (playoffs/{season} {v:2, type, teamOrder, manual}). Every bracket game is then a
+   real game: Schedule, Scorecard, lineups, pass, Live Feed. The bracket is worked out from finished games
+   (matchupId 'po_<season>_<key>'), so winners move on by themselves; the admin can still type a score on Record. */
+let rawPlayoff=null;
+function poMatchList(p){
+  const out=[];
+  (p.wbRounds||[]).forEach((r,ri)=>r.forEach((m,mi)=>out.push({key:'W'+(ri+1)+'_'+(mi+1), m, wb:ri+1})));
+  (p.lbRounds||[]).forEach((r,ri)=>r.forEach((m,mi)=>out.push({key:'L'+(ri+1)+(r.length>1?'_'+(mi+1):''), m, lb:ri+1})));
+  if(p.grandFinal) out.push({key:'GF', m:p.grandFinal});
+  if(p.bracketReset) out.push({key:'GR', m:p.bracketReset});
+  return out;
+}
+function poFresh(type, teamOrder){ return advancePlayoffs({type, teamOrder, wbRounds:[buildInitialWBRound(teamOrder)], lbRounds:[], lbQueue:[], wbChampion:null, lbChampion:null, grandFinal:null, bracketReset:null, champion:null, status:'active'}); }
+// The plan: every game the bracket can have, in order, with who plays ("#1 seed", "Winner G1", "Loser G2")
+const poSimCache={};
+function poSimulate(type, n){
+  n=Math.max(2,+n||2); const ck=type+':'+n; if(poSimCache[ck]) return poSimCache[ck];
+  const order=Array.from({length:n},(_,i)=>'s'+(i+1)); const src={}; order.forEach((t,i)=>{ src[t]='#'+(i+1)+' seed'; });
+  let p=poFresh(type, order); const slots=[]; const seen=new Set();
+  const wbTotal=Math.round(Math.log2(nextPowerOf2(n)));
+  for(let guard=0; guard<80; guard++){
+    const open=poMatchList(p).filter(x=>x.m.teamA&&x.m.teamB&&!x.m.winnerId);
+    open.forEach(x=>{ if(seen.has(x.key)) return; seen.add(x.key); const g=slots.length+1; let round;
+      if(x.wb){ const fromEnd=wbTotal-x.wb; round = type==='double' ? (fromEnd===0?'Winners final':'Winners round '+x.wb) : (fromEnd===0?'Final':fromEnd===1?'Semifinal':fromEnd===2?'Quarterfinal':'Round '+x.wb); }
+      else if(x.lb) round='Losers round '+x.lb; else round='Championship';
+      slots.push({key:x.key, g, round, a:src[x.m.teamA], b:src[x.m.teamB]}); });
+    if(!open.length) break;
+    open.forEach(x=>{ const g=slots.find(s=>s.key===x.key).g; x.m.winnerId=x.m.teamA; src[x.m.teamA]='Winner G'+g; src[x.m.teamB]='Loser G'+g; });
+    p=advancePlayoffs(p);
+  }
+  if(type==='double'){ const gf=slots.find(s=>s.key==='GF'); if(gf) slots.push({key:'GR', g:slots.length+1, round:'Championship (if necessary)', a:'Same teams', b:'if needed'}); }
+  return (poSimCache[ck]=slots);
+}
+function poMatchupId(sid, key){ return 'po_'+sid+'_'+key; }
+function poGameFor(sid, key){ const mid=poMatchupId(sid,key); return (S.allGamesForFeed||[]).find(g=>g.matchupId===mid)||null; }
+function poResultFor(raw, key, m){
+  const g=poGameFor(raw.seasonId, key);
+  if(g && g.completed){ const aSide=sideTeamId(g,'home')===m.teamA?'home':'away'; const bSide=aSide==='home'?'away':'home'; return {a:totalRuns(g,aSide), b:totalRuns(g,bSide), gameId:g.id}; }
+  const mr=(raw.manual||{})[key]; if(mr && mr.a!=null && mr.b!=null) return {a:+mr.a, b:+mr.b, manual:true};
+  return null;
+}
+function poDerive(raw){
+  let p=poFresh(raw.type, raw.teamOrder||[]);
+  for(let guard=0; guard<80; guard++){
+    const open=poMatchList(p).filter(x=>x.m.teamA&&x.m.teamB&&!x.m.winnerId);
+    if(!open.length) break;
+    const res=open.map(x=>[x, poResultFor(raw, x.key, x.m)]);
+    res.forEach(([x,r])=>{ x.m.key=x.key; if(r){ x.m.scoreA=r.a; x.m.scoreB=r.b; } });
+    if(res.some(([x,r])=>!r || r.a===r.b)) break;   // a round moves on together, so the bracket comes out the same as the plan
+    res.forEach(([x,r])=>{ x.m.winnerId=r.a>r.b?x.m.teamA:x.m.teamB; });
+    p=advancePlayoffs(p);
+  }
+  poMatchList(p).forEach(x=>{ x.m.key=x.key; });
+  return Object.assign(p,{v:2, seasonId:raw.seasonId, seeding:raw.seeding, manual:raw.manual||{}, startedAt:raw.startedAt||null});
+}
+function refreshPlayoff(){ if(rawPlayoff && rawPlayoff.v===2) currentPlayoff=poDerive(rawPlayoff); }
+async function poSlotUpdate(g, patch){ const sn=seasonById(g.seasonId); if(!sn) return; const cur=Object.assign({},((sn.playoffPlan||{}).slots||{})[g.poKey]||{},patch); await savePlan(sn,{['slots.'+g.poKey]:cur}); }
+function poPlan(sn){ return (sn&&sn.playoffPlan)||null; }
+function poTeamsAvailable(){ return (S.teams||[]).filter(t=>t.active!==false); }
+// virtual schedule rows for a season's playoff games
+function poSchedRows(sn){
+  const plan=poPlan(sn); if(!plan || seasonMethod(sn)==='pickup' || isTourneySeason(sn)) return [];
+  const slots=poSimulate(plan.type||'single', plan.n||poTeamsAvailable().length);
+  const P=(sn.id===S.currentSeasonId && currentPlayoff && currentPlayoff.v===2)?currentPlayoff:null;
+  const byKey={}; if(P) poMatchList(P).forEach(x=>{ byKey[x.key]=x.m; });
+  return slots.map(s=>{ const at=(plan.slots||{})[s.key]||{}; const m=byKey[s.key]||null; const g=poGameFor(sn.id, s.key);
+    let A=m&&m.teamA||null, B=m&&m.teamB||null; if(g){ A=sideTeamId(g,'home')||A; B=sideTeamId(g,'away')||B; }
+    return {id:'po_'+s.key, virtualPo:true, playoff:true, poKey:s.key, poG:s.g, poRound:s.round, poLabel:'G'+s.g+' · '+s.round, poA:s.a, poB:s.b,
+      seasonId:sn.id, matchupId:poMatchupId(sn.id, s.key), date:at.date||'', time:at.time||'', location:at.location||'',
+      teamId:A, opponentTeamId:B, homeAway:'home', opponent:B?teamNameAny(B):(s.b||'TBD'), completed:false, ready:!!(A&&B), started:!!P, ifNecessary:s.key==='GR'};
+  }).filter(r=>r && !(r.ifNecessary && !r.ready));
+}
+function poSchedTeams(g){ return {home:g.teamId?teamNameAny(g.teamId):g.poA, away:g.opponentTeamId?teamNameAny(g.opponentTeamId):g.poB, sep:'vs', homeTbd:!g.teamId, awayTbd:!g.opponentTeamId}; }
+// playoff games ready to play (both teams known), for the Scorecard and Lineup lists
+function poReadyRows(mineOnly){ const sn=currentSeason(); if(!sn) return []; const t=myTeamId();
+  return poSchedRows(sn).filter(r=>r.ready && !(schedPlayed(r)||{}).completed && (!mineOnly || r.teamId===t || r.opponentTeamId===t)); }
+// rules for a game: playoff games can have their own
+function gameCfg(game){
+  const sn=seasonById(game&&game.seasonId);
+  if(game && game.playoff && sn && !isTourneySeason(sn)){ const po=sn.seasonRules&&sn.seasonRules.po; if(po && po.on) return po; }
+  return rulesCfg(sn);
+}
+function poRulesOn(game){ const sn=seasonById(game&&game.seasonId); return !!(game && game.playoff && sn && sn.seasonRules && sn.seasonRules.po && sn.seasonRules.po.on); }
+function gameErrSacFly(game){ const sn=seasonById(game&&game.seasonId)||currentSeason(); const v=sn&&sn.seasonRules&&sn.seasonRules.errSacFly; return typeof v==='boolean'?v:leagueErrSacFly(); }
+function poTieCheck(game){
+  if(!game.playoff || totalRuns(game,'home')!==totalRuns(game,'away')) return false;
+  ruleAlert('#a8322a','🏆','Playoffs can’t end in a tie', (game.away.name||'Away')+' '+totalRuns(game,'away')+' – '+totalRuns(game,'home')+' '+(game.home.name||'Home'),
+    h('div',{},'Add an extra inning and keep playing until there’s a winner.'),
+    'OK — add an inning', async()=>{ await saveGame(game,{inningsPlanned:(game.inningsPlanned||7)+1}); toast('Extra inning added'); renderShell(); }, 'Cancel', async()=>{});
+  return true;
+}
+// ---- Season Rules → 4 · Playoffs ----
+async function savePlan(season, patch){
+  if(!season.playoffPlan){ const base={type:'single',seeding:'standings',n:poTeamsAvailable().length,slots:{}}; Object.keys(patch).forEach(k=>{ if(k.startsWith('slots.')) base.slots[k.slice(6)]=patch[k]; else base[k]=patch[k]; }); season.playoffPlan=base; await updateDoc(doc(db,'seasons',season.id),{playoffPlan:base}); return; }
+  const up={}; Object.keys(patch).forEach(k=>up['playoffPlan.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }
+function fmtMin(m){ const hh=Math.floor(m/60)%24, mm=m%60; return String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0'); }
+function poQuickFill(slots, day, first, gap, fields, finalField){
+  const toMin=t=>{ const m=/^(\d{1,2}):(\d{2})/.exec(t||''); return m?(+m[1])*60+(+m[2]):540; };
+  const start=toMin(first); const free={}; fields.forEach(f=>{ free[f]=start; }); const end={}; const out={};
+  slots.forEach(s=>{ let ready=start; [s.a,s.b].forEach(lbl=>{ const m=/G(\d+)$/.exec(lbl||''); if(m){ const dep=slots.find(x=>x.g===+m[1]); if(dep && end[dep.key]!=null) ready=Math.max(ready,end[dep.key]); } });
+    if(s.key==='GR'){ const gf=slots.find(x=>x.key==='GF'); if(gf && end.GF!=null) ready=Math.max(ready,end.GF); }
+    const isFinal = s.key==='GF' || s.key==='GR' || s===slots.filter(x=>x.key!=='GR').slice(-1)[0];
+    let f; if(isFinal && finalField && free[finalField]!=null) f=finalField; else f=fields.slice().sort((a,b)=>Math.max(free[a],ready)-Math.max(free[b],ready))[0];
+    const t=Math.max(free[f],ready); out[s.key]={date:day, time:fmtMin(t), location:f}; free[f]=t+gap; end[s.key]=t+gap; });
+  return out;
+}
+let poFill={day:'', first:'09:00', gap:90, fields:[], final:''};
+function playoffRulesCard(season){
+  const card=h('div',{class:'card',style:'border:1.5px solid var(--gold);background:#fffcf3;'});
+  card.appendChild(h('div',{class:'srSec',style:'border-top:none;margin-top:0;padding-top:0;color:#7a5a00;'},[h('span',{class:'srNum',style:'background:var(--gold);color:#2a1f05;'},'4'),'Playoffs 🏆']));
+  const plan=poPlan(season)||{type:'single',seeding:'standings',n:poTeamsAvailable().length,slots:{}};
+  const started=!!(rawPlayoff && S.currentSeasonId===season.id);
+  const oldStyle=started && rawPlayoff.v!==2;
+  const nTeams=poTeamsAvailable().length;
+  if(nTeams<2){ card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);'},'Add at least two teams to plan playoffs.')); return card; }
+  const save=p=>savePlan(season,p).catch(e=>toast('Could not save: '+(e.message||e)));
+  const row=(label,sub,ctrl)=>h('div',{style:'display:flex;align-items:center;gap:12px;padding:8px 0;border-top:1px solid #f0ead9;'},[h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},label),sub?h('div',{style:'font-size:12px;color:var(--ink-soft);'},sub):null]),ctrl]);
+  const seg=(val,opts,on,dis)=>{ const s=h('div',{class:'cntSeg'}); opts.forEach(([v,l])=>s.appendChild(h('button',Object.assign({type:'button',class:String(val)===String(v)?'on':'',onclick:()=>{ if(!dis) on(v); }},dis?{disabled:'disabled'}:{}),l))); return s; };
+  if(oldStyle){ card.appendChild(h('p',{style:'font-size:12.5px;line-height:1.45;'},'These playoffs started before playoff games were scored on the Scorecard, so they finish the old way — scores are typed on the Record tab. Next season’s playoffs use the new way.')); }
+  card.appendChild(row('Bracket', started?'Set when playoffs started':'', seg(started&&rawPlayoff.type?rawPlayoff.type:plan.type,[['single','Single'],['double','Double']],v=>save({type:v}),started)));
+  const nSel=h('select',{style:'width:auto;'}); for(let i=2;i<=nTeams;i++) nSel.appendChild(h('option',{value:String(i)},i+' teams')); nSel.value=String(Math.min(+plan.n||nTeams,nTeams)); if(started) nSel.disabled=true; nSel.addEventListener('change',()=>save({n:+nSel.value}));
+  card.appendChild(row('Teams in the playoffs','',nSel));
+  card.appendChild(row('Seeding','',seg(plan.seeding||'standings',[['standings','Standings'],['manual','My order']],v=>save({seeding:v}),started)));
+  const n=Math.min(+plan.n||nTeams,nTeams);
+  if((plan.seeding||'standings')==='manual' && !started){
+    const box=h('div',{style:'display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px;padding:4px 0 8px;'}); const man=plan.manual||[];
+    for(let i=0;i<n;i++){ const s=h('select',{}); s.appendChild(h('option',{value:''},'#'+(i+1)+' seed…')); poTeamsAvailable().forEach(t=>{ const o=h('option',{value:t.id},'#'+(i+1)+' '+t.name); if(man[i]===t.id) o.setAttribute('selected','selected'); s.appendChild(o); });
+      s.addEventListener('change',()=>{ const m2=(plan.manual||[]).slice(); m2[i]=s.value; save({manual:m2}); }); box.appendChild(s); }
+    card.appendChild(box);
+  }
+  // playoff rules
+  { const sr=season.seasonRules||{}; const po=Object.assign({innings:+sr.innings||7, limits:[], mercyRules:[]}, sr.po||{}); const on=!!po.on;
+    const psave=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.po.'+k]=patch[k]); if(!sr.po) await updateDoc(doc(db,'seasons',season.id),{'seasonRules.po':Object.assign({innings:po.innings,limits:[],mercyRules:[]},patch)}); else await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
+    const sw=h('button',{type:'button',role:'switch','aria-checked':on?'true':'false','aria-label':'Playoff games use different rules',class:'srSwitch'+(on?' on':''),onclick:()=>psave({on:!on})},[h('span',{class:'srSwTxt'},on?'YES':'NO'),h('span',{class:'srKnob'})]);
+    card.appendChild(row('Playoff games use different rules', on?'Playoff games use the rules below':'Off: playoff games use the season’s rules', sw));
+    if(on){ const inner=h('div',{style:'border-left:3px solid var(--gold);padding-left:10px;margin:4px 0 6px;'});
+      const inn=h('select',{style:'width:auto;'}); [5,6,7,8,9].forEach(k=>inn.appendChild(h('option',{value:String(k)},k+' innings'))); inn.value=String(+po.innings||7); inn.addEventListener('change',()=>psave({innings:+inn.value}));
+      inner.appendChild(row('Innings','',inn));
+      const tl=h('select',{style:'width:auto;'}); [[0,'None']].concat([45,50,55,60,65,70,75,90].map(k=>[k,k+' minutes'])).forEach(([v,l])=>tl.appendChild(h('option',{value:String(v)},l))); tl.value=String(+po.timeLimit||0); tl.addEventListener('change',()=>psave({timeLimit:+tl.value}));
+      inner.appendChild(row('Time limit','Shown on the Scorecard as a reminder',tl));
+      inner.appendChild(tourneyRulesEditor(po, psave)); card.appendChild(inner); }
+  }
+  // playoff schedule
+  const slots=poSimulate(started&&rawPlayoff.type?rawPlayoff.type:(plan.type||'single'), started&&rawPlayoff.teamOrder?rawPlayoff.teamOrder.length:n);
+  card.appendChild(h('div',{style:'font-weight:900;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:#7a5a00;margin:14px 0 4px;'},'Playoff schedule · '+slots.length+' game'+(slots.length===1?'':'s')));
+  card.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin-bottom:8px;line-height:1.45;'},'Set the date, time and field for every playoff game — no teams needed yet. Teams fall in from the seeds, and winners move on by themselves. The games show on the Schedule under 🏆 Playoffs.'));
+  { const fields=leagueFields().map(f=>f.name); if(!poFill.fields.length) poFill.fields=fields.slice(0,1); if(!poFill.final) poFill.final=poFill.fields[0]||'';
+    const qf=h('div',{style:'background:#fff;border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px;'});
+    qf.appendChild(h('div',{style:'font-size:11px;font-weight:900;letter-spacing:.08em;color:var(--grass-1);text-transform:uppercase;margin-bottom:4px;'},'Quick-fill all games'));
+    const day=h('input',{type:'date',value:poFill.day,style:'width:auto;'}); day.addEventListener('change',()=>{ poFill.day=day.value; });
+    const first=h('input',{type:'time',value:poFill.first,style:'width:auto;'}); first.addEventListener('change',()=>{ poFill.first=first.value; });
+    const gap=h('select',{style:'width:auto;'}); [60,75,90,105,120].forEach(k=>gap.appendChild(h('option',{value:String(k)},k+' min'))); gap.value=String(poFill.gap); gap.addEventListener('change',()=>{ poFill.gap=+gap.value; });
+    qf.appendChild(row('Playoff day','',day)); qf.appendChild(row('First game','',first)); qf.appendChild(row('Time between games','',gap));
+    const chips=h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;'});
+    if(!fields.length) chips.appendChild(h('span',{style:'font-size:12px;color:var(--ink-soft);'},'Add fields on the Schedule tab (Field locations) first'));
+    fields.forEach(f=>{ const on=poFill.fields.includes(f); chips.appendChild(h('button',{type:'button',class:'poChip'+(on?' on':''),onclick:()=>{ poFill.fields=on?poFill.fields.filter(x=>x!==f):poFill.fields.concat([f]); if(!poFill.fields.includes(poFill.final)) poFill.final=poFill.fields[0]||''; renderShell(); }},(on?'✓ ':'')+f)); });
+    qf.appendChild(row('Fields','Tap every field you’re using',chips));
+    if(poFill.fields.length>1){ const fs=h('select',{style:'width:auto;'}); poFill.fields.forEach(f=>fs.appendChild(h('option',{value:f},f))); fs.value=poFill.final; fs.addEventListener('change',()=>{ poFill.final=fs.value; }); qf.appendChild(row('Final at','',fs)); }
+    qf.appendChild(h('div',{style:'margin-top:8px;'},h('button',{class:'btn btn-primary btn-sm',onclick:async()=>{ if(!poFill.day){ toast('Pick the playoff day'); return; } if(!poFill.fields.length){ toast('Pick at least one field'); return; }
+      const out=poQuickFill(slots, poFill.day, poFill.first, poFill.gap, poFill.fields, poFill.final); await save({slots:Object.assign({},plan.slots||{},out)}); toast('All '+slots.length+' playoff games filled in'); }},'Fill in')));
+    card.appendChild(qf); }
+  const tbl=h('table',{class:'dataTable poPlanTbl'}); tbl.appendChild(h('tr',{},['Game','Teams','Date','Time','Field'].map(x=>h('th',{style:'text-align:left;'},x))));
+  const rows=(S.currentSeasonId===season.id && season.playoffPlan)?poSchedRows(season):[];
+  slots.forEach(s=>{ const at=(plan.slots||{})[s.key]||{}; const r=rows.find(x=>x.poKey===s.key);
+    const setSlot=(k,v)=>{ const cur=Object.assign({},(plan.slots||{})[s.key]||{}); cur[k]=v; save({['slots.'+s.key]:cur}); };
+    const di=h('input',{type:'date',value:at.date||'',class:'schedIn'}); di.addEventListener('change',()=>setSlot('date',di.value));
+    const ti=h('input',{type:'time',value:at.time||'',class:'schedIn'}); ti.addEventListener('change',()=>setSlot('time',ti.value));
+    const tm=r?poSchedTeams(r):{home:s.a,away:s.b,homeTbd:true,awayTbd:true};
+    const lbl=(txt,tbd)=>tbd?h('span',{class:'poSeed'},txt):h('b',{},txt);
+    tbl.appendChild(h('tr',{},[h('td',{style:'white-space:nowrap;'},h('span',{class:'poTag'},'G'+s.g+' · '+s.round)), h('td',{},[lbl(tm.home,tm.homeTbd),' vs ',lbl(tm.away,tm.awayTbd)]), h('td',{},di), h('td',{},ti), h('td',{},fieldPicker(at.location,v=>setSlot('location',v)))]));
+  });
+  card.appendChild(h('div',{class:'gridScroll',style:'margin:0;'},tbl));
+  // start / status
+  if(!started){
+    const go=async()=>{
+      const st=leagueStandings(); let order;
+      if((plan.seeding||'standings')==='manual'){ order=(plan.manual||[]).slice(0,n).filter(Boolean); if(order.length<n || new Set(order).size<n){ toast('Pick a different team for every seed'); return; } }
+      else { order=st.filter(x=>poTeamsAvailable().some(t=>t.id===x.teamId)).map(x=>x.teamId).slice(0,n); if(order.length<n) order=order.concat(poTeamsAvailable().map(t=>t.id).filter(id=>!order.includes(id))).slice(0,n); }
+      const missing=slots.filter(s=>!((plan.slots||{})[s.key]||{}).date).length;
+      const doIt=async()=>{ await setDoc(playoffRef(),{v:2, seasonId:season.id, type:plan.type||'single', seeding:plan.seeding||'standings', teamOrder:order, manual:{}, status:'active', startedAt:Date.now(), startedBy:(S.user&&S.user.email)||null}); if(!season.playoffPlan) await save({}); toast('🏆 Playoffs started — teams are in the bracket'); };
+      confirmModal('Start playoffs?', 'Seeds: '+order.map((id,i)=>'#'+(i+1)+' '+teamNameAny(id)).join(', ')+'.'+(missing?' '+missing+' game'+(missing===1?' has':'s have')+' no date yet — you can set it on the Schedule later.':''), doIt, {confirmLabel:'🏆 Start playoffs'});
+    };
+    card.appendChild(h('div',{style:'margin-top:12px;'},h('button',{class:'btn btn-gold',onclick:go},'🏆 Start playoffs')));
+    card.appendChild(h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:6px;'},(plan.seeding||'standings')==='manual'?'Seeds come from your order above.':'Seeds come from the standings when you tap Start playoffs — usually after the last regular-season game.'));
+  } else {
+    const P=currentPlayoff;
+    card.appendChild(h('div',{style:'margin-top:12px;font-size:13px;'},[h('b',{},P&&P.champion?'🏆 Champion: '+teamNameAny(P.champion):'Playoffs in progress'),' · '+((rawPlayoff.type==='double')?'Double':'Single')+' elimination'+(oldStyle?' · scores typed on the Record tab':' · bracket fills in from the Scorecard')]));
+    card.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'margin-top:8px;color:var(--leather-2);border-color:var(--leather-2);',onclick:()=>confirmModal('Reset playoffs?','This clears the bracket seeds so you can start again. Playoff games already scored stay in the game history.',async()=>{ await deleteDoc(playoffRef()); rawPlayoff=null; currentPlayoff=null; toast('Playoffs reset'); renderShell(); },{danger:true})},'Reset playoffs'));
+  }
+  return card;
+}
 let recordTeamId = null;
 Router.register('record', (root)=>{
   root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Record'),h('p',{},'Game-by-game results for any team, plus league standings.')]));
@@ -5773,7 +6000,7 @@ Router.register('record', (root)=>{
   tsel.addEventListener('change', ()=>{ recordTeamId=tsel.value; renderShell(); });
   card.appendChild(tsel);
   const log = recordTeamId ? teamGameLog(recordTeamId) : [];
-  const done = log.filter(x=>x.completed);
+  const done = log.filter(x=>x.completed && !x.playoff);
   const W=done.filter(x=>x.result==='W').length, L=done.filter(x=>x.result==='L').length, T=done.filter(x=>x.result==='T').length;
   card.appendChild(h('p',{style:'font-size:22px;font-weight:800;font-family:var(--font-mono);margin:0 0 12px;'}, W+'–'+L+(T?'–'+T:'')));
   if(!log.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No games recorded for this team this season.')); }
@@ -5814,7 +6041,7 @@ function recordPlayoffsBlock(standings){
   const regDone = !!P || (sn && seasonStatus(sn)==='ended') || (total>0 && played>=total);
   const open = (sid in recPoOpen) ? recPoOpen[sid] : regDone;
   const status = P ? (P.champion ? 'Champion: '+teamNameById(P.champion) : (P.type==='double'?'Double':'Single')+' elimination \u00b7 in progress')
-    : regDone ? 'Regular season complete'+(isAdmin()?' \u2014 start the bracket in Admin \u2192 Settings':'')
+    : regDone ? 'Regular season complete'+(isAdmin()?' \u2014 start the bracket in Admin \u2192 Settings \u2192 Season Rules':'')
     : 'Starts after the regular season'+(total?' \u00b7 '+played+' of '+total+' games played':'');
   const wrap=h('div',{style:'margin-top:18px;'});
   wrap.appendChild(h('div',{class:'poRibbon',onclick:()=>{ recPoOpen[sid]=!open; renderShell(); }},[
@@ -5915,20 +6142,29 @@ function playoffSection(standings, o){
   const p = currentPlayoff;
   if(p.champion){ wrap.appendChild(h('div',{class:'clockbox'},[h('div',{style:'color:#e8e2cf;'},'Champion'), h('div',{class:'big'}, teamNameById(p.champion))])); }
   const commit = async ()=>{ const updated = advancePlayoffs(JSON.parse(JSON.stringify(p))); await savePlayoff(updated); };
+  const V2=p.v===2; const sn2=currentSeason(); const slots=V2?poSimulate(p.type, (p.teamOrder||[]).length):[]; const plan=poPlan(sn2)||{};
+  const mrow=(m)=>{
+    if(!V2) return matchRow(m, commit, isAdmin());
+    const g=poGameFor(p.seasonId, m.key); const sl=slots.find(x=>x.key===m.key); const at=(plan.slots||{})[m.key]||{};
+    const el=matchRow(m, async()=>{ try{ await updateDoc(playoffRef(),{['manual.'+m.key]:{a:m.scoreA,b:m.scoreB, by:(S.user&&S.user.email)||null}}); toast('Result saved'); }catch(e){ toast('Could not save: '+(e.message||e)); } }, isAdmin() && !g);
+    const when=[at.date?formatDate(at.date):'', at.time?fmtSchedTime(at.time):'', at.location||''].filter(Boolean).join(' · ');
+    const stTxt=g?(g.completed?'Final':'● Live · '+(g.half==='top'?'T':'B')+g.inning):(m.winnerId&&m.teamB?'Final (entered)':(m.teamA&&m.teamB?'Scored on the Scorecard':''));
+    el.insertBefore(h('div',{style:'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px;font-size:11.5px;color:var(--ink-soft);'},[sl?h('span',{class:'poTag'},'G'+sl.g+' · '+sl.round):null, when?h('span',{},when):null, stTxt?h('span',{style:'font-weight:800;color:'+(g&&!g.completed?'var(--leather-2)':'var(--grass-1)')+';'},stTxt):null, g?h('button',{class:'btn btn-outline btn-sm',style:'padding:2px 8px;',onclick:()=>{ liveFeedGameId=g.id; S.activeTab='feed'; renderShell(); }},'Live Feed ›'):null]), el.firstChild);
+    return el; };
   p.wbRounds.forEach((round,i)=>{
-    wrap.appendChild(h('div',{class:'sectiontitle'},'Winners Bracket — Round '+(i+1)));
-    round.forEach(m=>wrap.appendChild(matchRow(m, commit, isAdmin())));
+    { const k1=(poMatchList({wbRounds:[round]})[0]||{}).key; const rn=V2&&p.type!=='double'?((slots.find(x=>x.key===('W'+(i+1)+'_'+(k1||'').split('_')[1]))||slots.find(x=>x.key.startsWith('W'+(i+1)+'_'))||{}).round):null; wrap.appendChild(h('div',{class:'sectiontitle'},rn||('Winners Bracket — Round '+(i+1)))); }
+    round.forEach(m=>{ if(V2 && !m.teamB) return; wrap.appendChild(mrow(m)); });
   });
   if(p.type==='double'){
     p.lbRounds.forEach((round,i)=>{
       wrap.appendChild(h('div',{class:'sectiontitle'},'Losers Bracket — Round '+(i+1)));
-      round.forEach(m=>wrap.appendChild(matchRow(m, commit, isAdmin())));
+      round.forEach(m=>wrap.appendChild(mrow(m)));
     });
   }
-  if(p.grandFinal){ wrap.appendChild(h('div',{class:'sectiontitle'},'Grand Final')); wrap.appendChild(matchRow(p.grandFinal, commit, isAdmin())); }
-  if(p.bracketReset){ wrap.appendChild(h('div',{class:'sectiontitle'},'Bracket Reset')); wrap.appendChild(matchRow(p.bracketReset, commit, isAdmin())); }
+  if(p.grandFinal){ wrap.appendChild(h('div',{class:'sectiontitle'},'Grand Final')); wrap.appendChild(mrow(p.grandFinal)); }
+  if(p.bracketReset){ wrap.appendChild(h('div',{class:'sectiontitle'},'Bracket Reset')); wrap.appendChild(mrow(p.bracketReset)); }
   if(isAdmin()){
-    wrap.appendChild(h('button',{class:'btn btn-danger btn-block',style:'margin-top:12px;',onclick:()=>confirmModal('Reset playoffs?','This deletes the current bracket for this season so you can regenerate it.',async()=>{ await deleteDoc(playoffRef()); currentPlayoff=null; renderShell(); })},'Reset Playoffs'));
+    wrap.appendChild(h('button',{class:'btn btn-danger btn-block',style:'margin-top:12px;',onclick:()=>confirmModal('Reset playoffs?','This deletes the current bracket for this season so you can regenerate it.',async()=>{ await deleteDoc(playoffRef()); currentPlayoff=null; rawPlayoff=null; renderShell(); })},'Reset Playoffs'));
   }
   return wrap;
 }
@@ -6957,7 +7193,7 @@ Router.register('feed', (root)=>{
     const isSel = g.id===liveFeedGameId;
     const statusLbl = g.completed ? 'Final' : ((g.half==='top'?'Top ':'Bot ')+(g.inning||1));
     pickCard.appendChild(h('div',{class:'gameListRow',style:'cursor:pointer;'+(isSel?'background:var(--chalk-2);border-radius:8px;padding-left:6px;padding-right:6px;':''),onclick:()=>{ liveFeedGameId=g.id; renderShell(); }},[
-      h('div',{},[h('div',{class:'glTeams'},g.away.name+' at '+g.home.name), h('div',{class:'glDate'},formatDate(g.date)+' · '+statusLbl+(g.completed?'':' · LIVE'))]),
+      h('div',{},[h('div',{class:'glTeams'},[g.playoff?h('span',{class:'poTag',style:'margin-right:6px;'},'🏆 '+(g.poLabel||'Playoffs')):null, g.away.name+' at '+g.home.name]), h('div',{class:'glDate'},formatDate(g.date)+' · '+statusLbl+(g.completed?'':' · LIVE'))]),
       h('div',{class:'glScore'}, totalRuns(g,'away')+' – '+totalRuns(g,'home'))
     ]));
   });
@@ -7487,7 +7723,7 @@ const HELP_KB = [
   {k:'where find my player card more menu right side button nothing happens', q:'Where do I find My player card?', a:'On a phone: tap More ☰ at the top right — 🪪 My player card is under Geezer Weezer. On a computer or a sideways iPad the menu is always open on the right side. Everyone with an approved account sees it (including the Super Admin) and each person only edits their own card. Don’t see it? Close the app completely and reopen it to load the latest version.'},
   {k:'training guide manual brochure how to learn admin manager season start finish', q:'Is there a training guide for admins and managers?', a:'Yes — the Geezer Ball Scorecard Admin & Manager Training Guide walks through a season from setup to season end in plain steps. Ask your league admin for a copy. It is for your league only and may not be shared outside the league without the Software Provider’s approval. To practise hands-on, use Admin → 🧪 Test Mode.'},
   {k:'license agreement word docx export download sponsor', q:'Can I download an agreement as a Word file?', a:'Yes. Admin → License (or Super Admin → Licenses, or a sponsor’s agreement) → ⬇ Word (.docx) next to Print / save PDF. The Super Admin can also download a draft before sending it. The Word file is a copy for reading or review — the signed version stays in the app with its fingerprint.'},
-  {k:'error sacrifice fly sac fly SF E scorecard setting turn on off', q:'How do I turn on errors and sacrifice flies?', a:'Admin → Settings → Scorecard → “Track errors and sacrifice flies”: slide it to YES. Scorekeepers then see E (reached on error) and SF (sac fly) when recording an at-bat. Slide to NO to hide them again. A sac fly doesn’t count as an at-bat; reaching on an error isn’t a hit.'},
+  {k:'error sacrifice fly sac fly SF E scorecard setting turn on off', q:'How do I turn on errors and sacrifice flies?', a:'Admin → Settings → Season Rules → 3 · Scorecard → “Track errors & sacrifice flies” → YES. It’s set for each season. When on, scorekeepers see E (reached on error) and SF (sac fly) when recording an at-bat.'},
   {k:'password show hide see typed letters eye sign in', q:'Can I see my password while typing it?', a:'Yes. On the sign-in and join screens, tap 👁 Show inside the password box to see what you typed. Tap 🙈 Hide to cover it again — it also hides by itself after 15 seconds.'},
   {k:'umpire umpires scorekeeper name officials game who umpired', q:'How do I record the umpires and scorekeeper?', a:'On the Scorecard, in the Official scorekeeper box, tap ＋ Add next to Officials. Pick one or more umpires and the person keeping score from the lists (recent names come first), or choose “Someone else” to type a name. Both are optional. Admins can change them any time, even after the game.'},
   {k:'umpire scorekeeper report who umpired each game totals', q:'Where can I see who umpired each game?', a:'Report → Umpires & Scorekeepers. It lists every game this season with its umpire(s), scorekeeper, field and score, plus totals for each person. Pick a person to see just their games, or Export to Excel.'},
@@ -7568,7 +7804,9 @@ const HELP_KB = [
   {k:'hit zone heat map filter', q:'What does Hit Zone show?', a:'Every ball in play this season. Filter by team and player, tap a zone for its count, or export to Excel.'},
   {k:'report batting standings trend scoring substitutes', q:'What reports are there?', a:'Report tab: Batting (by player, team totals, team vs team), Hit Zone by location, Scoring by season/year/field, Batting Average Trend, Substitutes, and Standings.'},
   {k:'record standings win loss', q:'Where do I see standings?', a:'Record tab: pick a team for its game-by-game log, plus League Standings and the playoff bracket below.'},
-  {k:'playoffs bracket start seed', q:'How do playoffs start?', a:'Admin → Settings → Playoffs: choose single or double elimination and seeding. Scores are entered on the Record tab and winners advance automatically. On the Record tab the Playoffs ribbon stays folded during the regular season — tap Show to see the bracket; it opens by itself once the regular season is over.'},
+  {k:'playoffs bracket start seed', q:'How do playoffs start?', a:'Admin → Settings → Season Rules → 4 · Playoffs. Pick single or double elimination, how many teams, and seeding (standings or your own order). Plan the playoff schedule, then tap 🏆 Start playoffs — the seeds fill the first games. Playoff games are scored on the Scorecard like any game, and winners move on in the bracket by themselves.'},
+  {k:'playoff schedule date time field quick fill bracket games different fields', q:'How do I schedule playoff games?', a:'Season Rules → 4 · Playoffs → Playoff schedule. Every bracket game is listed (G1, G2, Final…) — no teams needed yet. Use Quick-fill once: playoff day, first game time, time between games, and tap every field you’re using (and which field hosts the Final), then Fill in. Change any single game’s date, time or field after. The games show on the Schedule under 🏆 Playoffs as “#1 seed vs #4 seed” or “Winner G1”, and the team names fill in as they’re decided. Later changes (rainouts) can be made on the Schedule tab.'},
+  {k:'playoff rules tie extra inning playoff stats standings separate', q:'Do playoff games follow different rules?', a:'Only if you turn on “Playoff games use different rules” in Season Rules → Playoffs (innings, run limit, run rule, time limit) — the Scorecard then shows 🏆 Playoff rules. Playoff games can’t end in a tie: Save & archive asks to add an extra inning. Playoff games don’t count in regular-season standings; Report and Hit zone have Regular season / Playoffs / All chips.'},
   {k:'confirm last season final stats evaluation checked', q:'How do I confirm last season’s final stats are in the evaluation?', a:'Player Eval → the gold bar under Compare against shows the prior season and how many players have its final stats (and any returning players with none — fix those in Season Builder → Player list). When the season is fully scored and closed, tap ✓ Confirm last season stats are in. The bar turns green with the date and who confirmed it, for managers to see. Undo removes it.'},
   {k:'privacy other leagues see my information email phone separate', q:'Can other leagues see my information?', a:'No. Each league’s data is kept separate — members of one league cannot read another league’s players, games, chat or sign-ups. In your league, your name, team, position and stats are visible to members; your email, phone and age are visible only to your league’s administrators and team managers, and to you.'},
   {k:'privacy upgrade prepare data publish rules super admin scope', q:'What is the Privacy upgrade card in Admin?', a:'Super Admin only, shown once. Step 1, Prepare data, saves a cloud backup, labels older records with their league and switches the app to load each league separately. Step 2 is pasting the new firestore-rules.txt into the Firebase console and tapping Publish, then tapping “I’ve published the new rules”. Undo step 1 goes back to the old loading if something looks wrong before the rules are published.'},
@@ -7676,7 +7914,7 @@ const FAQ_DATA = [
   ]},
   { category:'Scorecard', items:[
     { q:'How do I add the umpires and scorekeeper?', a:'Scorecard → Officials → ＋ Add. Pick the umpire(s) and scorekeeper from the lists, or choose “Someone else” to type a name. Both are optional. See them all in Report → Umpires & Scorekeepers.' },
-    { q:'Where are errors (E) and sacrifice flies (SF)?', a:'They only appear if your league turns them on: Admin → Settings → Scorecard → “Track errors and sacrifice flies” → YES.' },
+    { q:'Where are errors (E) and sacrifice flies (SF)?', a:'They only appear if your league turns them on for the season: Admin → Settings → Season Rules → 3 · Scorecard → “Track errors & sacrifice flies” → YES.' },
     { q:'How do I record an at-bat?', a:'Tap “Record at-bat”, or tap an empty grid box for that player and inning. For a ball in play you’ll pick where it landed — that feeds the Hit Zone.' },
     { q:'How do I fix a runner on the wrong base?', a:'Drag them on the Base Diagram to the correct base, or to home plate to score them.' },
     { q:'A runner was tagged or forced out — how do I record it?', a:'Drag the runner onto “Tag / Force Out” (or tap it and pick the runner). It counts the out, shows OUT@base on the grid, and appears in the Live Feed play-by-play.' },
@@ -7698,7 +7936,8 @@ const FAQ_DATA = [
     { q:'Does the app handle tournaments?', a:'Yes — a Tournament is its own season type, set up by your league admin. Teams can include outside players as guests, games can have a run limit per inning, and tournament stats are kept separate. See Report → 🏆 Tournament History for champions and career tournament stats.' },
     { q:'Does my league use a run limit or run rule?', a:'If your league admin turned on Season Rules (Formal and Informal seasons) or set tournament rules, the Scorecard shows a 📋 Season rules or 🏆 Tournament rules strip at the top with the limits. If there’s no strip, there’s no run limit or run rule for that season.' },
     { q:'What happens when a run limit or run rule is reached?', a:'The scorekeeper gets a pop-up. 🚩 Run limit reached: runs past the limit don’t count and the side is retired (or Keep playing if the umpire says so) — some innings, like the last one, can be open with no limit. 🏁 Run rule reached: when a team is far enough ahead after an inning (for example 15 after 3), the game can end early. Live Feed shows it too. The umpire has the final say.' },
-    { q:'How do playoffs start?', a:'Admin → Settings → Playoffs: choose single or double elimination and seed by standings or manual order. Until then the Record tab shows a bracket preview with placeholder team numbers.' },
+    { q:'How do playoffs start?', a:'Admin → Settings → Season Rules → 4 · Playoffs: choose the bracket, teams and seeding, set the date, time and field for each playoff game, then tap 🏆 Start playoffs. Every playoff game is on the Schedule (🏆 Playoffs) and is scored on the Scorecard like any game — winners move on by themselves. Until playoffs start, the Record tab shows a bracket preview.' },
+    { q:'Are playoff games scored like regular games?', a:'Yes — Start ›, lineups, scorekeeper, 🔑 Pass, balls & strikes and Live Feed (🏆 tag) all work. A playoff game can’t end tied. Playoff games don’t count in regular-season standings.' },
     { q:'How do results get entered?', a:'On the Record tab, the admin enters each matchup’s score; winners advance automatically.' }
   ]},
   { category:'Communication', items:[
@@ -7949,22 +8188,12 @@ function settingsView(root){
   const season=S.seasons.find(x=>x.id===S.currentSeasonId)||{};
   const G=settingsSub!=='draft';
   root.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 12px;'},[['general','General'],['draft','Draft'],['rules','Season Rules']].map(([id,l])=>h('button',{style:'border-radius:14px;padding:5px 14px;font-size:12.5px;font-weight:800;cursor:pointer;border:1px solid '+(settingsSub===id?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ settingsSub=id; renderShell(); }},l))));
-  if(settingsSub==='rules'){ root.appendChild(seasonRulesCard(season)); return; }
+  if(settingsSub==='rules'){ root.appendChild(seasonRulesCard(season)); { const m=seasonMethod(season); if(m!=='pickup' && !isTourneySeason(season)) root.appendChild(playoffRulesCard(season)); } return; }
   // ---- Schedule (now managed on the Schedule tab) ----
   if(G) root.appendChild(h('div',{class:'sectiontitle'},'Schedule'));
   if(G) root.appendChild(h('div',{class:'card'},[h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},'Games are added, imported and edited on the Schedule tab (left menu) \u2014 the admin controls sit under the game list.'), h('button',{class:'btn btn-outline btn-sm',onclick:()=>goTab('schedule')},'Open Schedule')]));
-  // ---- Scorecard options ----
-  if(G) root.appendChild(h('div',{class:'sectiontitle'},'Scorecard'));
-  if(G) root.appendChild(scoringOptionsCard());
-  // ---- Playoffs ----
-  if(G) root.appendChild(h('div',{class:'sectiontitle'},'Playoffs'));
-  if(G && !currentPlayoff) root.appendChild(playoffSetupCard(leagueStandings()));
-  else if(G) {
-    const pc=h('div',{class:'card'}); pc.appendChild(h('h3',{},'Playoffs in progress'));
-    pc.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;'},(currentPlayoff.type==='double'?'Double':'Single')+' elimination · scores are entered on the Record tab.'));
-    pc.appendChild(h('button',{class:'btn btn-danger btn-block',onclick:()=>confirmModal('Reset playoffs?','This deletes the current bracket for this season.',async()=>{ await deleteDoc(playoffRef()); toast('Playoffs reset'); },{danger:true})},'Reset playoffs'));
-    root.appendChild(pc);
-  }
+  // Scorecard options and Playoffs live in Season Rules now
+  if(G) root.appendChild(h('div',{class:'card',style:'display:flex;align-items:center;gap:10px;flex-wrap:wrap;'},[h('span',{style:'flex:1;min-width:200px;font-size:13px;'},['Scorecard options (balls & strikes, errors & sac flies) and ',h('b',{},'🏆 Playoffs'),' are in Season Rules.']), h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ settingsSub='rules'; renderShell(); }},'Open Season Rules →')]));
   // ---- Sign-up window ----
 
   // ---- Branding ----
@@ -9648,31 +9877,42 @@ function pwEye(inp){ const btn=h('button',{type:'button',class:'pwEye','aria-lab
   btn.addEventListener('click',()=>{ clearTimeout(t); if(inp.type==='password'){ inp.type='text'; btn.textContent='🙈 Hide'; btn.setAttribute('aria-label','Hide password'); t=setTimeout(hide,15000); } else hide(); try{ inp.focus(); }catch(e){} });
   return h('div',{class:'pwWrap'},[inp,btn]); }
 function leagueErrSacFly(){ const lg=(S.leagues||[]).find(l=>l.id===S.currentLeagueId)||{}; return !!lg.errSacFly; }
+function srSec(n, title){ return h('div',{class:'srSec'},[h('span',{class:'srNum'},String(n)), title]); }
+function errSFEditor(c, save){
+  const v=typeof c.errSacFly==='boolean'?c.errSacFly:leagueErrSacFly(); const on=!!v;
+  const sw=h('button',{type:'button',role:'switch','aria-checked':on?'true':'false','aria-label':'Track errors and sacrifice flies',class:'srSwitch'+(on?' on':''),onclick:async()=>{ await save({errSacFly:!on}); toast(!on?'Errors and sac flies show on the scorecard':'Errors and sac flies hidden'); }},[h('span',{class:'srSwTxt'},on?'YES':'NO'),h('span',{class:'srKnob'})]);
+  return h('div',{style:'display:flex;align-items:center;gap:14px;margin-top:14px;border-top:1px solid var(--line);padding-top:12px;'},[h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Track errors & sacrifice flies'),
+    h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px;line-height:1.45;'},on?'Scorekeepers see E (reached on error) and SF (sac fly). A sac fly isn’t an at-bat; reaching on an error isn’t a hit.':'Off: E and SF are hidden when recording an at-bat.')]), sw]);
+}
 function seasonRulesCard(season){
   const card=h('div',{class:'card'}); const m=seasonMethod(season);
   card.appendChild(h('h3',{},['Season Rules ',h('span',{style:'display:inline-block;font-size:10.5px;font-weight:800;border-radius:8px;padding:2px 8px;background:#e7efe7;color:var(--grass-1);vertical-align:2px;font-family:var(--font-body,inherit);'},(season.name||'This season')+' · '+methodShort(m))]));
   if(isTourneySeason(season)){ card.appendChild(h('p',{style:'font-size:13px;margin:0 0 8px;'},'🏆 This is a tournament — its rules are set in Admin → 🏆 Tournament → 1 · Rules.')); card.appendChild(h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ adminSub='tourney'; renderShell(); }},'Open Tournament')); return card; }
   if(m==='pickup'){ card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 4px;line-height:1.45;'},'🧢 Pickup season — run limits and run rules don’t apply, since rules can change from game to game. You can still have everyone bat every inning.'));
     const pc=Object.assign({},season.seasonRules||{}); const psave=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
-    card.appendChild(ebEditor(pc, psave, {top:'8px'})); card.appendChild(countEditor(pc, psave)); return card; }
+    card.appendChild(srSec(1,'Batting')); card.appendChild(ebEditor(pc, psave, {top:'8px'})); card.appendChild(srSec(2,'Scorecard')); card.appendChild(countEditor(pc, psave)); card.appendChild(errSFEditor(pc, psave)); return card; }
   card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.45;'},['Game rules the Scorecard enforces for this season. Separate from ',h('b',{},'League Rules'),' (the bylaws document) and from tournament rules (Admin → 🏆 Tournament).']));
   const c=Object.assign({innings:9},season.seasonRules||{}); const on=!!c.on;
   const save=async(patch)=>{ try{ const up={}; Object.keys(patch).forEach(k=>up['seasonRules.'+k]=patch[k]); await updateDoc(doc(db,'seasons',season.id),up); }catch(e){ toast('Could not save: '+(e.message||e)); } };
+  card.appendChild(srSec(1,'Game'));
   const sw=h('button',{type:'button',role:'switch','aria-checked':on?'true':'false','aria-label':'Use season rules',style:'flex:none;display:flex;align-items:center;width:112px;height:40px;border-radius:20px;border:none;cursor:pointer;position:relative;padding:0;background:'+(on?'var(--grass-1)':'#b9b9b0')+';',
     onclick:async()=>{ const patch={on:!on}; if(!on && !season.seasonRules){ Object.assign(patch,{innings:9,limits:[],mercyRules:[]}); } await save(patch); toast(!on?'Season rules on — the Scorecard will enforce them':'Season rules off'); }},[
     h('span',{style:'position:absolute;'+(on?'left:14px;':'right:14px;')+'color:#fff;font-weight:800;font-size:14px;'},on?'YES':'NO'),
     h('span',{style:'position:absolute;top:4px;'+(on?'right:4px;':'left:4px;')+'width:32px;height:32px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.3);'})]);
   card.appendChild(h('div',{style:'display:flex;align-items:center;gap:14px;padding:4px 0 10px;border-bottom:1px solid var(--line);'},[
     h('div',{style:'flex:1;'},[h('div',{style:'font-weight:700;font-size:14px;'},'Use season rules'),h('div',{style:'font-size:12px;color:var(--ink-soft);margin-top:2px;'},on?'On: Formal and Informal games this season show the 📋 Season rules strip, run limit warnings and run rule prompts.':'Off: games are scored with no run limit or run rule.')]), sw]));
-  if(!on){ card.appendChild(ebEditor(c, save)); card.appendChild(countEditor(c, save)); return card; }
+  if(!on){ card.appendChild(srSec(2,'Batting')); card.appendChild(ebEditor(c, save)); card.appendChild(srSec(3,'Scorecard')); card.appendChild(countEditor(c, save)); card.appendChild(errSFEditor(c, save)); return card; }
   const inn=h('select',{style:'width:auto;'}); [5,6,7,8,9].forEach(n=>inn.appendChild(h('option',{value:String(n)},n+' innings'))); inn.value=String(+c.innings||9); inn.addEventListener('change',()=>save({innings:+inn.value}));
   card.appendChild(h('div',{style:'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);margin-bottom:8px;'},[h('div',{},[h('div',{style:'font-weight:700;font-size:14px;'},'Innings per game'),h('div',{style:'font-size:12px;color:var(--ink-soft);'},'Used for new games this season.')]),inn]));
   card.appendChild(tourneyRulesEditor(c, save));
   const others=(S.seasons||[]).filter(x=>x.id!==season.id && x.seasonRules && (tLimits(x.seasonRules).length||tMercy(x.seasonRules).length));
   if(others.length){ const cs=h('select',{style:'width:auto;'}); others.forEach(x=>cs.appendChild(h('option',{value:x.id},(x.name||x.id)+' ('+methodShort(seasonMethod(x))+')')));
     card.appendChild(h('div',{style:'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;font-size:12.5px;color:var(--ink-soft);'},['Copy from:',cs,h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ const src=others.find(x=>x.id===cs.value); if(!src) return; confirmModal('Copy season rules?','Replaces this season’s run limits and run rules with the ones from '+(src.name||'that season')+'.',async()=>{ const r=src.seasonRules; await save({innings:+r.innings||9,limits:tLimits(r),mercyRules:tMercy(r)}); toast('Season rules copied'); }); }},'Copy')])); }
+  card.appendChild(srSec(2,'Batting'));
   card.appendChild(ebEditor(c, save));
+  card.appendChild(srSec(3,'Scorecard'));
   card.appendChild(countEditor(c, save));
+  card.appendChild(errSFEditor(c, save));
   return card;
 }
 function scoringOptionsCard(){
@@ -10771,7 +11011,7 @@ Router.register('admin', (root)=>{
   if(adminSub==='players'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Player list'),h('p',{},'Returning vs new players for '+(currentSeasonName()||'this season')+', so past stats follow the right person.')])); playerListView(root); return; }
 
   if(adminSub==='rules'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'League Rules'),h('p',{},'Draft, import, and publish the rules members see.')])); rulesAdminView(root); return; }
-  if(adminSub==='settings'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Settings'),h('p',{},'General: schedule, playoffs, branding and test data. Draft: draft rank, roster order and draft shortcuts.')])); settingsView(root); return; }
+  if(adminSub==='settings'){ root.appendChild(h('div',{class:'pageHead'},[h('h2',{},'Settings'),h('p',{},'General: schedule, branding and test data. Draft: draft rank, roster order and draft shortcuts. Season Rules: game rules, batting, scorecard options and 🏆 playoffs.')])); settingsView(root); return; }
   const part=adminSub==='teams'?'teams':'seasons';
   root.appendChild(h('div',{class:'pageHead'},part==='teams'?[h('h2',{},'Teams & managers'),h('p',{},'Add teams, set each manager, and manage who can do what in '+(((S.leagues||[]).find(l=>l.id===S.currentLeagueId)||{}).name||'this league')+'.')]:[h('h2',{},'Seasons'),h('p',{},'Every season in this league. Create, change, archive or delete seasons here. Tap a season\u2019s name to set it up in the Season Builder.')]));
 
