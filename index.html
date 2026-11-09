@@ -605,7 +605,7 @@ tr.schedCaution td{background:#fff6dc !important;}
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth, onAuthStateChanged, signInWithEmailAndPassword,
-  createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, signInAnonymously, sendEmailVerification
+  createUserWithEmailAndPassword, signOut, sendPasswordResetEmail, signInAnonymously, sendEmailVerification, deleteUser
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
   getFirestore, collection, collectionGroup, doc, getDoc, getDocs, setDoc, addDoc,
@@ -936,7 +936,100 @@ async function openRegModal(lg){
         else sendChangeNotice({kind:'reg-new',subject:'Your '+label+' registration is complete',intro:'Your '+label+' registration was submitted',listLabel:'Also saved',sections:cardParts.length?['Player card ('+cardParts.join(', ')+')']:[]});
         close(); toast('Thanks — your '+regYearLabel(lg,y)+' registration is complete'); }catch(e){ show('Could not save: '+(e.message||e)); }
     }},'Sign & submit')]));
+  if(!isSuperAdmin()){
+    sheet.appendChild(h('div',{style:'font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-2);margin:18px 0 6px;'},'Leaving the league'));
+    const lv=h('div',{style:'border:1.5px solid #8a4b1f;border-radius:12px;padding:12px;background:#fffdf7;'});
+    lv.appendChild(h('h3',{style:'margin:0 0 6px;font-size:14px;'},'Leave Geezer Ball Scorecard'));
+    lv.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);line-height:1.45;margin:0 0 8px;'},'Removes your account, registration, player card and sign-ups, and stops any sharing with sponsors. Your name and stats in games already played stay in the league’s record.'));
+    lv.appendChild(h('button',{class:'btn btn-outline btn-sm',style:'border-color:#8a4b1f;color:#8a4b1f;',onclick:()=>{ close(); leaveLeagueSheet(lg); }},'Leave the league…'));
+    sheet.appendChild(lv);
+  }
   document.body.appendChild(overlay);
+}
+/* ===== Leaving the league (the player deletes his own account) and how the admin is told ===== */
+const LEAVE_REASONS=[['notplaying','Not playing this year'],['moving','Moving'],['otherleague','Other league'],['nosay','Prefer not to say']];
+function leaveLeagueSheet(lg){
+  const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet',style:'max-height:90vh;overflow:auto;'}); overlay.appendChild(sheet);
+  const close=()=>overlay.remove(); overlay.addEventListener('click',e=>{ if(e.target===overlay) close(); });
+  sheet.appendChild(h('div',{class:'modalHandle'})); sheet.appendChild(h('h3',{},'Leave the league?'));
+  sheet.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);line-height:1.45;margin:0 0 10px;'},'Your league admin will be told right away. This cannot be undone — to come back later you would register again.'));
+  sheet.appendChild(h('p',{style:'font-size:12.5px;font-weight:700;margin:0 0 6px;'},['Why are you leaving? ',h('span',{style:'font-weight:400;color:var(--ink-soft);'},'(optional)')]));
+  let reason=''; const segs=h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;'});
+  const draw=()=>{ segs.innerHTML=''; LEAVE_REASONS.forEach(([k,l])=>segs.appendChild(h('button',{type:'button',style:'border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '+(reason===k?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ reason=reason===k?'':k; draw(); }},l))); };
+  draw(); sheet.appendChild(segs);
+  const cb=h('input',{type:'checkbox',style:'width:auto;margin-right:8px;'});
+  sheet.appendChild(h('label',{style:'display:flex;align-items:center;font-size:12.5px;margin-bottom:12px;cursor:pointer;'},[cb,'I understand my account and personal details will be deleted']));
+  const go=h('button',{class:'btn',style:'flex:1;background:#b3261e;color:#fff;',onclick:async()=>{
+    if(!cb.checked){ toast('Tick the box first'); return; }
+    go.disabled=true; go.textContent='Leaving…';
+    try{ await leaveLeagueNow(lg, reason); close(); }
+    catch(e){ go.disabled=false; go.textContent='Yes, delete my account'; toast('Could not finish: '+friendlyErr(e)); }
+  }},'Yes, delete my account');
+  sheet.appendChild(h('div',{style:'display:flex;gap:8px;'},[go, h('button',{class:'btn btn-outline',style:'flex:1;',onclick:close},'Stay')]));
+  document.body.appendChild(overlay);
+}
+async function leaveLeagueNow(lg, reason){
+  const u=auth.currentUser; const uid=u.uid; const prof=S.profile||{}; const lid=prof.leagueId||(lg&&lg.id)||null;
+  const team=(S.allTeams||S.teams||[]).find(t=>t.id===prof.teamId)||null;
+  const managed=(S.allTeams||S.teams||[]).filter(t=>t.managerUserId===uid).map(t=>({id:t.id,name:t.name}));
+  const played=(S.allGamesForFeed||[]).filter(g=>(g.atbats||[]).some(a=>{ const pl=[].concat((g.home||{}).players||[],(g.away||{}).players||[]).find(p=>p.id===a.playerId); return pl && String(pl.name||'').trim().toLowerCase()===String(prof.displayName||'').trim().toLowerCase(); })).length;
+  // 1) tell the league (written first, so the admin hears even if a later step fails)
+  await addDoc(collection(db,'departures'),{ leagueId:lid, uid, name:prof.displayName||u.email||'A member', role:prof.role||'viewer', teamId:team?team.id:null, teamName:team?team.name:'', managedTeams:managed, reason:reason||'', gamesPlayed:played, at:Date.now(), seenBy:{}, followed:false });
+  // 2) personal records
+  try{ const rs=await getDocs(query(collection(db,'registrations'),where('uid','==',uid))); for(const d of rs.docs) await deleteDoc(d.ref).catch(()=>{}); }catch(e){}
+  try{ await deleteDoc(doc(db,'playerCards',uid)); }catch(e){}
+  try{ const ss=(S.signups||[]).filter(x=>x.claimedByUid===uid); for(const x of ss) await updateDoc(doc(db,'signups',x.id),{email:null, phone:null, claimedByUid:null, claimedEmail:null, left:true, leftAt:Date.now()}).catch(()=>{}); }catch(e){}
+  try{ const pp=await getDocs(query(collection(db,'chatPhotoPending'),where('uid','==',uid))); for(const d of pp.docs) await deleteDoc(d.ref).catch(()=>{}); }catch(e){}
+  // 3) the account itself
+  stopAllListeners();
+  await deleteDoc(doc(db,'users',uid));
+  let authGone=true; try{ await deleteUser(u); }catch(e){ authGone=false; console.warn('auth delete',e); }
+  S.user=null; S.profile=null;
+  if(!authGone){ try{ await signOut(auth); }catch(e){} }
+  S.authMessage='Your account and personal details have been deleted. Thanks for playing — if you come back, just register again.';
+  renderShell(); toast('You have left the league');
+}
+function unseenDepartures(){ const me=S.user&&S.user.uid; if(!me) return []; return (S.departures||[]).filter(d=>!(d.seenBy||{})[me] && (isAdmin() || (isManager() && (d.teamId===S.profile.teamId || (d.managedTeams||[]).some(t=>t.id===S.profile.teamId))))); }
+/* the admin's own device does the clean-up the leaving player could not: opens the manager slot, emails the admin once */
+let depFollowBusy=false;
+async function departuresFollowUp(){
+  if(!isAdmin() || depFollowBusy) return; depFollowBusy=true;
+  try{ for(const d of (S.departures||[]).filter(x=>!x.followed)){
+    for(const t of (d.managedTeams||[])){ const tm=(S.allTeams||S.teams||[]).find(x=>x.id===t.id); if(tm && tm.managerUserId===d.uid) await updateDoc(doc(db,'teams',t.id),{managerUserId:null}).catch(()=>{}); }
+    if(emailOn() && S.user && S.user.email){ const when=new Date(d.at||Date.now()).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); const why=(LEAVE_REASONS.find(r=>r[0]===d.reason)||[])[1];
+      const text=d.name+(d.teamName?' ('+d.teamName+')':'')+' deleted their Geezer Ball Scorecard account on '+when+'.'+(why?' Reason given: '+why+'.':'')+(d.managedTeams&&d.managedTeams.length?' They managed '+d.managedTeams.map(t=>t.name).join(', ')+' — that team needs a manager.':'')+' Their registration and personal details have been removed; their stats in played games are kept.\n\nOpen the app → Admin → Players → Who left.'+(appLink()?'\n'+appLink():'');
+      await addDoc(collection(db,'mail'),{ to:S.user.email, uid:S.user.uid, leagueId:d.leagueId||null, kind:'departure', createdAt:Date.now(), message:{ subject:'A player left the league: '+d.name, text:text.slice(0,3000), html:('<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1e2a22;max-width:520px"><p>'+escHtml(text).replace(/\n/g,'<br>')+'</p></div>').slice(0,6000) } }).catch(()=>{}); }
+    await updateDoc(doc(db,'departures',d.id),{followed:true}).catch(()=>{});
+  } } finally { depFollowBusy=false; }
+}
+function departureBanners(){
+  if(S.activeTab==='admin' && adminSub==='approvals' && regSub==='left') return [];
+  return unseenDepartures().slice(0,3).map(d=>{
+    const when=new Date(d.at||0).toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}); const why=(LEAVE_REASONS.find(r=>r[0]===d.reason)||[])[1];
+    const mgr=(d.managedTeams||[]).length;
+    const b=h('div',{class:'alertBanner warn',style:'align-items:flex-start;border-left-width:8px;background:#fde8e4;border-color:#b3261e;'},[
+      h('span',{style:'font-size:22px;line-height:1;'},'🚪'),
+      h('div',{style:'flex:1;'},[
+        h('b',{style:'display:block;color:#7a1a14;font-size:13.5px;margin-bottom:3px;'},d.name+' left the league — '+when),
+        h('div',{style:'font-size:12.5px;color:#4a2a26;line-height:1.45;'},'Account, registration and player card deleted.'+(why?' Reason: '+why+'.':'')+(d.gamesPlayed?' Name and stats in '+d.gamesPlayed+' played game'+(d.gamesPlayed===1?'':'s')+' are kept.':'')),
+        h('div',{style:'font-size:12.5px;color:#4a2a26;margin-top:3px;'},(d.teamName?['Team: ',h('b',{},d.teamName),' · Roster spot now open.']:['No team.']).concat(mgr?[h('b',{style:'color:#b3261e;'},' '+d.managedTeams.map(t=>t.name).join(', ')+' needs a manager.')]:[])),
+        h('div',{style:'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;'},[
+          h('button',{class:'btn btn-primary btn-sm',onclick:async()=>{ try{ await updateDoc(doc(db,'departures',d.id),{['seenBy.'+S.user.uid]:Date.now()}); }catch(e){ toast('Could not save: '+friendlyErr(e)); } }},'Got it'),
+          d.teamId?h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.selectedTeamId=d.teamId; S.activeTab='roster'; renderShell(); }},'Open roster'):null,
+          isAdmin()?h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ S.activeTab='admin'; adminSub='approvals'; regSub='left'; renderShell(); }},'Who left'):null])])]);
+    return b; });
+}
+function departuresView(root){
+  const list=(S.departures||[]).filter(d=>!S.currentLeagueId||d.leagueId===S.currentLeagueId);
+  const card=h('div',{class:'card'}); card.appendChild(h('h3',{},'Who left'));
+  card.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 8px;'},'Players who deleted their own account. Their stats stay; personal details are gone.'));
+  if(!list.length) card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'Nobody has left.'));
+  list.forEach(d=>{ const seen=!!(d.seenBy||{})[S.user.uid]; const why=(LEAVE_REASONS.find(r=>r[0]===d.reason)||[])[1];
+    card.appendChild(h('div',{style:'display:flex;justify-content:space-between;gap:10px;padding:8px 0;border-top:1px solid var(--line);font-size:12.5px;'},[
+      h('div',{},[h('b',{},((d.managedTeams||[]).length?'(manager) ':'')+d.name),h('div',{style:'color:var(--ink-soft);'},[d.teamName||'No team', why?' · '+why:'', (d.managedTeams||[]).length?h('b',{style:'color:#b3261e;'},' · team needs a manager'):null])]),
+      h('div',{style:'text-align:right;white-space:nowrap;'},[formatDate(new Date(d.at||0).toISOString().slice(0,10)),h('div',{},seen?h('span',{style:'color:var(--ink-soft);'},'✓ Seen'):h('button',{class:'btn btn-primary btn-sm',onclick:()=>updateDoc(doc(db,'departures',d.id),{['seenBy.'+S.user.uid]:Date.now()})},'Got it'))])]));
+  });
+  root.appendChild(card);
 }
 /* "Your seasons": sign up for the season(s) you are playing (formal / informal). Pickup needs no sign-up. */
 let seasonsCardHidden=false;
@@ -969,7 +1062,7 @@ function yourSeasonsCard(){
 let regSub='approvals', regReportYear=null, regReportFilter='all', regArcYear='all', regArcSearch='', regArcColF={}, regArcFullDob=false;
 function regSubNav(root){
   const nNew=newSeasonSignups().length;
-  const tabs=[['approvals','Account approvals'+(pendingAccounts().length?' ('+pendingAccounts().length+')':'')],['signups','Season sign-ups'+(nNew?' ('+nNew+' new)':'')],['regs','Registrations'],['form','Registration form']];
+  const nLeft=unseenDepartures().length; const tabs=[['approvals','Account approvals'+(pendingAccounts().length?' ('+pendingAccounts().length+')':'')],['signups','Season sign-ups'+(nNew?' ('+nNew+' new)':'')],['regs','Registrations'],['left',(nLeft?'🚪 ':'')+'Who left'+(nLeft?' ('+nLeft+')':'')],['form','Registration form']];
   root.appendChild(h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;margin:-4px 0 12px;'}, tabs.map(([id,l])=>h('button',{style:'border-radius:14px;padding:5px 12px;font-size:12.5px;font-weight:800;cursor:pointer;border:1px solid '+(regSub===id?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ regSub=id; renderShell(); }},l))));
 }
 function leagueRegs(lid){ return (S.registrations||[]).filter(r=>r.leagueId===lid); }
@@ -1313,7 +1406,7 @@ function pendingAccounts(){ return (S.usersDirectory||[]).filter(u=>u.role==='pe
 function signupSeenAt(){ try{ return parseInt(localStorage.getItem('gbSignupSeen_'+(S.currentLeagueId||'x'))||'0',10)||0; }catch(e){ return 0; } }
 function markSignupsSeen(){ try{ localStorage.setItem('gbSignupSeen_'+(S.currentLeagueId||'x'), String(Date.now())); }catch(e){} }
 function newSeasonSignups(){ const seen=signupSeenAt(); return (S.signups||[]).filter(x=>!x.isTest && !x.isGuest && (x.createdAt||0)>seen && (!S.currentLeagueId || x.leagueId===S.currentLeagueId)).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0)); }
-function adminAlertCount(){ if(!isAdmin()) return 0; return pendingAccounts().length + newSeasonSignups().length + chatPhotoQueue().length + chatReported().length + (isSuperAdmin()?licOwnerTodoAll()+spOwnerTodoAll():licLeagueTodo()); }
+function adminAlertCount(){ if(!isAdmin()) return 0; return unseenDepartures().length + pendingAccounts().length + newSeasonSignups().length + chatPhotoQueue().length + chatReported().length + (isSuperAdmin()?licOwnerTodoAll()+spOwnerTodoAll():licLeagueTodo()); }
 let lastAlertCount=null;
 function isAdmin(){ return isSuperAdmin() || (S.profile && S.profile.role === 'admin' && (!S.profile.leagueId || S.profile.leagueId===S.currentLeagueId)); }
 function isManager(){ return S.profile && S.profile.role === 'manager'; }
@@ -1555,6 +1648,7 @@ function startLeagueData(){
   if(staff){
     listen(L('signups'), snap=>{ S.signups = snap.docs.map(d=>({id:d.id, ...d.data()})); renderShell(); }, 'sign-ups');
     listen(L('users'), snap=>{ S.usersDirectory = snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); }, 'members');
+    listen(L('departures'), snap=>{ S.departures = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||0)-(a.at||0)); departuresFollowUp(); renderShell(); }, 'who left');
     S.draftPool=[];   // old draft pool (before sign-ups): Super Admin only
   } else { S.usersDirectory=[]; S.draftPool=[]; }
   if(role==='admin'){
@@ -1576,6 +1670,7 @@ function startLegacyData(){
   const listen=(ref,fn,err)=>unsubL.push(onSnapshot(ref,fn,err||dataErr('legacy')));
   if((isAdmin()||isManager()) && S.currentLeagueId) listen(query(collection(db,'scorePasses'),where('leagueId','==',S.currentLeagueId),where('active','==',true)), snap=>{ S.passes=snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); }, ()=>{ S.passes=[]; });
   listen(collection(db,'teams'), snap=>onTeamsList(snap.docs.map(d=>({id:d.id,...d.data()}))));
+  if((isAdmin()||isManager()) && S.currentLeagueId) listen(query(collection(db,'departures'),where('leagueId','==',S.currentLeagueId)), snap=>{ S.departures = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.at||0)-(a.at||0)); departuresFollowUp(); renderShell(); });
   listen(collection(db,'users'), snap=>{ S.usersDirectory = snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); });
   listen(collection(db,'draftPool'), snap=>{ S.draftPool = snap.docs.map(d=>({id:d.id,...d.data()})); renderShell(); });
   listen(collection(db,'suggestions'), snap=>{ S.suggestions = snap.docs.map(d=>({id:d.id,...d.data()})).sort((a,b)=>(b.ts||0)-(a.ts||0)); renderShell(); });
@@ -2686,6 +2781,7 @@ function renderShellInner(){
     const parts=[]; if(pa) parts.push(pa+' account'+(pa===1?'':'s')+' waiting for approval'); if(ns) parts.push(ns+' new season sign-up'+(ns===1?'':'s')); if(cq) parts.push(cq+' chat photo'+(cq===1?'':'s')+' to approve'); if(cr) parts.push(cr+' reported chat message'+(cr===1?'':'s')); if(lt) parts.push(lt+' license item'+(lt===1?'':'s')+' (signature or notice)'); if(sp) parts.push(sp+' sponsor agreement item'+(sp===1?'':'s'));
     content.appendChild(h('div',{class:'alertBanner',onclick:()=>{ if(sp && !lt && !pa && !ns && !cq && !cr){ S.activeTab='superadmin'; superSub='ads'; adSub='advertisers'; adFilter='noagr'; renderShell(); return; } if(lt && !pa && !ns && !cq && !cr){ if(isSuperAdmin()){ S.activeTab='superadmin'; superSub=noticeUnread()?'notices':'licenses'; } else { S.activeTab='admin'; adminSub=leagueNoticeUnread()?'notices':'license'; } renderShell(); return; } S.activeTab='admin'; adminSub=(!pa&&!ns&&(cq||cr))?'chat':'approvals'; if(adminSub==='approvals') regSub=(!pa&&ns)?'signups':'approvals'; renderShell(); }},[h('span',{style:'font-size:20px;'},'\ud83d\udd14'), h('span',{style:'flex:1;'},[h('b',{},(pa||ns)?'Players: ':((cq||cr)?'Chat: ':(lt?'License: ':'Sponsors: '))), parts.join(' \u00b7 ')]), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Review \u2192')]));
   }
+  departureBanners().forEach(b=>content.appendChild(b));
   if(isAdmin() && curSeasonIsTest() && !(S.activeTab==='admin' && adminSub==='test')) content.appendChild(h('div',{style:'display:flex;align-items:center;gap:8px;background:#fff6d6;border:1px solid #f3d27a;border-radius:10px;padding:6px 12px;margin:0 0 10px;font-size:12.5px;cursor:pointer;',onclick:()=>{ S.activeTab='admin'; adminSub='test'; renderShell(); }},[seasonModePill(currentSeason()),h('span',{style:'flex:1;'},h('b',{},(currentSeason()||{}).name||'')),h('span',{style:'color:var(--ink-soft);'},'Rehearsal season \u2014 doesn\u2019t count. Admin \u2192 Test Mode \u2192')]));
   if(isAdmin() && !(S.activeTab==='admin' && adminSub==='backup')){ const ov=bkOverdue(S.currentLeagueId); if(ov) content.appendChild(h('div',{class:'alertBanner',style:'background:#fff8e6;border-color:var(--gold);color:var(--ink);',onclick:()=>{ S.activeTab='admin'; adminSub='backup'; renderShell(); }},'\u26a0 League backup overdue: '+ov.join(' and ')+'. Tap to open Backup.')); }
   bkCheckScheduled();
@@ -4736,6 +4832,7 @@ Router.register('batting', (root)=>{
     table.appendChild(h('tr',{},[h('th',{},'Player'),h('th',{},'AB'),h('th',{},'H'),h('th',{},'R'),h('th',{},'RBI'),h('th',{},'TB'),h('th',{},'BB'),h('th',{},'AVG'),h('th',{},'OBP'),h('th',{},'SLG'),h('th',{},'SO'),h('th',{},'GO'),h('th',{},'FO')]));
     players.filter(p=>p.side===side && (!battingPlayerPick||p.id===battingPlayerPick)).sort((a,b)=>(a.order||99)-(b.order||99)).forEach(p=>{
       const l=computeBattingLine(game,p.id);
+      if(rosterPrivate(p)||namePrivate(p.name)){ table.appendChild(h('tr',{'data-pname':p.name},[h('td',{style:'font-weight:700;'},[p.name,lockTag()]),h('td',{colspan:'13',style:'text-align:left;'},naCell())])); return; }
       table.appendChild(h('tr',{'data-pname':p.name},[h('td',{style:'color:var(--grass-1);font-weight:700;text-decoration:underline;cursor:pointer;',onclick:()=>{ battingPlayerPick=p.id; pfReset('batting'); renderShell(); }},p.name),h('td',{},String(l.AB)),h('td',{},String(l.H)),h('td',{},String(l.R)),h('td',{},String(l.RBI)),h('td',{},String(l.TB)),h('td',{},String(l.BB)),h('td',{},fmt3(l.AVG)),h('td',{},fmt3(l.OBP)),h('td',{},fmt3(l.SLG)),h('td',{},String(l.outTypes.SO)),h('td',{},String(l.outTypes.GO)),h('td',{},String(l.outTypes.FO))]));
     });
     scrollWrap.appendChild(table); card.appendChild(scrollWrap); root.appendChild(card);
@@ -4750,7 +4847,7 @@ function exportBattingExcel(game, players, scope){
     const sidePlayers=players.filter(p=>p.side===side).sort((a,b)=>(a.order||99)-(b.order||99));
     if(!sidePlayers.length) return;
     const rows=[header];
-    sidePlayers.forEach(p=>{ const l=computeBattingLine(game,p.id); rows.push([p.name,l.AB,l.H,l.R,l.RBI,l.TB,l.BB,Number(l.AVG.toFixed(3)),Number(l.OBP.toFixed(3)),Number(l.SLG.toFixed(3)),l.outTypes.SO,l.outTypes.GO,l.outTypes.FO]); });
+    sidePlayers.forEach(p=>{ if(rosterPrivate(p)||namePrivate(p.name)){ rows.push([p.name,NA_TXT,'','','','','','','','','','','']); return; } const l=computeBattingLine(game,p.id); rows.push([p.name,l.AB,l.H,l.R,l.RBI,l.TB,l.BB,Number(l.AVG.toFixed(3)),Number(l.OBP.toFixed(3)),Number(l.SLG.toFixed(3)),l.outTypes.SO,l.outTypes.GO,l.outTypes.FO]); });
     const ws=XLSX.utils.aoa_to_sheet(rows); ws['!cols']=[{wch:20},{wch:6},{wch:6},{wch:6},{wch:6},{wch:6},{wch:7},{wch:7},{wch:7},{wch:5},{wch:5},{wch:5}];
     XLSX.utils.book_append_sheet(wb,ws,(game[side].name||(side==='home'?'Home':'Away')).slice(0,31));
   });
@@ -5185,7 +5282,7 @@ function exportSeasonBattingExcel(rows){
   if(typeof XLSX==='undefined'){ toast('Excel export is unavailable right now'); return; }
   if(!rows.length){ toast('No data to export'); return; }
   const header=['Player','GP','AB','H','R','RBI','AVG','OBP','SLG']; const data=[header];
-  rows.forEach(r=>data.push([r.name,r.GP,r.AB,r.H,r.R,r.RBI,Number(r.AVG.toFixed(3)),Number(r.OBP.toFixed(3)),Number(r.SLG.toFixed(3))]));
+  rows.forEach(r=>data.push(r.private?[r.name,NA_TXT,'','','','','','','']:[r.name,r.GP,r.AB,r.H,r.R,r.RBI,Number(r.AVG.toFixed(3)),Number(r.OBP.toFixed(3)),Number(r.SLG.toFixed(3))]));
   const wb=XLSX.utils.book_new(); const ws=XLSX.utils.aoa_to_sheet(data); ws['!cols']=[{wch:20},{wch:5},{wch:6},{wch:6},{wch:6},{wch:7},{wch:7},{wch:7}];
   XLSX.utils.book_append_sheet(wb,ws,'Season'); XLSX.writeFile(wb, `Season Batting - ${new Date().toISOString().slice(0,10)}.xlsx`); toast('Excel file downloaded');
 }
@@ -5308,7 +5405,8 @@ function priorStatsByName(){
   leaguePlayerStats(games).forEach(p=>{ const k=(p.name||'').trim().toLowerCase(); if(!map[k]||map[k].AB<p.AB) map[k]=p; const nk='n:'+normName(p.name); if(!map[nk]||map[nk].AB<p.AB) map[nk]=p; const em=emailOf[p.playerId]; if(em && (!map['@'+em]||map['@'+em].AB<p.AB)) map['@'+em]=p; });
   return map;
 }
-function priorStatsFor(x, prior){ prior=prior||priorStatsByName(); const be=x.email && prior['@'+ekey(x.email)]; if(be) return be; const m=matchFor(x); if(m.st==='returning'&&m.p){ const s2=prior['n:'+m.p.key]; if(s2) return s2; } return prior[(x.name||'').trim().toLowerCase()] || prior['n:'+normName(x.name)] || null; }
+function priorStatsFor(x, prior){ if(signupPrivate(x)) return null;   // stats private: past numbers stay hidden
+  prior=prior||priorStatsByName(); const be=x.email && prior['@'+ekey(x.email)]; if(be) return be; const m=matchFor(x); if(m.st==='returning'&&m.p){ const s2=prior['n:'+m.p.key]; if(s2) return s2; } return prior[(x.name||'').trim().toLowerCase()] || prior['n:'+normName(x.name)] || null; }
 /* ---- Evaluation sheet: download pre-filled, import back ---- */
 function downloadEvalSheet(){
   const rows=seasonSignups().slice().sort((a,b)=>rosterLastKey(a.name).localeCompare(rosterLastKey(b.name))); const idx=pastIndex();
@@ -5502,14 +5600,14 @@ function draftBoardView(root, canSetup){
     sel.addEventListener('change',()=>{ if(!sel.value) return; bbSort=k; bbDir=sel.value; renderShell(); }); return h('th',{style:'padding:2px 3px 6px;'},sel); };
   bt.appendChild(h('tr',{},[h('th',{}),h('th',{}),h('th',{}),ssel('age'),ssel('rating'),ssel('avg'),ssel('obp'),ssel('power'),ssel('def'),ssel('last'),h('th',{})]));
   rows.forEach((x,i)=>{
-    const st=priorStatsFor(x,prior); const e=x.eval||{};
+    const pv=signupPrivate(x); const st=priorStatsFor(x,prior); const e=x.eval||{};
     bt.appendChild(h('tr',{},[
       h('td',{},String(i+1)),
-      h('td',{style:'text-align:left;font-weight:700;'},[x.name, e.comment?h('div',{style:'font-size:10px;color:var(--ink-soft);font-weight:400;'},e.comment):null]),
+      h('td',{style:'text-align:left;font-weight:700;'},[x.name, pv?lockTag():null, e.comment?h('div',{style:'font-size:10px;color:var(--ink-soft);font-weight:400;'},e.comment):null]),
       h('td',{},x.pos||'\u2014'), h('td',{},x.age!=null?String(x.age):'\u2014'),
       h('td',{style:'font-weight:800;color:var(--grass-1);'},signupRating(x)?String(signupRating(x)):'\u2014'),
-      h('td',{},st?fmt3(st.AVG):'\u2014'), h('td',{},st?fmt3(st.OBP):'\u2014'),
-      h('td',{},e.power?String(e.power):'\u2014'), h('td',{},e.defense?String(e.defense):'\u2014'), h('td',{},e.lastRank?String(e.lastRank):(st?'':'New')),
+      h('td',{},pv?naCell('font-size:11px;'):(st?fmt3(st.AVG):'\u2014')), h('td',{},pv?naCell('font-size:11px;'):(st?fmt3(st.OBP):'\u2014')),
+      h('td',{},e.power?String(e.power):'\u2014'), h('td',{},e.defense?String(e.defense):'\u2014'), h('td',{},pv?naCell('font-size:11px;'):(e.lastRank?String(e.lastRank):(st?'':'New'))),
       h('td',{}, myTurn ? h('button',{class:'btn btn-gold btn-sm',onclick:()=>confirmModal('Draft '+x.name+'?','For '+teamNameById(cur.teamId)+' \u2014 Round '+cur.round+', Pick '+cur.pickNo+'.',()=>makeDraftPick(x,cur.teamId))},'Draft') : h('span',{class:'pill-role'},'Available'))
     ]));
   });
@@ -5561,7 +5659,7 @@ async function approveInformalRosters(){
     for(const x of pend){
       const teamId=x.pickTeamId; if(!S.teams.some(t=>t.id===teamId)) continue;
       const existing=S.allPlayersForFeed.filter(p=>p.teamId===teamId && p.seasonId===S.currentSeasonId).length;
-      await addDoc(collection(db,'teams',teamId,'players'),{name:x.name, number:null, position:x.pos||'', order:existing+1+n, isSub:false, subTeamName:'', seasonId:S.currentSeasonId, signupId:x.id, emailKey:ekey(x.email)||null, isTest:!!x.isTest});
+      await addDoc(collection(db,'teams',teamId,'players'),{name:x.name, number:null, position:x.pos||'', order:existing+1+n, isSub:false, subTeamName:'', seasonId:S.currentSeasonId, signupId:x.id, statsPrivate:!!x.statsPrivate, emailKey:ekey(x.email)||null, isTest:!!x.isTest});
       await updateDoc(doc(db,'signups',x.id),{drafted:true, draftedByTeamId:teamId});
       syncLinkedAccountTeam(x, teamId);
       n++;
@@ -5610,6 +5708,55 @@ function informalPickView(root){
   card.appendChild(h('p',{style:'font-size:11px;color:var(--ink-soft);margin:8px 0 0;'},admin?'Place or move anyone. Picks stay pending until you tap Approve rosters; approved players (\u2713) are on the Roster tab and can be moved there.':'Picks show as pending until the admin approves rosters. Players don\u2019t see teams yet. A player can only be on one team \u2014 ask the admin to move someone.'));
   root.appendChild(card);
 }
+/* ===== Players without an account (added by the admin) & "Stats private" =====
+   The sign-up carries noAccount / regStatus / statsPrivate; the roster entry copies statsPrivate when he is placed. */
+const REG_STATUS={paper:'Paper form on file',waived:'League waived it',owed:'Still owed'};
+function signupPrivate(x){ return !!(x && x.statsPrivate); }
+function rosterPrivate(p){ if(!p) return false; if(p.statsPrivate!=null) return !!p.statsPrivate; const su=p.signupId && (S.signups||[]).find(x=>x.id===p.signupId); return !!(su && su.statsPrivate); }
+function privateNames(){ const set=new Set(); (S.signups||[]).forEach(x=>{ if(x.statsPrivate && (!S.currentLeagueId||x.leagueId===S.currentLeagueId)) set.add(String(x.name||'').trim().toLowerCase()); }); (S.allPlayersForFeed||[]).forEach(p=>{ if(p.statsPrivate) set.add(String(p.name||'').trim().toLowerCase()); }); return set; }
+function namePrivate(name){ return privateNames().has(String(name||'').trim().toLowerCase()); }
+const NA_TXT='Not available';
+function naCell(extra){ return h('span',{style:'color:var(--ink-soft);font-style:italic;font-size:12px;'+(extra||''),title:'Stats not available — player’s choice'},NA_TXT); }
+function lockTag(){ return h('span',{style:'font-size:11px;margin-left:4px;',title:'Stats private — player’s choice'},'🔒'); }
+function offlinePlayerSheet(existing, onDone){
+  const sn=currentSeason(); if(!sn && !existing){ toast('Pick a season first'); return; }
+  const overlay=h('div',{class:'modalOverlay'}); const sheet=h('div',{class:'modalSheet',style:'max-height:92vh;overflow:auto;'}); overlay.appendChild(sheet);
+  const close=()=>overlay.remove(); overlay.addEventListener('click',e=>{ if(e.target===overlay) close(); });
+  sheet.appendChild(h('div',{class:'modalHandle'})); sheet.appendChild(h('h3',{},existing?'Player who isn’t online':'Add a player who isn’t online'));
+  sheet.appendChild(h('p',{style:'font-size:12px;color:var(--ink-soft);margin:0 0 8px;line-height:1.45;'},'For someone playing this season who won’t use the app. He goes on the sign-up list and into the draft like everyone else. If he joins later with this email, his account links up.'));
+  const x=existing||{};
+  const nm=h('input',{type:'text',placeholder:'First and last name',value:x.name||''});
+  const age=h('input',{type:'number',placeholder:'Age',min:'10',max:'110',value:x.age!=null?String(x.age):'',style:'flex:1;margin:0;'});
+  const pos=h('select',{style:'flex:1;margin:0;'}); ['','P','C','1B','2B','SS','3B','LF','LCF','RCF','RF','EH','Any'].forEach(v=>{ const o=h('option',{value:v},v||'Position'); if(v===(x.pos||'')) o.setAttribute('selected','selected'); pos.appendChild(o); });
+  const ph=h('input',{type:'tel',placeholder:'Cell (optional)',value:x.phone||'',style:'flex:1.4;margin:0;'});
+  const em=h('input',{type:'email',placeholder:'Email (optional — only to link him later)',value:x.email||'',style:'margin-top:6px;'});
+  sheet.appendChild(nm); sheet.appendChild(h('div',{style:'display:flex;gap:6px;margin-top:6px;'},[age,pos,ph])); sheet.appendChild(em);
+  const lab=t=>h('div',{style:'font-size:10.5px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--gold-2);margin:12px 0 6px;'},t);
+  sheet.appendChild(lab('Registration & waiver'));
+  let regStatus=x.regStatus||'paper'; const segs=h('div',{style:'display:flex;gap:6px;flex-wrap:wrap;'});
+  const drawSeg=()=>{ segs.innerHTML=''; Object.entries(REG_STATUS).forEach(([k,l])=>segs.appendChild(h('button',{type:'button',style:'border-radius:8px;padding:6px 10px;font-size:12px;font-weight:700;cursor:pointer;border:1px solid '+(regStatus===k?'var(--grass-1);background:var(--grass-1);color:#fff;':'var(--line);background:#fff;color:var(--ink);'),onclick:()=>{ regStatus=k; drawSeg(); }},l))); };
+  drawSeg(); sheet.appendChild(segs);
+  const sw=(title,desc,on,set)=>{ const row=h('div',{style:'display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:8px;padding:10px;border:1px solid var(--line);border-radius:10px;'}); const t=h('div',{style:'flex:1;'},[h('b',{style:'font-size:13px;'},title),desc?h('div',{style:'font-size:11.5px;color:var(--ink-soft);line-height:1.4;'},desc):null]); const b=h('button',{type:'button',style:'flex:none;width:44px;height:26px;border-radius:13px;border:0;position:relative;cursor:pointer;background:'+(on?'var(--grass-1)':'#c9c2ae')},h('span',{style:'position:absolute;top:3px;'+(on?'right:3px;':'left:3px;')+'width:20px;height:20px;border-radius:50%;background:#fff;'})); b.addEventListener('click',()=>{ on=!on; set(on); b.style.background=on?'var(--grass-1)':'#c9c2ae'; b.firstChild.style.cssText='position:absolute;top:3px;'+(on?'right:3px;':'left:3px;')+'width:20px;height:20px;border-radius:50%;background:#fff;'; }); row.appendChild(t); row.appendChild(b); return row; };
+  let priv=!!x.statsPrivate, paid=!!x.paid;
+  sheet.appendChild(sw('Stats private','His lines show “Not available” on Batting, Hit Zone, Report, Big Board and Player Eval. Scoring is unchanged.',priv,v=>{ priv=v; }));
+  sheet.appendChild(sw('Paid the league fee','',paid,v=>{ paid=v; }));
+  if(x.addedBy) sheet.appendChild(h('p',{style:'font-size:11.5px;color:var(--ink-soft);font-style:italic;margin:8px 0 0;'},'Added by '+x.addedBy+' · '+formatDate(new Date(x.createdAt||Date.now()).toISOString().slice(0,10))));
+  sheet.appendChild(h('div',{style:'display:flex;gap:8px;margin-top:12px;'},[
+    h('button',{class:'btn btn-primary',style:'flex:1;',onclick:async()=>{
+      const n=nm.value.trim().replace(/\s+/g,' '); if(!n){ toast('Enter a name'); nm.focus(); return; }
+      const data={ name:n, age:age.value?+age.value:null, pos:pos.value||'', phone:ph.value.trim(), email:normEmail(em.value)||null, noAccount:true, regStatus, statsPrivate:priv, paid };
+      try{
+        if(existing){ await updateDoc(doc(db,'signups',existing.id),data);
+          // the roster entry (if he has been placed) follows the switch
+          for(const t of (S.allTeams||[])){ const ps=(S.allPlayersForFeed||[]).filter(p=>p.teamId===t.id && p.signupId===existing.id); for(const p of ps) await updateDoc(doc(db,'teams',t.id,'players',p.id),{statsPrivate:priv}).catch(()=>{}); }
+          toast(n+' updated'); }
+        else { const ref=await addDoc(collection(db,'signups'),Object.assign(data,{ leagueId:S.currentLeagueId||null, seasonId:S.currentSeasonId, agreedTerms:false, drafted:false, createdAt:Date.now(), addedBy:(S.profile&&S.profile.displayName)||'admin', addedByUid:S.user.uid })); toast(n+' added to sign-ups'); if(onDone) onDone({id:ref.id,name:n}); }
+        close(); renderShell();
+      }catch(e){ toast('Could not save: '+friendlyErr(e)); }
+    }},existing?'Save':'Add to sign-ups'),
+    h('button',{class:'btn btn-outline',style:'flex:1;',onclick:close},'Cancel')]));
+  document.body.appendChild(overlay); setTimeout(()=>nm.focus(),50);
+}
 function signupWindowCard(){
   const season=S.seasons.find(x=>x.id===S.currentSeasonId); if(!season) return null;
   const league=S.leagues.find(l=>l.id===S.currentLeagueId);
@@ -5630,6 +5777,7 @@ function signupAdminView(root){
   const list=h('div',{class:'card'});
   const rows=seasonSignups();
   list.appendChild(h('h3',{},['Sign-ups', h('span',{style:'font-size:11px;color:var(--ink-soft);font-weight:600;'},rows.length+' \u00b7 '+rows.filter(x=>x.agreedTerms).length+' accepted terms \u00b7 '+rows.filter(x=>x.paid).length+' paid')]));
+  if(seasonMethod(season)!=='pickup') list.appendChild(h('div',{style:'margin:0 0 10px;'},[h('button',{class:'btn btn-primary btn-sm',onclick:()=>offlinePlayerSheet(null)},'＋ Add a player who isn’t online'),h('span',{style:'font-size:11.5px;color:var(--ink-soft);margin-left:8px;'},'For someone who plays but won’t use the app.')]));
   { const others=S.signups.filter(x=>x.seasonId!==S.currentSeasonId && (!S.currentLeagueId||x.leagueId===S.currentLeagueId) && !x.isTest);
     const bySeason={}; others.forEach(x=>{ bySeason[x.seasonId]=(bySeason[x.seasonId]||0)+1; });
     Object.entries(bySeason).forEach(([sid,n])=>{ const sn=(S.seasons.find(z=>z.id===sid)||{}).name||'another season'; list.appendChild(h('div',{class:'alertBanner',onclick:()=>{ S.currentSeasonId=sid; switchSeasonListeners(); renderShell(); }},[h('span',{},'\u2139\ufe0f'), h('span',{style:'flex:1;'},n+' sign-up'+(n===1?' is':'s are')+' filed under '+sn+'.'), h('span',{style:'font-weight:800;color:var(--grass-1);'},'Show \u2192')])); });
@@ -5642,7 +5790,8 @@ function signupAdminView(root){
       const paidCb=h('input',{type:'checkbox',style:'width:auto;',title:(x.paidClaim&&!x.paid)?'The player says he paid — check it, then tick':''}); if(x.paid) paidCb.checked=true; paidCb.addEventListener('change',()=>updateDoc(doc(db,'signups',x.id),{paid:paidCb.checked}));
       const acct=(S.usersDirectory||[]).find(u=>u.id===x.claimedByUid) || (S.usersDirectory||[]).find(u=>u.signupId===x.id);
       const emailAcct=!acct && x.email ? (S.usersDirectory||[]).find(u=>normEmail(u.email)===normEmail(x.email) && u.role!=='pending' && u.role!=='declined') : null;
-      const codeCell = acct ? h('span',{style:'color:var(--grass-1);font-weight:800;white-space:nowrap;',title:acct.email||''},'✓ Linked')
+      const codeCell = (x.noAccount && !acct) ? h('button',{class:'btn btn-outline btn-sm',style:'white-space:nowrap;',title:'Added by the admin — tap to change',onclick:()=>offlinePlayerSheet(x)},'No account · '+(REG_STATUS[x.regStatus]||'paper')+(x.statsPrivate?' · 🔒':''))
+        : acct ? h('span',{style:'color:var(--grass-1);font-weight:800;white-space:nowrap;',title:acct.email||''},'✓ Linked')
         : emailAcct ? h('button',{class:'btn btn-outline btn-sm',title:'An approved account uses this email',onclick:async()=>{ await linkAccountToSignup(emailAcct,x); toast('Linked '+x.name); }},'Link '+(emailAcct.email||''))
         : (S.usersDirectory||[]).some(u=>u.role==='pending' && normEmail(u.email)===normEmail(x.email)) ? h('span',{style:'color:#7a5a00;font-size:11px;font-weight:700;white-space:nowrap;'},'Waiting for approval')
         : h('span',{style:'color:var(--ink-soft);font-size:11px;white-space:nowrap;'},'No account yet');
@@ -5836,7 +5985,7 @@ function playerEvalView(root){
     const posInp=h('button',{title:'Set positions',style:'min-width:64px;padding:4px 7px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer;font-size:12px;font-weight:700;color:'+(pl.length?'var(--ink)':'var(--ink-soft)')+';',onclick:()=>evalPosPicker(x)},pl.length?pl.join(', '):'+ Pos');
     const cInp=h('input',{type:'text',value:e.comment||'',placeholder:'Notes',style:'padding:5px;min-width:160px;'}); cInp.addEventListener('change',()=>updateDoc(doc(db,'signups',x.id),{'eval.comment':cInp.value.trim()}));
     t.appendChild(h('tr',{},[
-      h('td',{style:'text-align:left;font-weight:700;'},[x.name, st?null:h('span',{class:'pill-gold',style:'margin-left:6px;'},'New')]),
+      h('td',{style:'text-align:left;font-weight:700;'},[x.name, signupPrivate(x)?lockTag():(st?null:h('span',{class:'pill-gold',style:'margin-left:6px;'},'New'))]),
       h('td',{},posInp), h('td',{},num('lastRank',e.lastRank)),
       h('td',{},st?fmt3(st.AVG):'\u2014'), h('td',{},st?fmt3(st.OBP):'\u2014'), h('td',{},st?fmt3(st.SLG):'\u2014'),
       h('td',{},num('power',e.power)), h('td',{},num('defense',e.defense)),
@@ -6414,7 +6563,8 @@ function scopeGames(all){
   return games.filter(g=>g.completed);
 }
 function sideTeamId(g, side){ return side===ownerSideOf(g) ? g.teamId : (g.opponentTeamId||null); }
-function leaguePlayerStats(games){
+function leaguePlayerStats(games, opt){
+  const keepPrivate=!!(opt&&opt.includePrivate); const priv=privateNames();
   const map={};
   games.forEach(g=>{
     ['home','away'].forEach(side=>{
@@ -6432,8 +6582,9 @@ function leaguePlayerStats(games){
     const agg=aggregateLines(lines);
     const extra={HR:0,'2B':0,'3B':0,SO:0,GO:0,FO:0};
     lines.forEach(l=>{ extra.HR+=l.hr; extra['2B']+=l.doubles; extra['3B']+=l.triples; extra.SO+=l.outTypes.SO; extra.GO+=l.outTypes.GO; extra.FO+=l.outTypes.FO; });
-    return {...sp, GP:sp.games.length, ...agg, ...extra};
-  }).filter(r=>r.AB>0 || r.BB>0);
+    const isPriv=priv.has(String(sp.name||'').trim().toLowerCase());
+    return {...sp, GP:sp.games.length, ...agg, ...extra, private:isPriv};
+  }).filter(r=>(r.AB>0 || r.BB>0) && (keepPrivate || !r.private));
 }
 function lastNameKey(n){ const parts=(n||'').trim().toLowerCase().split(/\s+/); return (parts[parts.length-1]||'')+' '+parts.slice(0,-1).join(' '); }
 function reportPlayerOptions(teamFilter, statPlayers){
@@ -6615,7 +6766,7 @@ let batColMin={}, batPlayerQ='', rptDir='best';
 const LOWER_IS_BETTER=['SO','GO','FO'];
 function statBestCmp(c,dir){ const low=LOWER_IS_BETTER.includes(c); const sign=((dir||'best')==='best')?(low?1:-1):(low?-1:1); return (a,b)=>sign*((a[c]||0)-(b[c]||0)); }
 function battingReportCard(games, title){
-  const stats = leaguePlayerStats(games);
+  const stats = leaguePlayerStats(games,{includePrivate:true});
   const card=h('div',{class:'card'});
   const cols=['GP','AB','H','R','RBI','AVG','OBP','SLG','HR','BB','SO','GO','FO'];
   // Title line with a compact View menu on the right
@@ -6640,10 +6791,10 @@ function battingReportCard(games, title){
   }
   if(!stats.length){ card.appendChild(h('p',{style:'font-size:13px;color:var(--ink-soft);'},'No completed games with at-bats yet.')); return card; }
   const showTeam=isAdmin();
-  const sorted=()=>stats.slice().sort((a,b)=>statBestCmp(rptStat,rptDir)(a,b)||a.name.localeCompare(b.name));
+  const sorted=()=>stats.slice().sort((a,b)=>((a.private?1:0)-(b.private?1:0))||statBestCmp(rptStat,rptDir)(a,b)||a.name.localeCompare(b.name));
   // Single-player summary tiles
   const tiles=h('div',{});
-  const drawTiles=()=>{ tiles.innerHTML=''; if(rptPlayer==='all') return; const r=stats.find(p=>p.key===rptPlayer); if(!r) return;
+  const drawTiles=()=>{ tiles.innerHTML=''; if(rptPlayer==='all') return; const r=stats.find(p=>p.key===rptPlayer); if(!r) return; if(r.private){ tiles.appendChild(h('div',{style:'background:var(--chalk-2);border-radius:10px;padding:12px;margin-bottom:12px;font-size:13px;'},['🔒 ',h('b',{},r.name),' — stats not available (player’s choice). His at-bats still count in team totals.'])); return; }
     tiles.appendChild(h('div',{style:'display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;'}, ['AVG','OBP','SLG','H','R','RBI','HR'].map(k=>h('div',{style:'flex:1 1 80px;background:var(--chalk-2);border-radius:10px;padding:10px;text-align:center;'},[
       h('div',{style:'font-size:10px;font-weight:700;color:var(--ink-soft);text-transform:uppercase;'},k),
       h('div',{style:'font-family:var(--font-mono);font-size:18px;font-weight:800;'},fmtStat(k,r[k]))])))); };
@@ -6704,7 +6855,7 @@ function battingReportCard(games, title){
             return true; });
     tbody.innerHTML='';
     if(!current.length) tbody.appendChild(h('tr',{},h('td',{colspan:String(cols.length+1+(showTeam?1:0)),style:'text-align:center;color:var(--ink-soft);padding:14px;'},'No players match these filters.')));
-    current.forEach(r=>tbody.appendChild(h('tr',{},[h('td',{style:'text-align:left;color:var(--grass-1);font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;',onclick:()=>{ rptPlayer=r.key; batPlayerQ=''; renderShell(); }},r.name)].concat(showTeam?[h('td',{style:'white-space:nowrap;'},r.teamName)]:[]).concat(cols.map(c=>h('td',{style:c===rptStat?'font-weight:800;':''},fmtStat(c,r[c])))))));
+    current.forEach(r=>tbody.appendChild(r.private ? h('tr',{},[h('td',{style:'text-align:left;font-weight:700;white-space:nowrap;'},[r.name,lockTag()])].concat(showTeam?[h('td',{style:'white-space:nowrap;'},r.teamName)]:[]).concat([h('td',{colspan:String(cols.length),style:'text-align:left;'},naCell()),])) : h('tr',{},[h('td',{style:'text-align:left;color:var(--grass-1);font-weight:700;text-decoration:underline;cursor:pointer;white-space:nowrap;',onclick:()=>{ rptPlayer=r.key; batPlayerQ=''; renderShell(); }},r.name)].concat(showTeam?[h('td',{style:'white-space:nowrap;'},r.teamName)]:[]).concat(cols.map(c=>h('td',{style:c===rptStat?'font-weight:800;':''},fmtStat(c,r[c])))))));
     countEl.textContent='Showing '+current.length+' of '+stats.length+' players';
     clearAll.style.display=(rptPlayer!=='all'||batPlayerQ||rptTeam!=='all')?'':'none';
   };
@@ -7159,7 +7310,7 @@ function atBatPlayerCard(game){
     h('div',{class:'pcName'},b.name),
     pc.nickname?h('div',{class:'pcNick'},'“'+pc.nickname+'”'):null,
     h('div',{class:'pcMeta'},[b.position, 'Batting '+pcOrd(b.order||order)].filter(Boolean).join(' · ')),
-    h('div',{class:'pcStats'},[
+    (rosterPrivate(b)||namePrivate(b.name)) ? h('div',{class:'pcStats'},[stat('🔒','Stats','not available — player’s choice')]) : h('div',{class:'pcStats'},[
       stat(todayTxt,'Today',todaySub),
       stat(season.AB?fmt3(season.AVG):'—','Season',season.AB?(season.RBI+' RBI'):'no ABs yet'),
       stat(streak?('🔥 '+streak):'—','Streak',streak?(streak===1?'game w/ hit':'games w/ hit'):'no hits yet',streak>=3)
@@ -7170,7 +7321,7 @@ function atBatPlayerCard(game){
     (pc.tags||[]).slice(0,3).length?h('span',{class:'pcTags'},(pc.tags||[]).slice(0,3).map(t=>h('span',{class:'pcTag'},t))):null]),
     pc.about?h('div',{class:'pcAboutTxt'},pc.about):null]));
   { const lineup=(team.players||[]).filter(p=>p.name&&p.name.trim()).sort((a,b)=>(a.order||99)-(b.order||99)); const i=lineup.findIndex(p=>p.id===b.id); const od=lineup.length>1?lineup[(i+1)%lineup.length]:null;
-    if(od){ const os=seasonStatsForPlayer(od.id, game.seasonId); card.appendChild(h('div',{class:'pcOnDeck'},[h('b',{},'On deck '),od.name+(od.position?' · '+od.position:''),os.AB?' · '+fmt3(os.AVG):''])); } }
+    if(od){ const os=seasonStatsForPlayer(od.id, game.seasonId); card.appendChild(h('div',{class:'pcOnDeck'},[h('b',{},'On deck '),od.name+(od.position?' · '+od.position:''),(os.AB && !rosterPrivate(od) && !namePrivate(od.name))?' · '+fmt3(os.AVG):''])); } }
   const raw=playerCardFor(b,true);
   if(raw && isAdmin() && (isSuperAdmin() || raw.leagueId===S.currentLeagueId)) card.appendChild(h('div',{class:'pcAdmin'},[
     raw.photo?h('button',{onclick:()=>confirmModal('Remove '+(b.name||'this player')+'’s photo?','The cartoon shows instead. The player can add a new photo later.',()=>updateDoc(doc(db,'playerCards',raw.id),{photo:'',photoRemovedBy:S.user.email,photoRemovedAt:Date.now()}),{danger:true,confirmLabel:'Remove photo'})},'Remove photo'):null,
@@ -7413,13 +7564,13 @@ Router.register('feed', (root)=>{
 });
 
 /* ===================== TERMS TAB ===================== */
-const TERMS_VERSION='2026-11-08';
+const TERMS_VERSION='2026-11-09';
 const TERMS_CLAUSES = [
   ['1. Who we are and what this is.','This app, Geezer Ball Scorecard, is provided and operated by its Software Provider (the \u201cSoftware Provider\u201d). Your league uses it to run registration, rosters, schedules, live scoring, statistics, and league communications. By creating an account or submitting a sign-up, you agree to these Terms and to the data practices described here.'],
   ['2. Information we collect.','Information you provide: name, age, email, phone number, preferred position, payment status, and anything you type into the app. Information generated by using the app: game results, at-bats, batting and fielding statistics, draft rankings and evaluations, and usage data such as which screens you view and for how long, along with your device and browser type.'],
   ['3. How we use it.','To run the league — registration, the draft, rosters, schedules, scoring, standings, and history; to show statistics and results to other league members; to contact you about league business; to improve the app; and to support the league\u2019s sponsors and partners as described below.'],
   ['4. How we share it.','Within the app: your name, team, position, and statistics are visible to members of your league. Members of other leagues cannot see your information. Your email, phone number, and age are visible only to your league\u2019s administrators and team managers (and to you). With sponsors and partners: the Software Provider and your league may share, license, or sell information about you — including your name, contact information, participation, statistics, and usage data — to third-party sponsors, advertisers, and business partners, who may use it for their own marketing and analytics. With service providers that host and operate the app (for example, Google Firebase). As required by law or to protect the league, its members, or others.'],
-  ['5. Your choices.','You can ask your league administrator to correct your information or remove you from the league, which will also stop future sharing with sponsors. Statistics already recorded in completed games may be kept as part of the league\u2019s historical record. Where required by law, you may have additional rights to access, correct, delete, or restrict the use of your information; contact your league administrator to exercise them.'],
+  ['5. Your choices.','You can leave the league yourself at any time from Menu \u2192 My registration \u2192 Leave the league, which deletes your account, registration and player card and stops any sharing with sponsors; or ask your league administrator to correct your information or remove you. Statistics already recorded in completed games may be kept as part of the league\u2019s historical record. Where required by law, you may have additional rights to access, correct, delete, or restrict the use of your information; contact your league administrator to exercise them.'],
   ['6. Marketing emails.','From time to time, we may contact you via email for the purpose of providing announcements, promotional offers, alerts, confirmations, surveys, and/or other general communication. You may choose not to receive marketing emails from us by clicking on the unsubscribe link in the marketing emails you receive from us. Even if you opt out of receiving such communications, we may continue sending you non-marketing email communications, such as administrative or transaction alerts, or information about changes to our terms of service.'],
   ['7. Retention.','We keep your information for as long as you participate in the league and afterward as part of season history, unless you ask for it to be removed.'],
   ['8. Use of the app.','You receive a limited, non-transferable right to use the app for league purposes. Don\u2019t misuse it, attempt to access other leagues\u2019 data, or use it for anything unlawful. You must be at least 18 to create an account.'],
@@ -7911,6 +8062,10 @@ let helpOpen=false, helpLog=[];
 // so ordinary questions ("enter the scorekeeper code", "Season Builder", "league license") still get answers
 const HELP_RESTRICTED = ['how was this app','how was the app','how is this app made','how was it made','how was it built','who made','who built','who created','who designed','who wrote','who coded','source code','programming language','programmed','developer','tech stack','architecture','database','firebase','firestore','server','backend','api','html','javascript','css','algorithm','encrypt','encryption','security rules','hack','hacking','bypass','password for','admin password','log in as','login as','proprietary','revenue','business plan','sponsor list','email list','phone list','all emails','everyone’s email','everyones email','someone else’s','other player’s email','claude','chatgpt','openai','anthropic','ai model','llm','prompt'];
 const HELP_KB = [
+  {k:'leave league delete account cancel remove me quit subscription', q:'How do I leave the league or delete my account?', a:'Menu (right side) → 📝 My registration → scroll to the bottom → Leave the league. Pick a reason if you like, tick the box and tap Yes, delete my account. Your account, registration, player card and sign-ups are deleted and sponsor sharing stops; your name and stats in games already played stay in the league record. Your league admin is told right away. To come back later, register again.'},
+  {k:'player left departed who left alert banner red admin notice', q:'How do I know when a player leaves?', a:'A red banner appears at the top of every screen for the league’s admins (and the player’s team manager) until you tap Got it. The 🔔 count includes it, Admin → Players → Who left keeps the list, and when email notices are on the admin gets an email. If a manager leaves, his team’s manager slot is opened and the banner says the team needs a manager.'},
+  {k:'add player not online no account offline paper refuses sign in app', q:'How do I add a player who won’t use the app?', a:'Admin → Players → Season sign-ups → ＋ Add a player who isn’t online. Enter name, age and position, say how his registration and waiver were handled (Paper form on file / League waived it / Still owed), and switch on Stats private if he asked for it. He goes into the draft or the managers’ pick list like anyone else and never appears on the Missing registrations list. Tap his No account chip later to change anything. If he joins the app with the email you entered, his account links up.'},
+  {k:'stats private not available hidden lock player choice', q:'What does Stats private do?', a:'Set by the admin on a player who isn’t online. The scorer still records his at-bats and runs — the game stays right — but Batting, Hit Zone, Report, the Big Board, Player Eval, his Live Feed card and Excel exports show “Not available” with a 🔒 instead of his numbers, and he is left out of leaderboards and league averages. Team totals still include his plays. Turn it off on his sign-up and everything appears, because it was recorded all along.'},
   {k:'season builder create season add teams new season where', q:'Where is the Season Builder?', a:'Admin → Season Builder (admins only). Create a season (Formal, Informal, Pickup or Tournament), add teams and set the dates there. Game rules for the season are in Admin → Settings → Season Rules.'},
   {k:'confirm email verify verification link invited admin manager sponsor', q:'Why do I have to confirm my email?', a:'If your email was set up as a league admin, a team manager or a sponsor, the app sends a link to that inbox first. Open the link, then tap “I’ve opened the link — continue”. This stops anyone else from signing up with your email and taking your role. Can’t find it? Check spam, or tap Send the email again.'},
   {k:'sac fly sf two outs third out run scores', q:'Does a sac fly with two outs score the run?', a:'No. When a sacrifice fly is the third out, the inning ends on the catch and no run scores — the app records it that way automatically.'},
@@ -8093,6 +8248,7 @@ function renderHelpWidget(){
 let qaOpenItem=null;
 const FAQ_DATA = [
   { category:'Getting started', items:[
+    { q:'How do I leave the league or delete my account?', a:'Menu (☰ on the right) → 📝 My registration → Leave the league at the bottom. Tick the box and confirm. Your account, registration, player card and sign-ups are deleted and sponsor sharing stops; your name and stats in played games stay in the league record. Your admin is told right away. To come back, register again.' },
     { q:'Why does the app ask me to confirm my email?', a:'Your email was set up as a league admin, team manager or sponsor. The app sends a link to that inbox; open it, then tap “I’ve opened the link — continue”. That way nobody else can sign up with your email and take your role.' },
     { q:'Where is the Season Builder?', a:'Admin → Season Builder (admins only). Create the season, add teams and set dates there; the season’s game rules are in Admin → Settings → Season Rules.' },
     { q:'Can I see my password while I type it?', a:'Yes — tap 👁 Show inside the password box. Tap 🙈 Hide to cover it again; it also hides by itself after 15 seconds.' },
@@ -8116,6 +8272,7 @@ const FAQ_DATA = [
     { q:'What does a manager see vs. an admin?', a:'A manager’s tabs are automatically locked to their team — their schedule, lineups, and games. An admin sees the whole league and picks the game they want to work on.' }
   ]},
   { category:'Roster & draft', items:[
+    { q:'Can someone play without using the app?', a:'Yes. The admin adds him under Admin → Players → Season sign-ups → Add a player who isn’t online, notes how his waiver was handled, and he goes into the draft or pick list like anyone else. If he asks, the admin can switch on Stats private so his numbers show as “Not available” everywhere while the game itself is still scored normally.' },
     { q:'Where do rosters come from?', a:'Either the draft (Draft Board → “Final draft → Rosters”) or the admin adding players on the Roster tab. Rosters are fixed once set — only the admin can change them.' },
     { q:'How does the draft work?', a:'Draft Board is in the right menu for managers and admins. The admin sets the draft order, rounds and pick clock there. It snakes each round. The manager on the clock (or the admin) taps Draft next to a player on the Big Board.' },
     { q:'What happens when the pick clock runs out?', a:'By default nothing — the clock shows 0:00 and the pick stays open until it’s made. The admin can turn on “Auto-pick when the clock runs out” in Draft Setup to have the top-rated available player picked automatically.' },
@@ -8190,6 +8347,8 @@ const FAQ_DATA = [
     { q:'How do I clear a test season?', a:'Test Mode → Clear this test season, or Clear ALL test seasons at the bottom. Everything in it is removed, including teams Test Mode added. A cloud backup is saved first. Real seasons are never listed there.' }
   ]},
   { category:'Privacy', items:[
+    { q:'A teammate shows “Not available” instead of stats — why?', a:'He asked the league to keep his statistics private. The scorer still records his at-bats so the game and team totals are right; only his own numbers are hidden, and he is left out of leaderboards.' },
+    { q:'Who is told when I leave the league?', a:'Your league’s admins and your team’s manager see a notice in the app; the admin may also get an email if the league has email notices on. Nobody else is told, and your personal details are deleted.' },
     { q:'Is my email on the roster?', a:'No. Rosters and player cards no longer store email addresses — only your league’s admins and managers can see a player’s email, on the sign-up list.' },
     { q:'Which version of the Terms did I accept?', a:'Each acceptance is saved with the Terms version (shown at the top of the Terms tab), so the league can tell which version you agreed to.' },
     { q:'Will I be told if my registration changes?', a:'Yes, when email notices are turned on for the app. When your registration or player card is changed, you get an email listing which parts changed (for example “Home address, Player card (photo)”) and when. For your privacy the email never includes the details themselves. If you didn’t make the change, contact your league admin right away.' },
@@ -11023,7 +11182,7 @@ async function tsApprove(){ if(!tsGuard()) return; const sn=currentSeason(); con
   const pend=(S.signups||[]).filter(x=>x.seasonId===sid && x.pickTeamId && !x.drafted); let n=0;
   for(const x of pend){ const teamId=x.pickTeamId; if(!S.teams.some(t=>t.id===teamId)) continue;
     const existing=(S.allPlayersForFeed||[]).filter(p=>p.teamId===teamId && p.seasonId===sid).length;
-    await addDoc(collection(db,'teams',teamId,'players'),{name:x.name, number:null, position:x.pos||'', order:existing+1+n, isSub:false, subTeamName:'', seasonId:sid, signupId:x.id, emailKey:ekey(x.email)||null, isTest:!!x.isTest});
+    await addDoc(collection(db,'teams',teamId,'players'),{name:x.name, number:null, position:x.pos||'', order:existing+1+n, isSub:false, subTeamName:'', seasonId:sid, signupId:x.id, statsPrivate:!!x.statsPrivate, emailKey:ekey(x.email)||null, isTest:!!x.isTest});
     await updateDoc(doc(db,'signups',x.id),{drafted:true, draftedByTeamId:teamId}); n++; }
   await tsWait(()=>(S.allPlayersForFeed||[]).filter(p=>p.seasonId===sid).length>=n,8000);
   await updateDoc(doc(db,'seasons',sid),{rostersApprovedAt:Date.now(), rosterOrder:'alpha', maskDraftRank:true}); try{ await applyRosterOrder('alpha'); }catch(e){}
@@ -11247,6 +11406,7 @@ Router.register('admin', (root)=>{
           sn&&m!=='pickup'?h('span',{style:pillS+'background:#fff;color:var(--grass-1);'},nUp+' signed up'):null,
           sn?h('span',{style:pillS+(open?'background:var(--gold);color:#1e1a10;':'background:rgba(0,0,0,.25);color:#f3efe2;')},winTxt):null]),
         h('div',{style:'font-size:12.5px;color:#e8e2cf;margin-top:8px;line-height:1.4;'}, m==='pickup'?'Pickup seasons need no sign-up \u2014 every registered member is in the pool.':(m==='informal'?'This list is the pool managers pick from. Switch seasons with the menu above.':'This list is the pool for Player Eval and the draft. Switch seasons with the menu above.'))])); { const w=signupWindowCard(); if(w) root.appendChild(w); } signupAdminView(root); }
+    else if(regSub==='left') departuresView(root);
     else approvalsView(root); return; }
   if(adminSub==='builder' || adminSub==='seasons'){
     adminSub='builder';
