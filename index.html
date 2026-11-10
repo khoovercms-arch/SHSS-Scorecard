@@ -8686,10 +8686,16 @@ const adBuf={}; const adSeen={};
 function adCountSelf(){ try{ return localStorage.getItem('gbAdCountSelf')==='1'; }catch(e){ return false; } }
 // Who counts: players/managers = real. Super Admin / league admins = only when switched on, and then as TEST data (kept apart, clearable).
 function adTestMode(){ const cfg=S.adConfig||{}; if(isSuperAdmin()) return cfg.testSuper?'test':'skip'; if(isAdmin()) return cfg.testAdmin?'test':'skip'; return 'real'; }
+// Best guess at the viewer's league for ad stats: current league, then profile, then the landing pick, then the league this device last used
+function adLeagueId(){
+  let id=viewerLeagueId() || (S.user && S.profile && S.profile.leagueId) || S.landingLeagueId || null;
+  if(!id){ try{ id=localStorage.getItem('gbLeague')||null; }catch(e){} }
+  return id;
+}
 function adTrack(a, kind, place, action){
   if(!a || !a.id || place==='__preview__') return;
   const tm=adTestMode(); if(tm==='skip') return; const isTest=tm==='test';
-  const lid=viewerLeagueId()||'none'; const date=new Date().toISOString().slice(0,10);
+  const lid=adLeagueId()||'none'; const date=new Date().toISOString().slice(0,10);
   const role=apViewerRole(), tid=(S.user&&myTeamId())||''; const key=date+'_'+a.id+'_'+lid+'_'+role+(tid?'_'+tid:'')+(isTest?'_test':'');
   const b=adBuf[key]||(adBuf[key]={adId:a.id, company:a.company||'', leagueId:lid, region:leagueRegion(lid)||'', campaign:adCampaign(a), date, test:isTest, role, teamId:tid||null, views:{}, clicks:{}, actions:{}});
   if(kind==='view') b.views[place]=(b.views[place]||0)+1;
@@ -8717,8 +8723,10 @@ async function adClearSelfTally(){
   toast('Removed '+n+' test view'+(n===1?'':'s')+'/click'+(n===1?'':'s')+' counted from this device'); renderShell();
 }
 function adFlush(){
-  Object.keys(adBuf).forEach(key=>{
-    const b=adBuf[key]; delete adBuf[key];
+  Object.keys(adBuf).forEach(k0=>{
+    let key=k0; const b=adBuf[key]; delete adBuf[key];
+    // Views counted before the league was known: re-file them under the league if we know it now
+    if(b.leagueId==='none'){ const lid=adLeagueId(); if(lid){ const nk=key.replace('_none_','_'+lid+'_'); if(nk!==key){ b.leagueId=lid; b.region=leagueRegion(lid)||''; key=nk; } } }
     const patch={adId:b.adId, company:b.company, leagueId:b.leagueId, region:b.region, campaign:b.campaign, date:b.date, updatedAt:Date.now()}; if(b.test) patch.test=true; if(b.role) patch.role=b.role; if(b.teamId) patch.teamId=b.teamId;
     ['views','clicks','actions'].forEach(f=>{ const m={}; Object.entries(b[f]).forEach(([k,n])=>{ if(n) m[k]=increment(n); }); if(Object.keys(m).length) patch[f]=m; });
     setDoc(doc(db,'adStats',key), patch, {merge:true}).catch(()=>{});
