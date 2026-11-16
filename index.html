@@ -293,6 +293,12 @@ table.batTbl tr:first-child th{border-bottom:none;}
 table.dataTable th.sortableTh.active{color:var(--grass-1);}
 table.dataTable td{font-family:var(--font-mono);text-align:center;padding:7px 3px;border-bottom:1px solid var(--line);}
 table.dataTable td:first-child{text-align:left;font-family:var(--font-ui);font-weight:600;font-size:12.5px;}
+table.lgTable td,table.lgTable th{vertical-align:top;}
+table.lgTable td.lgMid{padding-top:30px;}
+table.lgTable td{padding:8px 5px;}
+table.lgTable td input,table.lgTable td select{width:100%;box-sizing:border-box;height:32px;}
+table.lgTable td input{min-width:150px;}
+table.lgTable td select{min-width:120px;}
 .drawerOverlay{position:fixed;inset:0;background:rgba(30,42,34,0.5);z-index:250;}
 .drawerPanel{position:fixed;top:0;bottom:0;width:220px;background:var(--white);z-index:251;padding:20px 14px;box-shadow:0 0 20px rgba(0,0,0,0.25);overflow-y:auto;}
 .drawerPanel.left{left:0;} .drawerPanel.right{right:0;}
@@ -8070,6 +8076,7 @@ let helpOpen=false, helpLog=[];
 // so ordinary questions ("enter the scorekeeper code", "Season Builder", "league license") still get answers
 const HELP_RESTRICTED = ['how was this app','how was the app','how is this app made','how was it made','how was it built','who made','who built','who created','who designed','who wrote','who coded','source code','programming language','programmed','developer','tech stack','architecture','database','firebase','firestore','server','backend','api','html','javascript','css','algorithm','encrypt','encryption','security rules','hack','hacking','bypass','password for','admin password','log in as','login as','proprietary','revenue','business plan','sponsor list','email list','phone list','all emails','everyone’s email','everyones email','someone else’s','other player’s email','claude','chatgpt','openai','anthropic','ai model','llm','prompt'];
 const HELP_KB = [
+  {k:'league email website contact league administrator super admin leagues table', q:'Where do I enter the league website or league email?', a:'Super Admin → Leagues → the league’s row: League contact has a League email and a Website box (optional). The League administrator column holds the admin’s name and sign-in email. Changes save when you leave the box.'},
   {k:'retire league remove league close league delete league reactivate super admin', q:'How do I remove a league?', a:'Super Admin → Leagues → Retire… on the league’s row. Retiring is reversible: the league leaves the sign-in page, its join code and ads stop, players and managers are locked out, and the league’s admins can still sign in for 30 days to a “League retired” page to download their data. A formal notice is posted to the league (Agreement §13.5) and, with email notices on, its admin is emailed. Tap Reactivate to undo. Once retired, Delete permanently… appears: a final backup is saved and downloaded, then everything under the league is deleted except the executed License and its notices. You type the league name to confirm.'},
   {k:'closed league hidden sign-in page difference retired', q:'What is the difference between Closed and Retired?', a:'Closed only hides the league from the sign-in page list; members still sign in and play (use it for a test league). Retired locks members out and starts the 30-day window for the league admin to download data. Only a retired league can be deleted.'},
   {k:'leave league delete account cancel remove me quit subscription', q:'How do I leave the league or delete my account?', a:'Menu (right side) → 📝 My registration → scroll to the bottom → Leave the league. Pick a reason if you like, tick the box and tap Yes, delete my account. Your account, registration, player card and sign-ups are deleted and sponsor sharing stops; your name and stats in games already played stay in the league record. Your league admin is told right away. To come back later, register again.'},
@@ -8258,6 +8265,7 @@ function renderHelpWidget(){
 let qaOpenItem=null;
 const FAQ_DATA = [
   { category:'Getting started', items:[
+    { q:'Where do I record a league’s contact email and website?', a:'Super Admin → Leagues. Each league row has a League administrator (name and the admin’s sign-in email) and a League contact (a general league email and the league website — both optional). Type in the box and tab out; it saves on its own.' },
     { q:'How is a league removed?', a:'Only the Super Admin can. Retire… locks members out (reversible, with a notice to the league admin and 30 days to download data); Delete permanently… then removes everything except a final backup and the License record.' },
     { q:'How do I leave the league or delete my account?', a:'Menu (☰ on the right) → 📝 My registration → Leave the league at the bottom. Tick the box and confirm. Your account, registration, player card and sign-ups are deleted and sponsor sharing stops; your name and stats in played games stay in the league record. Your admin is told right away. To come back, register again.' },
     { q:'Why does the app ask me to confirm my email?', a:'Your email was set up as a league admin, team manager or sponsor. The app sends a link to that inbox; open it, then tap “I’ve opened the link — continue”. That way nobody else can sign up with your email and take your role.' },
@@ -9722,8 +9730,8 @@ Router.register('superadmin', (root)=>{
     rin.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); addR(); } });
     rc.appendChild(h('div',{style:'display:flex;gap:6px;'},[rin,h('button',{class:'btn btn-primary btn-sm',onclick:addR},'Add region')]));
     leagueCard.appendChild(rc); }
-  const ltable=h('table',{class:'dataTable',style:'min-width:920px;'});
-  ltable.appendChild(h('tr',{},[h('th',{},'Logo'),h('th',{style:'text-align:left;'},'League'),h('th',{style:'text-align:left;'},'Region'),h('th',{style:'text-align:left;'},'Admin'),h('th',{style:'text-align:left;'},'Email'),h('th',{},'Status'),h('th',{},'Sign-in page'),h('th',{},'Join code'),h('th',{},''),h('th',{},'Remove')]));
+  const ltable=h('table',{class:'dataTable lgTable',style:'min-width:1180px;'});
+  ltable.appendChild(h('tr',{},[h('th',{},'Logo'),h('th',{style:'text-align:left;'},'League'),h('th',{style:'text-align:left;'},'Region'),h('th',{style:'text-align:left;'},'League administrator'),h('th',{style:'text-align:left;'},'League contact'),h('th',{},'Status'),h('th',{},'Sign-in page'),h('th',{},'Join code'),h('th',{},''),h('th',{},'Remove')]));
   const cellInp=(val,ph)=>h('input',{type:'text',value:val||'',placeholder:ph,style:'padding:6px 8px;font-size:12.5px;min-width:0;'});
   S.leagues.slice().sort((a,b)=>a.name.localeCompare(b.name)).forEach(lg=>{
     const adminUser=S.usersDirectory.find(u=>u.id===lg.adminUserId);
@@ -9731,9 +9739,14 @@ Router.register('superadmin', (root)=>{
     nameInp.addEventListener('change', async()=>{ const v=nameInp.value.trim(); if(!v){ nameInp.value=lg.name; return; } await updateDoc(doc(db,'leagues',lg.id),{name:v}); });
     const adminInp=cellInp(lg.adminName||(adminUser?(adminUser.displayName||''):''),'Admin name');
     adminInp.addEventListener('change', ()=>updateDoc(doc(db,'leagues',lg.id),{adminName:adminInp.value.trim()}));
-    const emailInp=cellInp(adminUser?adminUser.email:(leagueAdminEmail(lg)||''),'admin@email.com'); emailInp.setAttribute('type','email');
+    const emailInp=cellInp(adminUser?adminUser.email:(leagueAdminEmail(lg)||''),'Administrator email'); emailInp.setAttribute('type','email');
     emailInp.addEventListener('change', ()=>linkLeagueAdminByEmail(lg, emailInp.value));
-    const state = adminUser ? h('div',{style:'font-size:10px;color:var(--grass-1);margin-top:2px;'},'✓ signed in') : (leagueAdminEmail(lg) ? h('div',{style:'font-size:10px;color:var(--gold);margin-top:2px;'},'pending sign-up') : null);
+    const lgEmailInp=cellInp(lg.leagueEmail||'','League email (optional)'); lgEmailInp.setAttribute('type','email');
+    lgEmailInp.addEventListener('change', ()=>updateDoc(doc(db,'leagues',lg.id),{leagueEmail:lgEmailInp.value.trim()||null}));
+    const webInp=cellInp(lg.website||'','League website (optional)'); webInp.setAttribute('type','url');
+    webInp.addEventListener('change', ()=>{ let v=webInp.value.trim(); if(v && !/^https?:\/\//i.test(v)) v='https://'+v; webInp.value=v; updateDoc(doc(db,'leagues',lg.id),{website:v||null}); });
+    const tiny=(t,second)=>h('div',{style:'font-size:9.5px;line-height:14px;height:14px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.3px;margin:'+(second?'6px':'0')+' 0 2px;text-align:left;white-space:nowrap;'},t||'\u00a0'); const note=t=>h('div',{style:'font-size:10px;line-height:14px;height:14px;margin-top:2px;'},t||'');
+    const state = adminUser ? h('span',{style:'color:var(--grass-1);'},'✓ signed in') : (leagueAdminEmail(lg) ? h('span',{style:'color:var(--gold);'},'pending sign-up') : '');
     const retired = lg.status==='retired';
     const active = lg.status!=='closed' && !retired;
     const statusBtn=retired ? h('span',{class:'pill-warn',style:'background:#b3261e;color:#fff;'},'Retired') : h('button',{class:active?'pill-role':'pill-warn',style:'border:none;cursor:pointer;',title:'Closed = hidden from the sign-in page; members can still sign in',onclick:()=>updateDoc(doc(db,'leagues',lg.id),{status:active?'closed':'active'})}, active?'Active':'Closed');
@@ -9741,18 +9754,18 @@ Router.register('superadmin', (root)=>{
     const rowEl=h('tr',{style:isCur?'background:var(--chalk-2);':''},[
       h('td',{},(()=>{ const fi=h('input',{type:'file',accept:'image/png,image/jpeg,image/webp,image/svg+xml',class:'hidden'}); fi.addEventListener('change',async e=>{ const f=e.target.files[0]; if(!f) return; try{ const data=await resizeImageFile(f,512); if(data.length>700000){ toast('Image too large'); return; } await updateDoc(doc(db,'leagues',lg.id),{logoDataUrl:data}); toast('Logo saved for '+lg.name); }catch(err){ toast('Could not read that image'); } });
         return h('div',{style:'text-align:center;'},[h('div',{title:'Tap to upload this league\u2019s logo',style:'width:46px;height:46px;border-radius:10px;background:var(--grass-1);display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;margin:auto;',onclick:()=>fi.click()}, lg.logoDataUrl?h('img',{src:lg.logoDataUrl,style:'max-width:42px;max-height:42px;object-fit:contain;'}):h('span',{style:'color:#fff;font-size:20px;'},'+')), h('div',{style:'font-size:10px;color:var(--ink-soft);margin-top:2px;'},lg.logoDataUrl?'Change':'Add logo'), lg.logoDataUrl?null:h('button',{class:'btn btn-outline btn-sm',style:'margin-top:4px;font-size:10px;padding:2px 6px;white-space:nowrap;',title:'Save the built-in South Hills Senior Softball logo as this league\u2019s logo',onclick:async()=>{ await updateDoc(doc(db,'leagues',lg.id),{logoDataUrl:DEFAULT_LOGO}); toast('South Hills logo saved for '+lg.name); }},'Use SHSS logo'), fi]); })()),
-      h('td',{},[nameInp, isCur?h('div',{style:'font-size:10px;color:var(--grass-1);margin-top:2px;'},'● viewing'):null]),
-      h('td',{},(()=>{ const sel=h('select',{style:'font-size:12.5px;padding:5px;'}); sel.appendChild(h('option',{value:''},'No region')); regionList().forEach(r=>{ const o=h('option',{value:r},r); if(lg.region===r) o.setAttribute('selected','selected'); sel.appendChild(o); }); sel.addEventListener('change',()=>updateDoc(doc(db,'leagues',lg.id),{region:sel.value||null})); return sel; })()),
-      h('td',{},adminInp),
-      h('td',{},[emailInp,state]),
-      h('td',{},statusBtn),
-      h('td',{},[
+      h('td',{},[tiny('League'),nameInp, note(isCur?h('span',{style:'color:var(--grass-1);'},'● viewing'):'')]),
+      h('td',{},(()=>{ const sel=h('select',{style:'font-size:12.5px;padding:5px;'}); sel.appendChild(h('option',{value:''},'No region')); regionList().forEach(r=>{ const o=h('option',{value:r},r); if(lg.region===r) o.setAttribute('selected','selected'); sel.appendChild(o); }); sel.addEventListener('change',()=>updateDoc(doc(db,'leagues',lg.id),{region:sel.value||null})); return [tiny('Region'),sel]; })()),
+      h('td',{},[tiny('Name'),adminInp,tiny('Email',true),emailInp,note(state)]),
+      h('td',{},[tiny('League email'),lgEmailInp,tiny('Website',true),webInp]),
+      h('td',{class:'lgMid'},[statusBtn]),
+      h('td',{class:'lgMid'},[
         h('button',{class:(lg.hideFromSignup||!active)?'pill-warn':'pill-role',style:'border:none;cursor:pointer;',title:'Show this league in the sign-in page league list',onclick:()=>updateDoc(doc(db,'leagues',lg.id),{hideFromSignup:!lg.hideFromSignup})}, (!active)?'Hidden (closed)':(lg.hideFromSignup?'Hidden':'Listed')),
         h('div',{},h('button',{class:'btn btn-outline btn-sm',style:'margin-top:4px;',onclick:async()=>{ const link=APP_URL.split('?')[0]+'?league='+lg.id; try{ await navigator.clipboard.writeText(link); toast('League link copied'); }catch(e){ prompt('Copy this link:',link); } }},'Copy link'))
       ]),
-      h('td',{},[h('span',{style:'font-family:var(--font-mono);font-weight:700;letter-spacing:1px;'},lg.joinCode||'—'), h('div',{},h('button',{class:'btn btn-outline btn-sm',style:'margin-top:4px;',onclick:async()=>{ await updateDoc(doc(db,'leagues',lg.id),{joinCode:genJoinCode()}); toast('New join code generated'); }},lg.joinCode?'New code':'Generate'))]),
-      h('td',{},[ isCur?h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ S.activeTab='admin'; adminSub='builder'; renderShell(); }},'Set up \u2192'):h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ switchLeague(lg.id); toast('Now viewing '+lg.name); }},'Select') ]),
-      h('td',{},[ retired
+      h('td',{class:'lgMid'},[h('span',{style:'font-family:var(--font-mono);font-weight:700;letter-spacing:1px;'},lg.joinCode||'—'), h('div',{},h('button',{class:'btn btn-outline btn-sm',style:'margin-top:4px;',onclick:async()=>{ await updateDoc(doc(db,'leagues',lg.id),{joinCode:genJoinCode()}); toast('New join code generated'); }},lg.joinCode?'New code':'Generate'))]),
+      h('td',{class:'lgMid'},[ isCur?h('button',{class:'btn btn-gold btn-sm',onclick:()=>{ S.activeTab='admin'; adminSub='builder'; renderShell(); }},'Set up \u2192'):h('button',{class:'btn btn-outline btn-sm',onclick:()=>{ switchLeague(lg.id); toast('Now viewing '+lg.name); }},'Select') ]),
+      h('td',{class:'lgMid'},[ retired
         ? h('div',{style:'display:flex;flex-direction:column;gap:4px;'},[h('button',{class:'btn btn-outline btn-sm',onclick:()=>confirmModal('Reactivate '+lg.name+'?','Members can sign in again and the league returns to the sign-in page list.',()=>reactivateLeague(lg),{confirmLabel:'Reactivate'})},'Reactivate'),h('button',{class:'btn btn-sm',style:'background:#b3261e;color:#fff;',onclick:()=>deleteLeagueSheet(lg)},'Delete permanently…')])
         : h('button',{class:'btn btn-outline btn-sm',style:'color:#8a4b1f;border-color:#8a4b1f;',onclick:()=>retireLeagueSheet(lg)},'Retire…') ])
     ]);
