@@ -1721,6 +1721,36 @@ function leagueSchedule(){
 }
 function useGame(g){ if(g.teamId && S.selectedTeamId!==g.teamId){ S.selectedTeamId=g.teamId; switchTeamListeners(); } S.activeGameId=g.id; renderShell(); }
 function currentGame(){ return S.games.find(g=>g.id===S.activeGameId) || (isAdmin() ? S.allGamesForFeed.find(g=>g.id===S.activeGameId) : null); }
+/* Super Admin only: advertiser contact list — League, Player name, Email — for members who accepted the
+   Terms and the data-use consent on their current registration. Leaves out offline (no-account) players,
+   accounts waiting for approval or declined, anyone who left, and anyone whose registration did not consent. */
+async function advertiserContactReport(){
+  if(!isSuperAdmin()) return;
+  if(typeof XLSX==='undefined'){ toast('Excel library not loaded — check your connection and try again'); return; }
+  toast('Building the contact list…');
+  let users=[], regs=[];
+  try{ const us=await getDocsNet(collection(db,'users')); const rs=await getDocsNet(collection(db,'registrations')); users=us.docs.map(d=>({id:d.id,...d.data()})); regs=rs.docs.map(d=>({id:d.id,...d.data()})); }
+  catch(e){ toast('Could not read: '+friendlyErr(e)); return; }
+  const lgName=id=>{ const l=(S.leagues||[]).find(x=>x.id===id); return l?(l.name||l.shortName||id):''; };
+  const live=(S.leagues||[]).filter(l=>l.status!=='retired').map(l=>l.id);
+  const byUid={}; regs.forEach(r=>{ if(!r.uid) return; const k=r.leagueId+'|'+r.uid; if(!byUid[k] || (r.year||0)>(byUid[k].year||0)) byUid[k]=r; });
+  const rows=[]; let skipped=0;
+  users.forEach(u=>{
+    if(!['viewer','manager','admin'].includes(u.role) || !u.leagueId || !live.includes(u.leagueId)) return;
+    if((u.email||'').toLowerCase()===SUPER_ADMIN_EMAIL) return;
+    const r=byUid[u.leagueId+'|'+u.id];
+    if(!r || !r.consent || r.consent.data!==true || r.consent.terms!==true){ skipped++; return; }
+    rows.push({'League':lgName(u.leagueId),'Player name':r.name||u.displayName||'','Email':r.email||u.email||''});
+  });
+  rows.sort((a,b)=>a.League.localeCompare(b.League)||a['Player name'].localeCompare(b['Player name']));
+  if(!rows.length){ toast('No members with a signed registration and data-use consent yet'+(skipped?' ('+skipped+' without consent)':'')); return; }
+  const wb=XLSX.utils.book_new(); const ws=XLSX.utils.json_to_sheet(rows,{header:['League','Player name','Email']}); ws['!cols']=[{wch:28},{wch:28},{wch:36}];
+  XLSX.utils.book_append_sheet(wb,ws,'Contacts');
+  const about=XLSX.utils.aoa_to_sheet([['Geezer Ball Scorecard — advertiser contact list'],['Made '+new Date().toLocaleString()+' by the Super Admin'],[''],['Included: members of active leagues who accepted the Terms of Use & Privacy Notice and the “Use of my information” consent on their current registration.'],['Left out: players added without an account, accounts waiting for approval or declined, anyone who left a league, and '+skipped+' member'+(skipped===1?'':'s')+' without that consent.'],['Give only to a Software Provider-approved advertiser under a signed Sponsor Agreement (§4.2): own offers only, no resale, delete when the campaign ends, honor every stop request.']]);
+  about['!cols']=[{wch:120}]; XLSX.utils.book_append_sheet(wb,about,'About this list');
+  XLSX.writeFile(wb,'Advertiser contact list '+new Date().toISOString().slice(0,10)+'.xlsx');
+  toast(rows.length+' contact'+(rows.length===1?'':'s')+' exported'+(skipped?' · '+skipped+' left out (no consent)':''));
+}
 function homeLeagueId(){ const L=(S.leagues||[]); const byName=L.find(l=>/south hills|shss/i.test((l.name||'')+' '+(l.shortName||''))); if(byName) return byName.id; const sorted=L.slice().sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); return (sorted[0]||{}).id||null; }
 function untaggedVisibleHere(){ return (S.leagues||[]).length<=1 || S.currentLeagueId===(S.homeLeagueId||homeLeagueId()); }
 function applyLeagueFilter(){
@@ -8076,6 +8106,7 @@ let helpOpen=false, helpLog=[];
 // so ordinary questions ("enter the scorekeeper code", "Season Builder", "league license") still get answers
 const HELP_RESTRICTED = ['how was this app','how was the app','how is this app made','how was it made','how was it built','who made','who built','who created','who designed','who wrote','who coded','source code','programming language','programmed','developer','tech stack','architecture','database','firebase','firestore','server','backend','api','html','javascript','css','algorithm','encrypt','encryption','security rules','hack','hacking','bypass','password for','admin password','log in as','login as','proprietary','revenue','business plan','sponsor list','email list','phone list','all emails','everyone’s email','everyones email','someone else’s','other player’s email','claude','chatgpt','openai','anthropic','ai model','llm','prompt'];
 const HELP_KB = [
+  {k:'advertiser contact list report export excel emails sponsor players consent super admin', q:'How do I give an advertiser a list of player emails?', a:'Super Admin → Users → Advertiser contact list (Excel). It lists League, Player name and Email for members who accepted the Terms and the data-use consent on their registration; players without an account, unapproved accounts, anyone who left and anyone without consent are left out. Only for an approved advertiser with a signed Sponsor Agreement.'},
   {k:'league email website contact league administrator super admin leagues table', q:'Where do I enter the league website or league email?', a:'Super Admin → Leagues → the league’s row: League contact has a League email and a Website box (optional). The League administrator column holds the admin’s name and sign-in email. Changes save when you leave the box.'},
   {k:'retire league remove league close league delete league reactivate super admin', q:'How do I remove a league?', a:'Super Admin → Leagues → Retire… on the league’s row. Retiring is reversible: the league leaves the sign-in page, its join code and ads stop, players and managers are locked out, and the league’s admins can still sign in for 30 days to a “League retired” page to download their data. A formal notice is posted to the league (Agreement §13.5) and, with email notices on, its admin is emailed. Tap Reactivate to undo. Once retired, Delete permanently… appears: a final backup is saved and downloaded, then everything under the league is deleted except the executed License and its notices. You type the league name to confirm.'},
   {k:'closed league hidden sign-in page difference retired', q:'What is the difference between Closed and Retired?', a:'Closed only hides the league from the sign-in page list; members still sign in and play (use it for a test league). Retired locks members out and starts the 30-day window for the league admin to download data. Only a retired league can be deleted.'},
@@ -8366,6 +8397,7 @@ const FAQ_DATA = [
     { q:'How do I clear a test season?', a:'Test Mode → Clear this test season, or Clear ALL test seasons at the bottom. Everything in it is removed, including teams Test Mode added. A cloud backup is saved first. Real seasons are never listed there.' }
   ]},
   { category:'Privacy', items:[
+    { q:'Can my email be given to an advertiser?', a:'Only if you accepted the Terms of Use & Privacy Notice and the “Use of my information” consent on your registration, and only to an advertiser approved by Geezer Ball Scorecard under a signed agreement that limits them to their own offers and requires them to honor every stop request. Untick the consent on your registration (Menu → My registration) and you are left out of any list.' },
     { q:'A teammate shows “Not available” instead of stats — why?', a:'He asked the league to keep his statistics private. The scorer still records his at-bats so the game and team totals are right; only his own numbers are hidden, and he is left out of leaderboards.' },
     { q:'Who is told when I leave the league?', a:'Your league’s admins and your team’s manager see a notice in the app; the admin may also get an email if the league has email notices on. Nobody else is told, and your personal details are deleted.' },
     { q:'Is my email on the roster?', a:'No. Rosters and player cards no longer store email addresses — only your league’s admins and managers can see a player’s email, on the sign-up list.' },
@@ -9798,6 +9830,10 @@ Router.register('superadmin', (root)=>{
   });
   const scrollWrap=h('div',{class:'gridScroll'}); scrollWrap.appendChild(table); masterCard.appendChild(scrollWrap);
   if(superSub==='users') root.appendChild(masterCard);
+  const adRepCard=h('div',{class:'card'}); adRepCard.appendChild(h('h3',{},'Advertiser contact list'));
+  adRepCard.appendChild(h('p',{style:'font-size:12.5px;color:var(--ink-soft);margin:0 0 10px;line-height:1.5;'},'Excel file with League, Player name and Email for members of every active league who accepted the Terms and the “Use of my information” consent on their registration (License §7.2 / Sponsor Agreement §4.2). Players added without an account, accounts not yet approved, anyone who left, and anyone without that consent are left out. Give it only to an approved advertiser with a signed Sponsor Agreement.'));
+  adRepCard.appendChild(h('button',{class:'btn btn-gold btn-block',onclick:advertiserContactReport},'⬇ Advertiser contact list (Excel)'));
+  if(superSub==='users') root.appendChild(adRepCard);
 });
 
 /* =================== SEASON BUILDER =================== */
